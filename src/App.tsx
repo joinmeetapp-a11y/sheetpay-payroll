@@ -1,0 +1,1661 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import confetti from 'canvas-confetti';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { useAction, useMutation, useQuery } from 'convex/react';
+import { auth } from './lib/firebase';
+import { api } from '../convex/_generated/api';
+import { AuthScreen } from './components/auth/AuthScreen';
+import {
+  AccountType,
+  AccountantClient,
+  AttentionItem,
+  AuditLogEntry,
+  BatchPayrollJob,
+  BusinessDetails,
+  CaylaMessage,
+  Employee,
+  FirmTeamMember,
+  PayrollRun,
+  PayslipCustomization,
+} from './types';
+import {
+  defaultPayslipCustomization,
+  initialAugustPayrollRun,
+  initialBusinessDetails,
+  initialEmployees,
+} from './lib/initialData';
+import {
+  initialAccountantClients,
+  initialAttentionItems,
+  initialBatchJobs,
+  initialFirmTeamMembers,
+} from './lib/accountantData';
+import { CaylaAgentEngine } from './lib/caylaEngine';
+import { recalculateEmployee, recalculatePayrollRun, formatCurrency } from './lib/taxEngine';
+import { Sidebar } from './components/Sidebar';
+import { Header } from './components/Header';
+import { CaylaTranscript } from './components/CaylaTranscript';
+import { PayrollWorkspace } from './components/PayrollWorkspace';
+import {
+  MobileBottomNav,
+  MobilePayrollCards,
+  MobilePayslipModal,
+} from './components/MobileViews';
+import {
+  AuditTrailModal,
+  BusinessEditModal,
+  EmailPayslipModal,
+  TimesheetUploadModal,
+} from './components/Modals';
+import { EmployeesView } from './components/tabs/EmployeesView';
+import { PayrollRunsView } from './components/tabs/PayrollRunsView';
+import { PayslipsPortalView } from './components/tabs/PayslipsPortalView';
+import { TaxFormsView } from './components/tabs/TaxFormsView';
+import { ReportsView } from './components/tabs/ReportsView';
+import { AttendanceView } from './components/tabs/AttendanceView';
+import { SettingsView } from './components/tabs/SettingsView';
+import { AccountantDashboard } from './components/accountant/AccountantDashboard';
+import { ClientsView } from './components/accountant/ClientsView';
+import { AccountantTeamView } from './components/accountant/AccountantTeamView';
+import { AccountantReportsView } from './components/accountant/AccountantReportsView';
+import { AddClientModal } from './components/accountant/AddClientModal';
+import { ClientInviteModal } from './components/accountant/ClientInviteModal';
+import { BatchPayrollModal } from './components/accountant/BatchPayrollModal';
+import { CaylaPenMascot } from './components/CaylaPenMascot';
+import { UpgradeBanner } from './components/UpgradeBanner';
+import { ProGate } from './components/ProGate';
+import { openPaddleCheckout, isPaddleConfigured } from './lib/paddle';
+import { AdminDashboard } from './components/admin/AdminDashboard';
+import { InviteAcceptPage } from './components/invite/InviteAcceptPage';
+import { EmailPreviewPage } from './components/dev/EmailPreviewPage';
+import { isAdminEmail } from './lib/admin';
+import { LandingPage } from './components/landing/LandingPage';
+import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
+import { CalculatorPage } from './components/calculators/CalculatorPage';
+import { CalculatorHub } from './components/calculators/CalculatorHub';
+import { CountryHub } from './components/calculators/CountryHub';
+import { LegalPage } from './components/legal/LegalPage';
+import { getCalculatorByPath } from './lib/calculators/registry';
+import { getLegalDocumentByPath } from './lib/legalContent';
+import { CountryCode } from './lib/tax-rules';
+import { Sparkles, ArrowUp, X } from 'lucide-react';
+
+export default function App() {
+  // Path Routing State
+  const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname);
+
+  // Navigation / View State
+  const [viewMode, setViewMode] = useState<'landing' | 'auth' | 'app'>('landing');
+  const [authMode, setAuthMode] = useState<'signup' | 'signin'>('signup');
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<{
+    uid: string;
+    email: string;
+    displayName: string;
+  } | null>(null);
+  const [pendingOnboardingData, setPendingOnboardingData] = useState<{
+    business: BusinessDetails;
+    employees: Employee[];
+    accountType: AccountType;
+    payrollRuns?: PayrollRun[];
+  } | null>(null);
+
+  // Role & Mode State
+  const [accountType, setAccountType] = useState<AccountType>('accountant');
+  const [activeTab, setActiveTab] = useState<string>('accountant_dashboard');
+
+  // Accountant State
+  const [clients, setClients] = useState<AccountantClient[]>(initialAccountantClients);
+  const [teamMembers, setTeamMembers] = useState<FirmTeamMember[]>(initialFirmTeamMembers);
+  const [batchJobs, setBatchJobs] = useState<BatchPayrollJob[]>(initialBatchJobs);
+  const [attentionItems, setAttentionItems] = useState<AttentionItem[]>(initialAttentionItems);
+  const [activeClientId, setActiveClientId] = useState<string>('client-1');
+
+  // Accountant Modals State
+  const [isAddClientOpen, setIsAddClientOpen] = useState(false);
+  const [inviteModalClient, setInviteModalClient] = useState<AccountantClient | null>(null);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+
+  // Sync browser popstate (back/forward)
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigate = (path: string) => {
+    if (path === currentPath) return;
+    window.history.pushState({}, '', path);
+    setCurrentPath(path);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Application State
+  const [userName, setUserName] = useState('Marcus Vance');
+  const [userAvatar, setUserAvatar] = useState(
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'
+  );
+
+  const [business, setBusiness] = useState<BusinessDetails>(initialBusinessDetails);
+  const [customization, setCustomization] = useState<PayslipCustomization>(
+    defaultPayslipCustomization
+  );
+  const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
+
+  // Payroll State (null initially to preserve pure Cayla-centric empty hero state!)
+  const [payrollRun, setPayrollRun] = useState<PayrollRun | null>(null);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('emp-1');
+
+  // Cayla Conversation State
+  const [messages, setMessages] = useState<CaylaMessage[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+
+  // Modals & Mobile View States
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isTimesheetModalOpen, setIsTimesheetModalOpen] = useState(false);
+  const [isBusinessModalOpen, setIsBusinessModalOpen] = useState(false);
+  const [emailModalEmployee, setEmailModalEmployee] = useState<Employee | null>(null);
+  const [mobilePayslipEmployee, setMobilePayslipEmployee] = useState<Employee | null>(null);
+
+  // Floating Cayla Quick Command State
+  const [showFloatingCayla, setShowFloatingCayla] = useState(false);
+  const [floatingInput, setFloatingInput] = useState('');
+  const [showFloatingBar, setShowFloatingBar] = useState(false);
+
+  // Agent Engine Reference
+  const agentEngineRef = useRef<CaylaAgentEngine>(new CaylaAgentEngine());
+
+  // Convex Mutations (graceful no-op when Convex URL not configured)
+  const convexCreateOrUpdateUser = useMutation(api.users.createOrUpdate);
+  const convexCreateBusiness = useMutation(api.businesses.create);
+  const convexBulkCreateEmployees = useMutation(api.employees.bulkCreate);
+  const convexCreatePayrollRun = useMutation(api.payrollRuns.create);
+
+  // Convex Actions — AI, email, and payments
+  const caylaChatAction = useAction(api.cayla.chat);
+  const sendEmailAction = useAction(api.emailService.sendEmail);
+  const createCheckoutSession = useAction((api as any).paddle.createCheckoutSession);
+
+  // Convex — reactive billing entitlement (unlocks features the moment plan changes)
+  const activateFromCheckout = useMutation((api as any).subscriptions.activateFromCheckout);
+  const entitlement = useQuery(
+    (api as any).subscriptions.getEntitlement,
+    { firebaseUid: currentUser?.uid }
+  ) as { plan: 'free' | 'pro' | 'accountant'; planStatus: string; isPro: boolean; isAccountant: boolean } | undefined;
+  // Admin accounts (e.g. the owner) get full access to every feature.
+  const isAdmin = isAdminEmail(currentUser?.email);
+  const plan = isAdmin ? 'accountant' : (entitlement?.plan ?? 'free');
+  const isPro = isAdmin || (entitlement?.isPro ?? false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // Firebase auth state sync
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        const name = user.displayName || user.email?.split('@')[0] || 'User';
+        setCurrentUser({ uid: user.uid, email: user.email!, displayName: name });
+        setUserName(name);
+        // Returning authenticated user — go straight to app if on landing
+        // (but never hijack the /admin route).
+        if (
+          viewMode === 'landing' &&
+          !pendingOnboardingData &&
+          window.location.pathname !== '/admin'
+        ) {
+          setViewMode('app');
+          navigate('/app');
+        }
+      } else {
+        setCurrentUser(null);
+      }
+    });
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle Paddle checkout success redirect (?upgraded=pro|accountant).
+  // Optimistically activates the plan via Convex; the Paddle webhook reconciles.
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const params = new URLSearchParams(window.location.search);
+    const upgraded = params.get('upgraded');
+    if (upgraded === 'pro' || upgraded === 'accountant') {
+      activateFromCheckout({ firebaseUid: currentUser.uid, plan: upgraded }).catch(() => {});
+      confetti({
+        particleCount: 120,
+        spread: 80,
+        origin: { y: 0.6 },
+        colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'],
+      });
+      // Strip the query param without a reload
+      params.delete('upgraded');
+      const clean = window.location.pathname + (params.toString() ? `?${params}` : '');
+      window.history.replaceState({}, '', clean);
+      setViewMode('app');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.uid]);
+
+  // Show floating Cayla trigger when scrolling down into payroll results
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 280 && payrollRun) {
+        setShowFloatingBar(true);
+      } else {
+        setShowFloatingBar(false);
+      }
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [payrollRun]);
+
+  /**
+   * Handle switching active client tenant
+   */
+  const handleSelectClient = (clientId: string, targetTab: string = 'dashboard') => {
+    setActiveClientId(clientId);
+    const target = clients.find((c) => c.id === clientId);
+    if (target) {
+      const companyDisplayName = target.companyName || target.name || 'Client Corporation';
+      const cleanEmailDomain = companyDisplayName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'company';
+      setBusiness({
+        name: companyDisplayName,
+        currency: target.currency || 'TTD',
+        currencySymbol: target.currency === 'GYD' ? 'G$' : target.currency === 'BBD' ? 'Bds$' : '$',
+        address: target.businessAddress || `${companyDisplayName} Corporate Headquarters, Port of Spain`,
+        phone: target.contactPhone || '+1 (868) 555-0100',
+        email: target.contactEmail || `payroll@${cleanEmailDomain}.com`,
+        taxRegistrationId: target.taxRegistrationId || `BIR-${Math.floor(10000000 + Math.random() * 90000000)}`,
+        nisNumber: target.nisNumber || `NIB-EMP-${Math.floor(100000 + Math.random() * 900000)}`,
+        signatoryName: userName || 'Accountant',
+        signatoryTitle: 'Senior Practice Accountant',
+      });
+      // If client has isolated employees, use them; otherwise keep active employees
+      if (target.employees && target.employees.length > 0) {
+        setEmployees(target.employees);
+      }
+      // If client has active payroll runs, load the latest
+      if (target.payrollRuns && target.payrollRuns.length > 0) {
+        setPayrollRun(target.payrollRuns[0]);
+      } else {
+        setPayrollRun(null);
+      }
+      setActiveTab(targetTab);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  /**
+   * Handle switching account type from settings or onboarding
+   */
+  const handleSwitchAccountType = (newType: AccountType) => {
+    setAccountType(newType);
+    if (newType === 'accountant') {
+      setActiveTab('accountant_dashboard');
+    } else {
+      setActiveTab('dashboard');
+    }
+  };
+
+  // Pending confirmation state for Cayla sensitive actions
+  const [pendingCaylaConfirmation, setPendingCaylaConfirmation] = useState<CaylaMessage['confirmationRequired'] | null>(null);
+
+  /**
+   * Main Natural Language Dispatcher for Cayla — uses Convex OpenAI action
+   */
+  const handleSendMessage = async (text: string, confirmingAction?: string, confirmationPayload?: any) => {
+    if (!text.trim() || isProcessing) return;
+
+    const userMsg: CaylaMessage = {
+      id: `msg-${Date.now()}`,
+      sender: 'user',
+      text: text.trim(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setIsProcessing(true);
+    setPendingCaylaConfirmation(null);
+
+    // Show typing indicator
+    const thinkingId = `thinking-${Date.now()}`;
+    const thinkingMsg: CaylaMessage = {
+      id: thinkingId,
+      sender: 'cayla',
+      text: '...',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isWorking: true,
+    };
+    setMessages((prev) => [...prev, thinkingMsg]);
+
+    try {
+      const userId = currentUser?.uid ?? 'demo';
+
+      const result = await caylaChatAction({
+        message: text.trim(),
+        userId,
+        businessId: undefined,
+        confirmingAction,
+        confirmationPayload,
+      });
+
+      // Replace thinking indicator with real response
+      const caylaMsg: CaylaMessage = {
+        id: `cayla-${Date.now()}`,
+        sender: 'cayla',
+        text: result.text ?? "I'm not sure how to help with that.",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        confirmationRequired: result.pendingConfirmation ?? undefined,
+      };
+
+      setMessages((prev) => prev.filter((m) => m.id !== thinkingId).concat(caylaMsg));
+
+      if (result.pendingConfirmation) {
+        setPendingCaylaConfirmation(result.pendingConfirmation);
+      }
+    } catch (err) {
+      console.error('Cayla dispatch error:', err);
+      // Fallback to local engine on error
+      setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+
+      try {
+        if (accountType === 'accountant') {
+          const result = await agentEngineRef.current.processAccountantPrompt(
+            text,
+            clients,
+            teamMembers,
+            activeClientId
+          );
+          setMessages((prev) => [...prev, result.message]);
+          if (result.newActiveClientId) handleSelectClient(result.newActiveClientId, 'dashboard');
+          if (result.updatedClients) setClients(result.updatedClients);
+          if (result.updatedBatchJobs) setBatchJobs(result.updatedBatchJobs);
+          if (result.updatedPayroll) setPayrollRun(result.updatedPayroll);
+        } else {
+          const result = await agentEngineRef.current.processPrompt(
+            text,
+            payrollRun,
+            initialAugustPayrollRun,
+            selectedEmployeeId
+          );
+          setMessages((prev) => [...prev, result.message]);
+          if (result.updatedPayroll) setPayrollRun(result.updatedPayroll);
+          if (result.triggerPayrollDisplay && !payrollRun) setPayrollRun(result.updatedPayroll || initialAugustPayrollRun);
+          if (result.selectedEmployeeId) setSelectedEmployeeId(result.selectedEmployeeId);
+          if (result.newAuditEntry) setAuditLogs((prev) => [result.newAuditEntry!, ...prev]);
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback engine error:', fallbackErr);
+        setMessages((prev) => [...prev, {
+          id: `err-${Date.now()}`,
+          sender: 'cayla',
+          text: "I'm having trouble right now. Please try again in a moment.",
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  /**
+   * Handle Cayla confirmation dialog
+   */
+  const handleCaylaConfirm = () => {
+    if (!pendingCaylaConfirmation) return;
+    handleSendMessage(
+      'Yes, confirmed.',
+      pendingCaylaConfirmation.confirmAction,
+      pendingCaylaConfirmation.payload
+    );
+  };
+
+  const handleCaylaCancel = () => {
+    setPendingCaylaConfirmation(null);
+    const cancelMsg: CaylaMessage = {
+      id: `cancel-${Date.now()}`,
+      sender: 'cayla',
+      text: 'Action cancelled. Let me know if you need anything else.',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages((prev) => [...prev, cancelMsg]);
+  };
+
+  /**
+   * Handle Undo for an action
+   */
+  const handleUndo = (undoAction: NonNullable<CaylaMessage['undoAction']>) => {
+    if (!payrollRun) return;
+
+    const targetEmp = payrollRun.employees.find((e) => e.name === undoAction.employeeName);
+    if (!targetEmp) return;
+
+    const restoredEmp = recalculateEmployee({
+      ...targetEmp,
+      [undoAction.field]: undoAction.previousValue,
+      changedFields: [undoAction.field],
+    });
+
+    const updatedPayroll = recalculatePayrollRun({
+      ...payrollRun,
+      employees: payrollRun.employees.map((e) => (e.id === restoredEmp.id ? restoredEmp : e)),
+    });
+
+    setPayrollRun(updatedPayroll);
+
+    const auditEntry: AuditLogEntry = {
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString(),
+      actor: 'user',
+      action: `Undid ${undoAction.field} change for ${undoAction.employeeName}`,
+      employeeName: undoAction.employeeName,
+      previousValue: undoAction.newValue,
+      newValue: undoAction.previousValue,
+      reversible: false,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    const systemMsg: CaylaMessage = {
+      id: `msg-${Date.now()}`,
+      sender: 'cayla',
+      text: `Reverted ${undoAction.field} for ${undoAction.employeeName} back to ${undoAction.previousValue}.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages((prev) => [...prev, systemMsg]);
+  };
+
+  /**
+   * Finalize Payroll Action (with confetti!)
+   */
+  const handleConfirmFinalize = () => {
+    if (!payrollRun) return;
+
+    const finalized: PayrollRun = {
+      ...payrollRun,
+      status: 'finalized',
+      finalizedAt: new Date().toISOString(),
+    };
+    setPayrollRun(finalized);
+
+    confetti({
+      particleCount: 100,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ['#059669', '#10b981', '#34d399', '#047857'],
+    });
+
+    const auditEntry: AuditLogEntry = {
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString(),
+      actor: 'user',
+      action: 'Authorized and finalized August 2026 payroll',
+      reversible: false,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    const msg: CaylaMessage = {
+      id: `msg-${Date.now()}`,
+      sender: 'cayla',
+      text: `August 2026 payroll has been officially finalized. ${finalized.employeesCount} payslips are sealed, and bank payment batch files are ready for transfer.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      actionSummary: {
+        type: 'payroll_run',
+        title: 'Payroll Run Finalized',
+        description: `Net disbursement: ${formatCurrency(finalized.netPay)} to ${finalized.employeesCount} staff.`,
+      },
+    };
+    setMessages((prev) => [...prev, msg]);
+  };
+
+  /**
+   * Handle Inline Employee Update from table or mobile card
+   */
+  const handleUpdateEmployee = (updatedEmp: Employee, fieldChanged?: string) => {
+    setEmployees((prev) =>
+      prev.map((e) => (e.id === updatedEmp.id ? updatedEmp : e))
+    );
+
+    if (payrollRun) {
+      const updatedPayroll = recalculatePayrollRun({
+        ...payrollRun,
+        employees: payrollRun.employees.map((e) => (e.id === updatedEmp.id ? updatedEmp : e)),
+      });
+      setPayrollRun(updatedPayroll);
+    }
+
+    if (fieldChanged) {
+      const auditEntry: AuditLogEntry = {
+        id: `audit-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        actor: 'user',
+        action: `Manually updated ${fieldChanged}`,
+        employeeName: updatedEmp.name,
+        employeeId: updatedEmp.id,
+        newValue: (updatedEmp as any)[fieldChanged],
+        reversible: true,
+      };
+      setAuditLogs((prev) => [auditEntry, ...prev]);
+    }
+  };
+
+  const handleAddEmployee = (newEmp: Employee) => {
+    setEmployees((prev) => [newEmp, ...prev]);
+    if (payrollRun) {
+      const updatedPayroll = recalculatePayrollRun({
+        ...payrollRun,
+        employeesCount: payrollRun.employeesCount + 1,
+        employees: [newEmp, ...payrollRun.employees],
+      });
+      setPayrollRun(updatedPayroll);
+    }
+    const auditEntry: AuditLogEntry = {
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString(),
+      actor: 'user',
+      action: `Added new employee ${newEmp.name}`,
+      employeeName: newEmp.name,
+      employeeId: newEmp.id,
+      reversible: false,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+  };
+
+  const handleDeleteEmployee = (empId: string) => {
+    const target = employees.find((e) => e.id === empId);
+    setEmployees((prev) => prev.filter((e) => e.id !== empId));
+    if (payrollRun) {
+      const updatedPayroll = recalculatePayrollRun({
+        ...payrollRun,
+        employeesCount: Math.max(1, payrollRun.employeesCount - 1),
+        employees: payrollRun.employees.filter((e) => e.id !== empId),
+      });
+      setPayrollRun(updatedPayroll);
+    }
+    if (target) {
+      const auditEntry: AuditLogEntry = {
+        id: `audit-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        actor: 'user',
+        action: `Removed employee ${target.name}`,
+        employeeName: target.name,
+        employeeId: target.id,
+        reversible: false,
+      };
+      setAuditLogs((prev) => [auditEntry, ...prev]);
+    }
+  };
+
+  /**
+   * Handle Timesheet Overtime Data Import
+   */
+  const handleApplyTimesheetData = (otMap: Record<string, number>) => {
+    if (!payrollRun) {
+      const base = recalculatePayrollRun(initialAugustPayrollRun);
+      const updatedEmployees = base.employees.map((e) => {
+        const firstName = (e.name || '').split(' ')[0]?.toLowerCase() || '';
+        if (otMap[firstName] !== undefined) {
+          return recalculateEmployee({
+            ...e,
+            overtimeHours: otMap[firstName],
+            changedFields: ['overtimeHours', 'grossPay', 'paye', 'nis', 'netPay'],
+          });
+        }
+        return e;
+      });
+      const newRun = recalculatePayrollRun({ ...base, employees: updatedEmployees });
+      setPayrollRun(newRun);
+      setEmployees(updatedEmployees);
+    } else {
+      const updatedEmployees = payrollRun.employees.map((e) => {
+        const firstName = (e.name || '').split(' ')[0]?.toLowerCase() || '';
+        if (otMap[firstName] !== undefined) {
+          return recalculateEmployee({
+            ...e,
+            overtimeHours: otMap[firstName],
+            changedFields: ['overtimeHours', 'grossPay', 'paye', 'nis', 'netPay'],
+          });
+        }
+        return e;
+      });
+      const newRun = recalculatePayrollRun({ ...payrollRun, employees: updatedEmployees });
+      setPayrollRun(newRun);
+      setEmployees(updatedEmployees);
+    }
+
+    const countApplied = Object.keys(otMap).length;
+    const msg: CaylaMessage = {
+      id: `msg-${Date.now()}`,
+      sender: 'cayla',
+      text: `Successfully ingested biometric punch logs. Overtime hours applied to ${countApplied} staff and payroll values recalculated.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      actionSummary: {
+        type: 'timesheet_imported',
+        title: 'Timesheet Processed',
+        description: `${countApplied} overtime records synchronized.`,
+      },
+    };
+    setMessages((prev) => [...prev, msg]);
+  };
+
+  /**
+   * Handle Sending Email — uses Resend via Convex action
+   */
+  const handleSendEmail = async (recipientEmail: string) => {
+    const employee = emailModalEmployee;
+    try {
+      await sendEmailAction({
+        to: recipientEmail,
+        emailType: 'employeePayslip',
+        data: {
+          employeeName: employee?.name ?? 'Employee',
+          period: payrollRun?.periodLabel ?? `${payrollRun?.month ?? ''} ${payrollRun?.year ?? ''}`.trim(),
+          businessName: business.name,
+          grossPay: (employee?.grossPay ?? 0).toFixed(2),
+          netPay: (employee?.netPay ?? 0).toFixed(2),
+          currency: business.currency || 'TTD',
+          deductions: [
+            { label: 'PAYE', amount: (employee?.paye ?? 0).toFixed(2) },
+            { label: 'NIS', amount: (employee?.nis ?? 0).toFixed(2) },
+            { label: 'Health Surcharge', amount: (employee?.healthSurcharge ?? 0).toFixed(2) },
+          ].filter((d) => parseFloat(d.amount) > 0),
+          payslipLink: 'https://mysheetpay.web.app/app',
+        },
+        userId: currentUser?.uid,
+      });
+    } catch (_) { /* graceful fallback if Resend not yet configured */ }
+
+    confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 }, colors: ['#059669', '#10b981'] });
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `msg-${Date.now()}`,
+        sender: 'cayla',
+        text: `Payslip dispatched to ${recipientEmail}.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+  };
+
+  /**
+   * Accountant Action Handlers
+   */
+  const handleAddClient = (newClient: AccountantClient) => {
+    setClients((prev) => [newClient, ...prev]);
+    setIsAddClientOpen(false);
+    confetti({
+      particleCount: 60,
+      spread: 60,
+      origin: { y: 0.6 },
+      colors: ['#059669', '#10b981'],
+    });
+  };
+
+  const handleUpdateClient = (updatedClient: AccountantClient) => {
+    setClients((prev) =>
+      prev.map((c) => (c.id === updatedClient.id ? updatedClient : c))
+    );
+  };
+
+  const handleDeleteClient = (clientId: string) => {
+    setClients((prev) => prev.filter((c) => c.id !== clientId));
+  };
+
+  const handleAddTeamMember = (member: FirmTeamMember) => {
+    setTeamMembers((prev) => [...prev, member]);
+  };
+
+  const handleUpdateTeamMember = (updatedMember: FirmTeamMember) => {
+    setTeamMembers((prev) =>
+      prev.map((m) => (m.id === updatedMember.id ? updatedMember : m))
+    );
+  };
+
+  const handleDeleteTeamMember = (memberId: string) => {
+    setTeamMembers((prev) => prev.filter((m) => m.id !== memberId));
+  };
+
+  const handleRunBatchJob = (jobId: string) => {
+    setBatchJobs((prev) =>
+      prev.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              status: 'completed',
+              completedAt: new Date().toISOString(),
+              clientsProcessed: job.totalClients,
+            }
+          : job
+      )
+    );
+    confetti({
+      particleCount: 80,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ['#059669', '#10b981', '#34d399'],
+    });
+  };
+
+  // Auth flow callbacks — declared before render branches to avoid temporal dead zone
+  const handleOnboardingComplete = useCallback(
+    (
+      newBiz: BusinessDetails,
+      newEmps: Employee[],
+      newAccountType: AccountType,
+      importedPayrollRuns?: PayrollRun[]
+    ) => {
+      setPendingOnboardingData({
+        business: newBiz,
+        employees: newEmps,
+        accountType: newAccountType,
+        payrollRuns: importedPayrollRuns,
+      });
+      setIsOnboardingOpen(false);
+      setViewMode('auth');
+    },
+    []
+  );
+
+  const handleAuthComplete = useCallback(
+    async (uid: string, email: string, displayName: string) => {
+      setCurrentUser({ uid, email, displayName });
+      setUserName(displayName || email.split('@')[0]);
+
+      const pending = pendingOnboardingData;
+      setPendingOnboardingData(null);
+
+      let convexUserId: any = null;
+      let convexBusinessId: any = null;
+      try {
+        const accountTypeToSave = pending?.accountType ?? accountType;
+        convexUserId = await convexCreateOrUpdateUser({
+          firebaseUid: uid,
+          email,
+          displayName,
+          accountType: accountTypeToSave === 'accountant' ? 'accountant' : 'business',
+        });
+      } catch (_) { /* Convex not yet configured */ }
+
+      if (pending) {
+        const { business: newBiz, employees: newEmps, accountType: newAccountType, payrollRuns: importedRuns } = pending;
+
+        setBusiness(newBiz);
+        setEmployees(newEmps);
+        if (newEmps.length > 0) setSelectedEmployeeId(newEmps[0].id);
+        handleSwitchAccountType(newAccountType);
+
+        try {
+          if (convexUserId) {
+            convexBusinessId = await convexCreateBusiness({
+              userId: convexUserId,
+              name: newBiz.name,
+              address: newBiz.address,
+              phone: newBiz.phone,
+              email: newBiz.email,
+              taxRegistrationId: newBiz.taxRegistrationId,
+              nisNumber: newBiz.nisNumber,
+              signatoryName: newBiz.signatoryName,
+              signatoryTitle: newBiz.signatoryTitle,
+              currency: newBiz.currency || 'TTD',
+              currencySymbol: newBiz.currencySymbol || '$',
+            });
+            if (newEmps.length > 0) {
+              await convexBulkCreateEmployees({
+                businessId: convexBusinessId,
+                userId: convexUserId,
+                employees: newEmps,
+              });
+            }
+          }
+        } catch (_) { /* Convex not yet configured */ }
+
+        if (importedRuns && importedRuns.length > 0) {
+          const latestRun = importedRuns[importedRuns.length - 1];
+          setPayrollRun(latestRun);
+          setActiveTab('dashboard');
+
+          try {
+            if (convexUserId && convexBusinessId) {
+              for (const run of importedRuns) {
+                await convexCreatePayrollRun({
+                  businessId: convexBusinessId,
+                  userId: convexUserId,
+                  month: run.month || '',
+                  year: run.year || new Date().getFullYear(),
+                  status: run.status || 'finalized',
+                  periodLabel: run.periodLabel,
+                  employeesSnapshot: run.employees || [],
+                  totalGross: run.grossPay || 0,
+                  totalPaye: run.totalPaye || run.totalTax || 0,
+                  totalNis: run.totalNis || 0,
+                  totalHealthSurcharge: run.totalHealthSurcharge || 0,
+                  totalDeductions: run.totalDeductions || 0,
+                  totalNet: run.netPay || 0,
+                });
+              }
+            }
+          } catch (_) { /* Convex not yet configured */ }
+
+          const welcomeMsg: CaylaMessage = {
+            id: `cayla-import-${Date.now()}`,
+            sender: 'cayla',
+            text: `🎉 **Migration Complete!** I've extracted and imported your payroll data for **${newBiz.name}** with **${newEmps.length} active employees** and **${importedRuns.length} historical payroll cycles** (up to ${latestRun.periodLabel}). All statutory calculations (PAYE, NIS, Health Surcharge) and payslips are calculated and ready in your real workspace.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          setMessages([welcomeMsg]);
+          confetti({
+            particleCount: 100,
+            spread: 80,
+            origin: { y: 0.6 },
+            colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'],
+          });
+        } else {
+          if (newAccountType === 'accountant') {
+            handleSendMessage('Show my client payroll status');
+          } else {
+            handleSendMessage('Run payroll for this month');
+          }
+        }
+      }
+
+      setViewMode('app');
+      navigate('/app');
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pendingOnboardingData, accountType]
+  );
+
+  // -------------------------------------------------------------
+  // Router Branch: Team invitation acceptance (/invite/[token])
+  // -------------------------------------------------------------
+  if (currentPath.startsWith('/invite/')) {
+    return (
+      <InviteAcceptPage
+        currentUser={
+          currentUser
+            ? {
+                uid: currentUser.uid,
+                email: currentUser.email ?? '',
+                displayName: currentUser.displayName ?? null,
+              }
+            : null
+        }
+        onSignedInRedirect={(path) => {
+          setViewMode(path === '/app' ? 'app' : 'landing');
+          navigate(path);
+        }}
+      />
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch: Dev-only email template preview (/dev/email-preview)
+  // -------------------------------------------------------------
+  if (currentPath === '/dev/email-preview' && import.meta.env.DEV) {
+    return <EmailPreviewPage />;
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch 0: Admin Console (/admin)
+  // -------------------------------------------------------------
+  if (currentPath === '/admin') {
+    return (
+      <AdminDashboard
+        currentUser={currentUser}
+        onNavigate={(path) => {
+          if (path === '/app') setViewMode('app');
+          else setViewMode('landing');
+          navigate(path);
+        }}
+        onEnsureUser={async (uid, email, name) => {
+          try {
+            await convexCreateOrUpdateUser({
+              firebaseUid: uid,
+              email,
+              displayName: name,
+              accountType: 'business',
+            });
+          } catch {
+            /* Convex not configured — analytics will show unauthorized until reachable */
+          }
+        }}
+      />
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch 1: Specific Calculator Page
+  // -------------------------------------------------------------
+  const calculatorConfig = getCalculatorByPath(currentPath);
+  if (calculatorConfig) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <CalculatorPage
+          config={calculatorConfig}
+          onNavigate={navigate}
+          onLaunchApp={() => {
+            setViewMode('app');
+            navigate('/app');
+          }}
+          onStartOnboarding={() => setIsOnboardingOpen(true)}
+        />
+
+        {isOnboardingOpen && (
+          <OnboardingFlow
+            initialBusiness={business}
+            initialEmployees={employees}
+            initialAccountType={accountType}
+            onComplete={handleOnboardingComplete}
+            onCancel={() => setIsOnboardingOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch 2: Master Calculator Hub (/calculators)
+  // -------------------------------------------------------------
+  if (currentPath === '/calculators') {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <CalculatorHub
+          onNavigate={navigate}
+          onLaunchApp={() => {
+            setViewMode('app');
+            navigate('/app');
+          }}
+          onStartOnboarding={() => setIsOnboardingOpen(true)}
+        />
+
+        {isOnboardingOpen && (
+          <OnboardingFlow
+            initialBusiness={business}
+            initialEmployees={employees}
+            initialAccountType={accountType}
+            onComplete={handleOnboardingComplete}
+            onCancel={() => setIsOnboardingOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch 3: Country Hubs
+  // -------------------------------------------------------------
+  const countryHubMap: Record<string, CountryCode> = {
+    '/trinidad-and-tobago': 'TT',
+    '/barbados': 'BB',
+    '/saint-lucia': 'LC',
+    '/belize': 'BZ',
+  };
+
+  const matchedCountry = countryHubMap[currentPath];
+  if (matchedCountry) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <CountryHub
+          countryCode={matchedCountry}
+          onNavigate={navigate}
+          onLaunchApp={() => {
+            setViewMode('app');
+            navigate('/app');
+          }}
+          onStartOnboarding={() => setIsOnboardingOpen(true)}
+        />
+
+        {isOnboardingOpen && (
+          <OnboardingFlow
+            initialBusiness={business}
+            initialEmployees={employees}
+            initialAccountType={accountType}
+            onComplete={handleOnboardingComplete}
+            onCancel={() => setIsOnboardingOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch 4: Legal & Trust Pages (/privacy-policy, /terms-of-service, /refund-policy, /security, /compliance, /contact)
+  // -------------------------------------------------------------
+  const legalDoc = getLegalDocumentByPath(currentPath);
+  if (legalDoc) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <LegalPage
+          document={legalDoc}
+          onNavigate={navigate}
+          onLaunchApp={() => {
+            setViewMode('app');
+            navigate('/app');
+          }}
+          onStartOnboarding={() => setIsOnboardingOpen(true)}
+        />
+
+        {isOnboardingOpen && (
+          <OnboardingFlow
+            initialBusiness={business}
+            initialEmployees={employees}
+            initialAccountType={accountType}
+            onComplete={handleOnboardingComplete}
+            onCancel={() => setIsOnboardingOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  const handleLogout = async () => {
+    await signOut(auth).catch(() => {});
+    setCurrentUser(null);
+    setViewMode('landing');
+    if (window.location.pathname !== '/') {
+      navigate('/');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const PADDLE_PRICE_IDS: Record<'pro' | 'accountant', string> = {
+    pro: 'pri_01m00gw728zjvw770d1k94fh6y',
+    accountant: 'pri_01m0r19pgkx604y5q3gp1trhqh',
+  };
+
+  const handleOpenCheckout = async (checkoutPlan: 'pro' | 'accountant') => {
+    const email = currentUser?.email ?? undefined;
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://mysheetpay.web.app';
+    const successUrl = `${origin}/app?upgraded=${checkoutPlan}`;
+    const customData: Record<string, string> = { plan: checkoutPlan };
+    if (currentUser?.uid) customData.firebaseUid = currentUser.uid;
+
+    // Primary: Paddle.js overlay checkout — opens directly in the browser and
+    // does not depend on the Convex backend being reachable.
+    if (isPaddleConfigured()) {
+      try {
+        await openPaddleCheckout({
+          priceId: PADDLE_PRICE_IDS[checkoutPlan],
+          email,
+          customData,
+          successUrl,
+          onComplete: () => {
+            if (currentUser?.uid) {
+              activateFromCheckout({ firebaseUid: currentUser.uid, plan: checkoutPlan }).catch(() => {});
+            }
+          },
+        });
+        return;
+      } catch (err) {
+        console.error('Paddle.js checkout error, falling back to server checkout:', err);
+      }
+    }
+
+    // Fallback: server-created transaction checkout URL (needs a default payment
+    // link configured in the Paddle dashboard and a reachable Convex backend).
+    try {
+      const result = await createCheckoutSession({
+        priceId: PADDLE_PRICE_IDS[checkoutPlan],
+        plan: checkoutPlan,
+        firebaseUid: currentUser?.uid,
+        customerEmail: email,
+        successUrl,
+      });
+      if (result?.url) {
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+      } else {
+        window.location.href = '/#pricing';
+      }
+    } catch (err) {
+      console.error('Paddle checkout error:', err);
+      alert('Checkout is temporarily unavailable. Please try again in a moment or contact support.');
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Router Branch 5a: Auth Screen (after onboarding completes)
+  // -------------------------------------------------------------
+  if (viewMode === 'auth') {
+    return (
+      <AuthScreen
+        onAuthComplete={handleAuthComplete}
+        onBack={() => {
+          setPendingOnboardingData(null);
+          setViewMode('landing');
+          navigate('/');
+        }}
+        defaultMode={authMode === 'signin' ? 'signin' : 'signup'}
+      />
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch 5: Landing Page (Default if not in /app or when viewMode is landing)
+  // -------------------------------------------------------------
+  if (viewMode === 'landing' || currentPath === '/') {
+    return (
+      <div className="min-h-screen bg-white">
+        <LandingPage
+          onNavigate={navigate}
+          onLaunchApp={() => {
+            setViewMode('app');
+            navigate('/app');
+          }}
+          onStartOnboarding={() => setIsOnboardingOpen(true)}
+          onChoosePlan={handleOpenCheckout}
+          onLogin={() => {
+            setAuthMode('signin');
+            setViewMode('auth');
+          }}
+        />
+
+        {isOnboardingOpen && (
+          <OnboardingFlow
+            initialBusiness={business}
+            initialEmployees={employees}
+            initialAccountType={accountType}
+            onComplete={handleOnboardingComplete}
+            onCancel={() => setIsOnboardingOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  const activeClientObj = clients.find((c) => c.id === activeClientId);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col md:flex-row antialiased selection:bg-emerald-500/20">
+      {/* Desktop Persistent Left Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          if (tab === 'cayla' || tab === 'dashboard' || tab === 'accountant_dashboard') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        }}
+        isPayrollActive={payrollRun !== null}
+        onOpenCayla={() => {
+          if (accountType === 'accountant') {
+            setActiveTab('accountant_dashboard');
+          } else {
+            setActiveTab('dashboard');
+          }
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        accountType={accountType}
+        clientsCount={clients.length}
+        employeesCount={employees.length}
+        activeClientName={activeClientObj?.companyName || business.name}
+        onOpenBatchPayroll={() => setIsBatchModalOpen(true)}
+      />
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Header */}
+        <Header
+          userName={userName}
+          userAvatar={userAvatar}
+          onUpdateAvatar={setUserAvatar}
+          onUpdateUserName={setUserName}
+          business={business}
+          onSwitchBusiness={(name) => setBusiness((prev) => ({ ...prev, name }))}
+          auditCount={auditLogs.length}
+          onOpenAudit={() => setIsAuditModalOpen(true)}
+          onOpenLanding={handleLogout}
+          onOpenOnboarding={() => setIsOnboardingOpen(true)}
+          accountType={accountType}
+          accountantClients={clients}
+          activeClientId={activeClientId}
+          onSelectClient={(cId) => handleSelectClient(cId)}
+          onOpenAddClientModal={() => setIsAddClientOpen(true)}
+          onSwitchAccountType={handleSwitchAccountType}
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            if (tab === 'dashboard' || tab === 'accountant_dashboard' || tab === 'cayla') {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+          }}
+          onOpenBatchPayroll={() => setIsBatchModalOpen(true)}
+        />
+
+        {/* Tab Routing Router */}
+        <main className="flex-1 flex flex-col pb-24 md:pb-12">
+          {/* Upgrade to Pro banner (business accounts) — reactively reflects Convex plan */}
+          {accountType === 'business' && (isPro || !bannerDismissed) && (
+            <UpgradeBanner
+              plan={plan}
+              planStatus={entitlement?.planStatus}
+              onUpgrade={handleOpenCheckout}
+              onDismiss={() => setBannerDismissed(true)}
+            />
+          )}
+
+          {/* ACCOUNTANT TAB 1: Accountant Dashboard */}
+          {accountType === 'accountant' && activeTab === 'accountant_dashboard' && (
+            <AccountantDashboard
+              userName={userName}
+              clients={clients}
+              teamMembers={teamMembers}
+              batchJobs={batchJobs}
+              attentionItems={attentionItems}
+              activeClient={activeClientObj || null}
+              onSelectClient={(cId) => handleSelectClient(cId, 'dashboard')}
+              onOpenAddClient={() => setIsAddClientOpen(true)}
+              onOpenBatchPayroll={() => setIsBatchModalOpen(true)}
+              onOpenInviteClient={(c) => setInviteModalClient(c)}
+              onAddNewClient={handleAddClient}
+              onUpdateClients={(updated) => setClients(updated)}
+              messages={messages}
+              onSendMessage={handleSendMessage}
+              isProcessing={isProcessing}
+              onQuickExecuteCayla={(prompt) => {
+                handleSendMessage(prompt);
+              }}
+            />
+          )}
+
+          {/* ACCOUNTANT TAB 2: Clients Directory */}
+          {accountType === 'accountant' && activeTab === 'accountant_clients' && (
+            <ClientsView
+              clients={clients}
+              teamMembers={teamMembers}
+              onSelectClient={(cId) => handleSelectClient(cId, 'dashboard')}
+              onAddClient={() => setIsAddClientOpen(true)}
+              onUpdateClient={handleUpdateClient}
+              onDeleteClient={handleDeleteClient}
+              onInviteClient={(c) => setInviteModalClient(c)}
+            />
+          )}
+
+          {/* ACCOUNTANT TAB 3: Firm Team & Permissions */}
+          {accountType === 'accountant' && activeTab === 'accountant_team' && (
+            <AccountantTeamView
+              teamMembers={teamMembers}
+              clients={clients}
+              onAddMember={handleAddTeamMember}
+              onUpdateMember={handleUpdateTeamMember}
+              onDeleteMember={handleDeleteTeamMember}
+            />
+          )}
+
+          {/* ACCOUNTANT TAB 4: Portfolio Reports */}
+          {accountType === 'accountant' && activeTab === 'accountant_reports' && (
+            <AccountantReportsView
+              clients={clients}
+              onSelectClient={(cId) => handleSelectClient(cId, 'dashboard')}
+            />
+          )}
+
+          {/* TAB: Dashboard / Cayla (Cayla transcript + dynamic payroll table) - Only for Single Business Account */}
+          {accountType === 'business' && (activeTab === 'dashboard' || activeTab === 'cayla') && (
+            <>
+              {/* Main Hero with Cayla Transcript */}
+              <CaylaTranscript
+                messages={messages}
+                onSendMessage={handleSendMessage}
+                isProcessing={isProcessing}
+                onUndo={handleUndo}
+                onConfirmAction={handleConfirmFinalize}
+                onCancelAction={() => {}}
+                onOpenUpload={(type) => {
+                  if (type === 'timesheet') setIsTimesheetModalOpen(true);
+                }}
+                isPayrollActive={payrollRun !== null}
+                pendingConfirmation={pendingCaylaConfirmation ?? undefined}
+                onCaylaConfirm={handleCaylaConfirm}
+                onCaylaCancel={handleCaylaCancel}
+              />
+
+              {/* Dynamically Generated Payroll Workspace */}
+              {payrollRun && (
+                <>
+                  {/* Desktop View */}
+                  <div className="hidden md:block">
+                    <PayrollWorkspace
+                      payroll={payrollRun}
+                      selectedEmployeeId={selectedEmployeeId}
+                      onSelectEmployee={setSelectedEmployeeId}
+                      onUpdateEmployee={handleUpdateEmployee}
+                      onFinalizePayroll={handleConfirmFinalize}
+                      onOpenAudit={() => setIsAuditModalOpen(true)}
+                      business={business}
+                      customization={customization}
+                      onUpdateCustomization={(c) => setCustomization((prev) => ({ ...prev, ...c }))}
+                      onOpenEmailModal={(emp) => setEmailModalEmployee(emp)}
+                      onOpenBusinessEditModal={() => setIsBusinessModalOpen(true)}
+                    />
+                  </div>
+
+                  {/* Mobile View */}
+                  <div className="md:hidden">
+                    <MobilePayrollCards
+                      payroll={payrollRun}
+                      onSelectEmployee={setSelectedEmployeeId}
+                      onViewPayslipModal={(emp) => setMobilePayslipEmployee(emp)}
+                      onUpdateEmployee={handleUpdateEmployee}
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* TAB: Employees Directory */}
+          {activeTab === 'employees' && (
+            <EmployeesView
+              employees={employees}
+              onUpdateEmployee={handleUpdateEmployee}
+              onAddEmployee={handleAddEmployee}
+              onDeleteEmployee={handleDeleteEmployee}
+              onViewPayslip={(emp) => {
+                setSelectedEmployeeId(emp.id);
+                setActiveTab('payslips');
+              }}
+            />
+          )}
+
+          {/* TAB: Payroll Runs */}
+          {activeTab === 'payroll_runs' && (
+            <PayrollRunsView
+              currentPayroll={payrollRun}
+              business={business}
+              onOpenRun={(run) => {
+                setPayrollRun(run);
+                setActiveTab('dashboard');
+              }}
+              onFinalizeCurrent={handleConfirmFinalize}
+              onOpenCayla={() => {
+                setActiveTab('dashboard');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          )}
+
+          {/* TAB: Payslips Customizer & Batch Portal */}
+          {activeTab === 'payslips' && (
+            <PayslipsPortalView
+              payroll={payrollRun}
+              employees={employees}
+              business={business}
+              customization={customization}
+              onUpdateCustomization={(c) => setCustomization((prev) => ({ ...prev, ...c }))}
+              onOpenEmailModal={(emp) => setEmailModalEmployee(emp)}
+              onOpenBusinessEditModal={() => setIsBusinessModalOpen(true)}
+            />
+          )}
+
+          {/* TAB: Tax Forms (TD4 / NIB / Health Surcharge) */}
+          {activeTab === 'tax_forms' && (
+            <TaxFormsView
+              employees={employees}
+              business={business}
+              currentPayroll={payrollRun}
+              onOpenCayla={() => {
+                setActiveTab('dashboard');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          )}
+
+          {/* TAB: Reports & Analytics (Pro feature for single-business accounts) */}
+          {activeTab === 'reports' && (
+            accountType === 'business' ? (
+              <ProGate
+                isPro={isPro}
+                title="Advanced Reports & Analytics"
+                description="Payroll trends, statutory summaries, and export-ready analytics are part of Business Pro."
+                features={[
+                  'Monthly payroll trend charts',
+                  'PAYE / NIS / Health Surcharge summaries',
+                  'Export-ready statutory reports',
+                ]}
+                onUpgrade={handleOpenCheckout}
+              >
+                <ReportsView
+                  employees={employees}
+                  business={business}
+                  currentPayroll={payrollRun}
+                />
+              </ProGate>
+            ) : (
+              <ReportsView
+                employees={employees}
+                business={business}
+                currentPayroll={payrollRun}
+              />
+            )
+          )}
+
+          {/* TAB: Attendance & Biometric Timesheets */}
+          {activeTab === 'attendance' && (
+            <AttendanceView
+              employees={employees}
+              onUpdateEmployee={handleUpdateEmployee}
+              onOpenTimesheetModal={() => setIsTimesheetModalOpen(true)}
+            />
+          )}
+
+          {/* TAB: Organization & Statutory Settings */}
+          {activeTab === 'settings' && (
+            <SettingsView
+              business={business}
+              onSaveBusiness={(b) => setBusiness(b)}
+              accountType={accountType}
+              onSwitchAccountType={handleSwitchAccountType}
+              onLogout={handleLogout}
+              onUpgrade={handleOpenCheckout}
+              plan={plan}
+              isPro={isPro}
+              onImportData={(newBiz, newEmps, importedRuns) => {
+                setBusiness(newBiz);
+                setEmployees(newEmps);
+                if (newEmps.length > 0) {
+                  setSelectedEmployeeId(newEmps[0].id);
+                }
+                if (importedRuns && importedRuns.length > 0) {
+                  const latestRun = importedRuns[importedRuns.length - 1];
+                  setPayrollRun(latestRun);
+                  setActiveTab('dashboard');
+
+                  const welcomeMsg: CaylaMessage = {
+                    id: `cayla-import-settings-${Date.now()}`,
+                    sender: 'cayla',
+                    text: `🎉 **Payroll Archive Successfully Migrated!** I've updated your workspace with **${newBiz.name}**, **${newEmps.length} employees**, and **${importedRuns.length} historical payroll cycles** (up to ${latestRun.periodLabel}).`,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  };
+                  setMessages([welcomeMsg]);
+                  confetti({
+                    particleCount: 80,
+                    spread: 70,
+                    origin: { y: 0.6 },
+                    colors: ['#059669', '#10b981', '#34d399'],
+                  });
+                }
+              }}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Floating Cayla Quick Command Button */}
+      {showFloatingBar && (
+        <div className="fixed bottom-20 md:bottom-6 right-6 z-40 flex items-center gap-2 animate-in fade-in zoom-in-95">
+          {showFloatingCayla ? (
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 flex items-center gap-2 w-80 md:w-96 animate-in fade-in slide-in-from-right-4">
+              <CaylaPenMascot size="xs" />
+              <input
+                type="text"
+                value={floatingInput}
+                onChange={(e) => setFloatingInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && floatingInput.trim()) {
+                    handleSendMessage(floatingInput.trim());
+                    setFloatingInput('');
+                    setShowFloatingCayla(false);
+                  }
+                }}
+                placeholder={accountType === 'accountant' ? 'Ask cross-client Cayla...' : 'Ask Cayla anything...'}
+                autoFocus
+                className="flex-1 text-xs bg-transparent border-none focus:outline-none text-slate-800 placeholder:text-slate-400"
+              />
+              <button
+                onClick={() => {
+                  if (floatingInput.trim()) {
+                    handleSendMessage(floatingInput.trim());
+                    setFloatingInput('');
+                    setShowFloatingCayla(false);
+                  }
+                }}
+                className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setShowFloatingCayla(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              id="floating-cayla-trigger-btn"
+              onClick={() => setShowFloatingCayla(true)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-full p-2 sm:p-2.5 shadow-xl shadow-emerald-600/30 flex items-center gap-2 text-xs font-semibold transform hover:scale-105 transition-all cursor-pointer ring-2 ring-white"
+            >
+              <CaylaPenMascot size="xs" />
+              <span className="hidden sm:inline font-bold">Ask Cayla</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Dedicated Mobile Floating Bottom Pill Navigation */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          if (tab === 'dashboard' || tab === 'accountant_dashboard' || tab === 'cayla') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        }}
+        onCaylaClick={() => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          setShowFloatingCayla(true);
+        }}
+        accountType={accountType}
+        onOpenBatchPayroll={() => setIsBatchModalOpen(true)}
+        clientsCount={clients.length}
+        onOpenLanding={handleLogout}
+      />
+
+      {/* Mobile Fullscreen Payslip Modal */}
+      {payrollRun && (
+        <MobilePayslipModal
+          isOpen={mobilePayslipEmployee !== null}
+          onClose={() => setMobilePayslipEmployee(null)}
+          employee={mobilePayslipEmployee || payrollRun.employees[0]}
+          allEmployees={payrollRun.employees}
+          onSelectEmployee={(emp) => setMobilePayslipEmployee(emp)}
+          payroll={payrollRun}
+          business={business}
+          customization={customization}
+          onUpdateCustomization={(c) => setCustomization((prev) => ({ ...prev, ...c }))}
+          onOpenEmailModal={(emp) => setEmailModalEmployee(emp)}
+          onOpenBusinessEditModal={() => setIsBusinessModalOpen(true)}
+        />
+      )}
+
+      {/* Accountant Specific Modals */}
+      <AddClientModal
+        isOpen={isAddClientOpen}
+        onClose={() => setIsAddClientOpen(false)}
+        onAddClient={handleAddClient}
+        teamMembers={teamMembers}
+      />
+
+      <ClientInviteModal
+        isOpen={inviteModalClient !== null}
+        onClose={() => setInviteModalClient(null)}
+        client={inviteModalClient}
+      />
+
+      <BatchPayrollModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        clients={clients}
+        onRunBatch={(selectedClientIds, period) => {
+          const newBatchJob: BatchPayrollJob = {
+            id: `batch-${Date.now()}`,
+            name: `${period} Batch Run`,
+            periodLabel: period,
+            clientIds: selectedClientIds,
+            status: 'completed',
+            createdAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            totalClients: selectedClientIds.length,
+            clientsProcessed: selectedClientIds.length,
+            errorsCount: 0,
+          };
+          setBatchJobs((prev) => [newBatchJob, ...prev]);
+          setIsBatchModalOpen(false);
+          confetti({
+            particleCount: 80,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#059669', '#10b981', '#34d399'],
+          });
+        }}
+      />
+
+      {/* Supporting Modals */}
+      <AuditTrailModal
+        isOpen={isAuditModalOpen}
+        onClose={() => setIsAuditModalOpen(false)}
+        logs={auditLogs}
+      />
+
+      <TimesheetUploadModal
+        isOpen={isTimesheetModalOpen}
+        onClose={() => setIsTimesheetModalOpen(false)}
+        onApplyTimesheetData={handleApplyTimesheetData}
+      />
+
+      <EmailPayslipModal
+        isOpen={emailModalEmployee !== null}
+        onClose={() => setEmailModalEmployee(null)}
+        employee={emailModalEmployee}
+        onSendEmail={handleSendEmail}
+      />
+
+      <BusinessEditModal
+        isOpen={isBusinessModalOpen}
+        onClose={() => setIsBusinessModalOpen(false)}
+        business={business}
+        onSave={setBusiness}
+      />
+
+      {isOnboardingOpen && (
+        <OnboardingFlow
+          initialBusiness={business}
+          initialEmployees={employees}
+          initialAccountType={accountType}
+          onComplete={handleOnboardingComplete}
+          onCancel={() => setIsOnboardingOpen(false)}
+        />
+      )}
+    </div>
+  );
+}

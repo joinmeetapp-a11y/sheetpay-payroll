@@ -1,0 +1,10 @@
+{
+  "name": "Sheetpay Ai",
+  "description": "Conversational AI payroll management powered by Cayla with live deterministic tax engine, payslip generation, and interactive payroll workspace.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
