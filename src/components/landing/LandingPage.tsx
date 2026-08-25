@@ -151,6 +151,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       stats: { gross: '$184,500.00', deductions: '$34,940.00', net: '$149,560.00', count: 24 },
       actionBadge: 'Variance: +3.4% vs July',
     },
+    {
+      id: 'set-reminder',
+      label: 'Set payroll reminders',
+      userQuery: 'Remind me Friday at 3 PM to run payroll.',
+      caylaResponse: "I'll remind you every Friday at 3:00 PM to run payroll.",
+      stats: { gross: '$184,500.00', deductions: '$34,940.00', net: '$149,560.00', count: 24 },
+      actionBadge: 'Reminder scheduled',
+      kind: 'reminder' as const,
+      reminderCard: {
+        title: 'Payroll Reminder',
+        cadence: 'Every Friday',
+        time: '3:00 PM',
+        nextRun: 'Friday, 3:00 PM',
+      },
+    },
   ];
 
   const [activeDemoId, setActiveDemoId] = useState<string>('run-payroll');
@@ -476,7 +491,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
               {/* Supporting Copy */}
               <p className="text-base sm:text-lg lg:text-xl text-slate-600 max-w-xl mx-auto lg:mx-0 leading-relaxed font-medium">
-                Run payroll, calculate taxes, make changes and create payslips just by asking. Cayla does the work. You review and approve.
+                Run payroll, calculate taxes, make changes, create payslips, and get timely payroll reminders just by asking. Cayla does the work. You review and approve.
               </p>
 
               {/* CTAs */}
@@ -1556,6 +1571,110 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
 
+        {/* FEATURE 9: Never Forget Payroll — Cayla Reminders */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-24 sm:mt-32">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+
+            {/* Text Left */}
+            <div className="lg:col-span-6 space-y-6 order-1">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-100 text-emerald-800 text-xs sm:text-sm font-bold">
+                <Bell className="w-4 h-4" />
+                <span>Cayla Smart Payroll Reminders</span>
+              </div>
+              <h2 className="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-950 tracking-tight leading-[1.12]">
+                Never <span className="text-emerald-600">forget payroll</span>.
+              </h2>
+              <p className="text-slate-600 text-base sm:text-lg leading-relaxed font-medium">
+                Cayla remembers when payroll needs your attention and sends timely reminders for payroll, employee hours, payslips and important deadlines.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                {[
+                  '"Remind me every Friday at 3 PM."',
+                  '"Remind me 2 days before payroll."',
+                  '"Remind me tomorrow to check hours."',
+                  '"Remind me when it’s time to send payslips."',
+                ].map((b, i) => (
+                  <div key={i} className="flex items-center gap-2.5 text-sm font-semibold text-slate-800 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                    <CaylaPenMascot size="xs" />
+                    <span>{b}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-slate-500 font-medium pt-1">
+                Cayla remembers &rarr; you get reminded &rarr; payroll gets done on time.
+              </p>
+            </div>
+
+            {/* Phone Right */}
+            <div className="lg:col-span-6 flex justify-center order-2">
+              <IPhoneMockup activeIslandText="Reminder set">
+                <div className="bg-white px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CaylaPenMascot size="xs" />
+                    <span className="font-extrabold text-xs text-slate-900">Cayla &middot; Reminders</span>
+                  </div>
+                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    Active
+                  </span>
+                </div>
+
+                <div className="p-3.5 space-y-3 flex-1 overflow-y-auto bg-slate-50 text-xs">
+                  {/* User message */}
+                  <div className="bg-emerald-600 text-white p-2.5 rounded-xl rounded-tr-xs text-[11px] self-end ml-8 shadow-2xs font-semibold">
+                    &ldquo;Remind me every Friday at 3 PM to run payroll.&rdquo;
+                  </div>
+
+                  {/* Cayla response */}
+                  <div className="bg-white p-3 rounded-xl rounded-tl-xs border border-slate-200 text-[11px] text-slate-800 shadow-2xs mr-8 space-y-1">
+                    <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-800">
+                      <CaylaPenMascot size="xs" />
+                      <span>Cayla</span>
+                    </div>
+                    <p className="font-semibold">Done. I&apos;ll remind you every Friday at 3:00 PM.</p>
+                  </div>
+
+                  {/* Reminder card */}
+                  <div className="bg-white rounded-2xl border border-emerald-200 p-3 shadow-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">Payroll Reminder</div>
+                        <div className="mt-1 text-[13px] font-black text-slate-900 flex items-center gap-1.5">
+                          <Bell className="w-3 h-3 text-emerald-600" />
+                          Every Friday
+                        </div>
+                        <div className="text-[11px] text-slate-600 font-semibold flex items-center gap-1 mt-0.5">
+                          <Clock3 className="w-3 h-3 text-slate-400" />
+                          3:00 PM
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-1.5">Next reminder: Friday, 3:00 PM</div>
+                      </div>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 border border-emerald-200 text-[9px] font-black text-emerald-800 uppercase tracking-wider shrink-0">
+                        <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                        Active
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Extra suggestion chips */}
+                  <div className="pt-1 space-y-1.5">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Try saying</div>
+                    {[
+                      'Remind me 2 days before payroll',
+                      'Remind me tomorrow to check hours',
+                      'Remind me when to send payslips',
+                    ].map((s) => (
+                      <div key={s} className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-semibold">
+                        {s}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </IPhoneMockup>
+            </div>
+
+          </div>
+        </div>
+
       </section>
 
       {/* ------------------------------------------------------------- */}
@@ -1749,21 +1868,48 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       {activeDemo.caylaResponse}
                     </p>
 
-                    {/* Result Metrics */}
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-center font-mono">
-                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                        <div className="text-xs text-slate-400 font-sans">Gross</div>
-                        <div className="text-sm font-bold text-slate-900">{activeDemo.stats.gross}</div>
+                    {/* Result: reminder card OR payroll stats grid */}
+                    {(activeDemo as any).kind === 'reminder' && (activeDemo as any).reminderCard ? (
+                      <div className="pt-2 border-t border-slate-100">
+                        <div className="bg-white p-4 rounded-2xl border border-emerald-200 shadow-xs">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-[10px] font-black text-emerald-700 uppercase tracking-wider">
+                                {(activeDemo as any).reminderCard.title}
+                              </div>
+                              <div className="mt-1.5 text-sm font-black text-slate-900">
+                                {(activeDemo as any).reminderCard.cadence}
+                              </div>
+                              <div className="text-xs text-slate-600 font-semibold">
+                                {(activeDemo as any).reminderCard.time}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-2">
+                                Next reminder: {(activeDemo as any).reminderCard.nextRun}
+                              </div>
+                            </div>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 border border-emerald-200 text-[10px] font-black text-emerald-800 uppercase tracking-wider shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              Active
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                        <div className="text-xs text-slate-400 font-sans">Deductions</div>
-                        <div className="text-sm font-bold text-rose-700">{activeDemo.stats.deductions}</div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-center font-mono">
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                          <div className="text-xs text-slate-400 font-sans">Gross</div>
+                          <div className="text-sm font-bold text-slate-900">{activeDemo.stats.gross}</div>
+                        </div>
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                          <div className="text-xs text-slate-400 font-sans">Deductions</div>
+                          <div className="text-sm font-bold text-rose-700">{activeDemo.stats.deductions}</div>
+                        </div>
+                        <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
+                          <div className="text-xs text-emerald-800 font-bold font-sans">Net Pay</div>
+                          <div className="text-sm font-black text-emerald-700">{activeDemo.stats.net}</div>
+                        </div>
                       </div>
-                      <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
-                        <div className="text-xs text-emerald-800 font-bold font-sans">Net Pay</div>
-                        <div className="text-sm font-black text-emerald-700">{activeDemo.stats.net}</div>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1907,6 +2053,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     'Unlimited payroll runs',
                     'Unlimited payslips',
                     'Full Cayla AI assistant',
+                    'Cayla Smart Payroll Reminders',
                     '50 OCR scans/month',
                     'Voice commands included',
                     'Tax calculations included',
@@ -1965,6 +2112,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     'Unlimited employees',
                     'Unlimited payroll runs & payslips',
                     'Full Cayla AI + Multi-client intelligence',
+                    'Cayla Smart Payroll Reminders',
                     '150 OCR scans/month',
                     'Voice commands & tax calculations',
                     'All 12 payslip templates',
