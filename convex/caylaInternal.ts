@@ -330,6 +330,20 @@ export const executeTool = internalAction({
         if (!emp) return { error: `Employee not found: ${args.employeeId}` };
         if (!emp.email) return { error: `${emp.name} has no email address on file` };
 
+        // Enforce free-plan cap BEFORE sending; over-limit users see an
+        // upgrade prompt instead of consuming their last quota.
+        try {
+          await ctx.runMutation(internal.usage.internalAssertLimitByUid, {
+            firebaseUid: userId,
+            kind: "payslip",
+          });
+        } catch (err: any) {
+          if (String(err?.message ?? "").includes("FREE_LIMIT_REACHED")) {
+            return { error: "FREE_LIMIT_REACHED:payslip", success: false };
+          }
+          throw err;
+        }
+
         const result = await ctx.runAction(internal.emailService.sendEmailInternal, {
           to: emp.email,
           emailType: "employeePayslip",
@@ -351,6 +365,19 @@ export const executeTool = internalAction({
           businessId,
         });
 
+        if (result.success) {
+          const opId = `payslip:${userId}:${args.period ?? "current"}:${emp.employeeId ?? emp.id ?? emp.name}`;
+          try {
+            await ctx.runMutation(internal.usage.internalIncrementByUid, {
+              firebaseUid: userId,
+              kind: "payslip",
+              opId,
+            });
+          } catch (e) {
+            console.error("[cayla.send_payslip_email] usage increment failed:", e);
+          }
+        }
+
         return {
           success: result.success,
           message: result.success
@@ -366,8 +393,24 @@ export const executeTool = internalAction({
 
         let sent = 0;
         let failed = 0;
+        let quotaHit = false;
 
         for (const emp of withEmail) {
+          // Check cap before each send so a partial batch can succeed and the
+          // remainder cleanly stops without half-counting.
+          try {
+            await ctx.runMutation(internal.usage.internalAssertLimitByUid, {
+              firebaseUid: userId,
+              kind: "payslip",
+            });
+          } catch (err: any) {
+            if (String(err?.message ?? "").includes("FREE_LIMIT_REACHED")) {
+              quotaHit = true;
+              break;
+            }
+            throw err;
+          }
+
           const result = await ctx.runAction(internal.emailService.sendEmailInternal, {
             to: emp.email,
             emailType: "employeePayslip",
@@ -387,8 +430,21 @@ export const executeTool = internalAction({
             userId,
             businessId,
           });
-          if (result.success) sent++;
-          else failed++;
+          if (result.success) {
+            sent++;
+            const opId = `payslip:${userId}:${args.period ?? "current"}:${emp.employeeId ?? emp.id ?? emp.name}`;
+            try {
+              await ctx.runMutation(internal.usage.internalIncrementByUid, {
+                firebaseUid: userId,
+                kind: "payslip",
+                opId,
+              });
+            } catch (e) {
+              console.error("[cayla.send_all_payslips] usage increment failed:", e);
+            }
+          } else {
+            failed++;
+          }
         }
 
         return {
@@ -397,7 +453,8 @@ export const executeTool = internalAction({
           sent,
           failed,
           skipped: noEmail.length,
-          message: `Sent ${sent} payslips for ${args.period}${failed > 0 ? `, ${failed} failed` : ""}${noEmail.length > 0 ? `, ${noEmail.length} skipped (no email)` : ""}.`,
+          quotaHit,
+          message: `Sent ${sent} payslips for ${args.period}${failed > 0 ? `, ${failed} failed` : ""}${noEmail.length > 0 ? `, ${noEmail.length} skipped (no email)` : ""}${quotaHit ? ". Free-plan monthly payslip cap reached — upgrade to send the rest." : "."}`,
         };
       }
 

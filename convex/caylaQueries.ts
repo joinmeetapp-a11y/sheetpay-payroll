@@ -1,5 +1,6 @@
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { assertWithinLimit, incrementUsageIdempotent } from "./usage";
 
 // ─── Conversation store (called from cayla.ts actions) ────────────────────────
 export const getOrCreateConversation = internalMutation({
@@ -202,6 +203,8 @@ export const savePayrollRun = internalMutation({
       .first();
 
     if (existing) {
+      // Updating an existing run for the same period doesn't consume another
+      // payroll credit — it's the same logical operation.
       await ctx.db.patch(existing._id, {
         status: "completed",
         periodLabel: args.periodLabel,
@@ -214,10 +217,15 @@ export const savePayrollRun = internalMutation({
         totalNet: args.totalNet,
         updatedAt: now,
       });
+      // Idempotent — a Cayla retry against the same period doesn't double-count.
+      await incrementUsageIdempotent(ctx, user._id, "payroll", `payroll:${existing._id}`);
       return existing._id;
     }
 
-    return await ctx.db.insert("payrollRuns", {
+    // New run: enforce free-plan cap first, then insert + count.
+    await assertWithinLimit(ctx, user, "payroll");
+
+    const runId = await ctx.db.insert("payrollRuns", {
       userId: user._id,
       businessId: business._id,
       month: args.month,
@@ -234,5 +242,7 @@ export const savePayrollRun = internalMutation({
       createdAt: now,
       updatedAt: now,
     });
+    await incrementUsageIdempotent(ctx, user._id, "payroll", `payroll:${runId}`);
+    return runId;
   },
 });

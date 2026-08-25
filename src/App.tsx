@@ -324,6 +324,19 @@ export default function App() {
     }
   };
 
+  // Defensive gate: if entitlement resolves and the user is NOT on an
+  // Accountant plan while accountant state is active (e.g. stale local state
+  // from before their subscription lapsed), snap them back to the business
+  // workspace. The server-side requirePlan on future accountant mutations is
+  // the authoritative check; this just prevents a confusing empty-data UI.
+  useEffect(() => {
+    if (!entitlement) return;
+    if (accountType === 'accountant' && !isAccountant) {
+      setAccountType('business');
+      setActiveTab('dashboard');
+    }
+  }, [entitlement, accountType, isAccountant]);
+
   // Pending confirmation state for Cayla sensitive actions
   const [pendingCaylaConfirmation, setPendingCaylaConfirmation] = useState<CaylaMessage['confirmationRequired'] | null>(null);
 

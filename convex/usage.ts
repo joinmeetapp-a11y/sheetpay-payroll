@@ -172,6 +172,60 @@ export async function incrementUsageIdempotent(
 }
 
 /**
+ * Firebase-UID variants for callers that only hold the Firebase uid string
+ * (Cayla tools, actions). They resolve to the Convex user row before
+ * enforcing / incrementing.
+ */
+export async function assertWithinLimitByUid(
+  ctx: MutationCtx,
+  firebaseUid: string,
+  kind: UsageKind
+): Promise<{ userId: Id<"users"> }> {
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", firebaseUid))
+    .first();
+  if (!user) throw new Error("Unauthorized");
+  await assertWithinLimit(ctx, user, kind);
+  return { userId: user._id };
+}
+
+export async function incrementByUidIdempotent(
+  ctx: MutationCtx,
+  firebaseUid: string,
+  kind: UsageKind,
+  opId: string
+): Promise<{ counted: boolean; used: number }> {
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", firebaseUid))
+    .first();
+  if (!user) throw new Error("Unauthorized");
+  return await incrementUsageIdempotent(ctx, user._id, kind, opId);
+}
+
+/** Internal mutation form of the above for actions (which can't share ctx). */
+export const internalIncrementByUid = internalMutation({
+  args: {
+    firebaseUid: v.string(),
+    kind: v.union(v.literal("payslip"), v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
+    opId: v.string(),
+  },
+  handler: async (ctx, args) => incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId),
+});
+
+export const internalAssertLimitByUid = internalMutation({
+  args: {
+    firebaseUid: v.string(),
+    kind: v.union(v.literal("payslip"), v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
+  },
+  handler: async (ctx, args) => {
+    await assertWithinLimitByUid(ctx, args.firebaseUid, args.kind);
+    return { ok: true };
+  },
+});
+
+/**
  * Server-side increment exposed to internal callers (e.g. OCR action,
  * payslip generation, Cayla dispatcher). Not exposed to the browser — the
  * frontend must not be able to decrement or reset its own counters.

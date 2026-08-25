@@ -1,6 +1,7 @@
 "use node";
 import { action } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 
 const OPENAI_URL = "https://api.openai.com/v1";
 const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
@@ -64,8 +65,13 @@ export const extractPayrollDocument = action({
     fileBase64: v.string(),
     mimeType: v.string(),
     fileName: v.optional(v.string()),
+    // Firebase uid — required for authenticated users so we can enforce the
+    // free-plan OCR cap and record usage. Optional to preserve backwards
+    // compatibility with any anonymous caller; the anonymous path skips
+    // enforcement but also doesn't count toward any account.
+    requesterUid: v.optional(v.string()),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args): Promise<any> => {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
@@ -81,6 +87,29 @@ export const extractPayrollDocument = action({
         error: "OCR only supports image uploads. Convert PDFs to images first.",
         employees: [],
       };
+    }
+
+    // Enforce free-plan OCR cap BEFORE burning an OpenAI vision call. The
+    // check runs against the caller's account; over-limit throws which we
+    // convert to a structured error the UI translates into an upgrade prompt.
+    if (args.requesterUid) {
+      try {
+        await ctx.runMutation(internal.usage.internalAssertLimitByUid, {
+          firebaseUid: args.requesterUid,
+          kind: "ocr",
+        });
+      } catch (err: any) {
+        const msg = String(err?.message ?? err);
+        if (msg.includes("FREE_LIMIT_REACHED")) {
+          return {
+            ok: false,
+            error: "FREE_LIMIT_REACHED:ocr",
+            reason: "Your free-plan OCR scans are used up for this month. Upgrade to keep scanning.",
+            employees: [],
+          };
+        }
+        throw err;
+      }
     }
 
     const dataUrl = `data:${args.mimeType};base64,${args.fileBase64}`;
@@ -164,6 +193,26 @@ Rules:
       } catch {
         parsed = {};
       }
+      const employees = Array.isArray(parsed.employees) ? parsed.employees : [];
+
+      // Count usage only for genuinely successful extractions. A parse failure
+      // that returns zero employees should not consume a scan. opId derived
+      // from a hash of the fileName + first-employee marker so a UI retry of
+      // the same file dedupes; different files get different ids.
+      if (args.requesterUid && employees.length > 0) {
+        const marker = `${args.fileName ?? "ocr"}:${employees[0]?.name ?? ""}:${employees.length}`;
+        const opId = `ocr:${marker}`;
+        try {
+          await ctx.runMutation(internal.usage.internalIncrementByUid, {
+            firebaseUid: args.requesterUid,
+            kind: "ocr",
+            opId,
+          });
+        } catch (err) {
+          console.error("[ai.extractPayrollDocument] usage increment failed:", err);
+        }
+      }
+
       return {
         ok: true,
         businessName: parsed.businessName ?? null,
@@ -171,7 +220,7 @@ Rules:
         nisEmployerId: parsed.nisEmployerId ?? null,
         currency: parsed.currency ?? null,
         periodLabel: parsed.periodLabel ?? null,
-        employees: Array.isArray(parsed.employees) ? parsed.employees : [],
+        employees,
         fileName: args.fileName ?? null,
       };
     } catch (err: any) {
