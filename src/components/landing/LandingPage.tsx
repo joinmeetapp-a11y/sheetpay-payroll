@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { IPhoneMockup } from './IPhoneMockup';
+import { NiaWidget } from '../nia/NiaWidget';
 import { CaylaPenMascot } from '../CaylaPenMascot';
 import { CaribbeanReviews } from './CaribbeanReviews';
 import {
@@ -2512,6 +2513,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
       </footer>
+
+      {/* Nia support widget — anonymous mode on landing */}
+      <NiaWidget variant="landing" currentPage="landing" />
     </div>
   );
 };

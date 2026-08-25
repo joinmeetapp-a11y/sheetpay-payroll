@@ -371,6 +371,57 @@ export default defineSchema({
     .index("by_op", ["opId"])
     .index("by_user_kind_period", ["userId", "kind", "period"]),
 
+  // ── Nia (support assistant) ────────────────────────────────────────────────
+  // Conversation between a user (or anonymous visitor) and Nia. Persists so a
+  // user can close and reopen the panel without losing context.
+  niaConversations: defineTable({
+    userId: v.optional(v.id("users")), // absent for anonymous landing-page chats
+    anonSessionId: v.optional(v.string()), // for anonymous continuity
+    businessId: v.optional(v.id("businesses")),
+    // 'nia' = Nia is answering; 'waiting_for_human' = handoff requested, Nia
+    // paused; 'human' = a support agent has picked up; 'closed' = archived.
+    mode: v.string(),
+    lastMessageAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_anon", ["anonSessionId"])
+    .index("by_mode", ["mode"]),
+
+  niaMessages: defineTable({
+    conversationId: v.id("niaConversations"),
+    // 'user' | 'nia' | 'support'
+    senderType: v.string(),
+    senderUserId: v.optional(v.id("users")),
+    content: v.string(),
+    createdAt: v.number(),
+  }).index("by_conversation", ["conversationId"]),
+
+  // Support cases created when a user asks to talk to a human. Kept even if
+  // the transcript email fails so admins can respond from the console.
+  supportCases: defineTable({
+    conversationId: v.id("niaConversations"),
+    userId: v.optional(v.id("users")),
+    businessId: v.optional(v.id("businesses")),
+    // Snapshot at hand-off time so an admin can respond without re-querying:
+    contactName: v.string(),
+    contactEmail: v.string(),
+    plan: v.optional(v.string()),
+    currentPage: v.optional(v.string()),
+    summary: v.string(),
+    // 'open' | 'waiting' | 'in_progress' | 'resolved' | 'closed'
+    status: v.string(),
+    priority: v.optional(v.string()),
+    assignedToUserId: v.optional(v.id("users")),
+    transcriptEmailStatus: v.optional(v.string()), // 'sent' | 'failed'
+    transcriptEmailError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_status", ["status"])
+    .index("by_created_at", ["createdAt"])
+    .index("by_conversation", ["conversationId"]),
+
   // Aggregated daily analytics (populated by a scheduled job — see
   // convex/analyticsAggregation.ts). Read by the admin dashboard instead of
   // scanning the users/payrollRuns tables at request time.

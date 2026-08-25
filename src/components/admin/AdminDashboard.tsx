@@ -14,6 +14,7 @@ import {
   AdminPayrollView,
   AdminCaylaView,
   AdminSystemView,
+  AdminSupportView,
 } from './sections';
 import {
   AreaChart,
@@ -50,6 +51,7 @@ import {
   Wallet,
   Bot,
   ActivitySquare,
+  HeadphonesIcon,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -68,7 +70,8 @@ type AdminSection =
   | 'seo'
   | 'payroll'
   | 'cayla'
-  | 'system';
+  | 'system'
+  | 'support';
 
 const NAV: { section: AdminSection; label: string; path: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { section: 'overview', label: 'Overview', path: '/admin', icon: LayoutDashboard },
@@ -80,6 +83,7 @@ const NAV: { section: AdminSection; label: string; path: string; icon: React.Com
   { section: 'payroll', label: 'Payroll', path: '/admin/payroll', icon: Wallet },
   { section: 'cayla', label: 'Cayla', path: '/admin/cayla', icon: Bot },
   { section: 'system', label: 'System', path: '/admin/system', icon: ActivitySquare },
+  { section: 'support', label: 'Support', path: '/admin/support', icon: HeadphonesIcon },
 ];
 
 function sectionForPath(path: string): AdminSection {
@@ -342,6 +346,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {section === 'payroll' && <AdminPayrollView requesterUid={currentUser?.uid} />}
         {section === 'cayla' && <AdminCaylaView requesterUid={currentUser?.uid} />}
         {section === 'system' && <AdminSystemView requesterUid={currentUser?.uid} />}
+        {section === 'support' && <AdminSupportView requesterUid={currentUser?.uid} />}
 
         {section === 'overview' && (<>
         <div className="flex items-center justify-between">

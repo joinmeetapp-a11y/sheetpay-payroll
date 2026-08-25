@@ -547,3 +547,74 @@ export const AdminSystemView: React.FC<{ requesterUid?: string }> = ({ requester
     </div>
   );
 };
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Support inbox — Nia handoffs
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const AdminSupportView: React.FC<{ requesterUid?: string }> = ({ requesterUid }) => {
+  const res = useQuery((api as any).niaInternal.listSupportCasesForAdmin, { requesterUid }) as any;
+  if (res === undefined) return <Loading />;
+  if (res.authorized === false) return <Unauthorized />;
+
+  const groups: Record<string, any[]> = { open: [], waiting: [], in_progress: [], resolved: [], closed: [] };
+  for (const c of res.cases) (groups[c.status] ?? groups.open).push(c);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Kpi label="Open" value={groups.open.length} />
+        <Kpi label="Waiting" value={groups.waiting.length} />
+        <Kpi label="In progress" value={groups.in_progress.length} />
+        <Kpi label="Resolved" value={groups.resolved.length} />
+        <Kpi label="Closed" value={groups.closed.length} />
+      </div>
+      <Card className="p-0 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 text-sm font-black text-slate-900">Recent cases</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[10px] uppercase text-slate-400 border-b">
+                <th className="px-4 py-2 font-bold">User</th>
+                <th className="px-4 py-2 font-bold">Plan</th>
+                <th className="px-4 py-2 font-bold">Page</th>
+                <th className="px-4 py-2 font-bold">Summary</th>
+                <th className="px-4 py-2 font-bold">Email</th>
+                <th className="px-4 py-2 font-bold">Status</th>
+                <th className="px-4 py-2 font-bold">Received</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {res.cases.map((c: any) => (
+                <tr key={c.id}>
+                  <td className="px-4 py-2 font-semibold text-slate-800">
+                    {c.contactName}
+                    <div className="text-[10px] text-slate-400 font-normal font-mono">{c.contactEmail}</div>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{c.plan ?? '—'}</td>
+                  <td className="px-4 py-2 text-slate-500 font-mono text-[10px]">{c.currentPage ?? '—'}</td>
+                  <td className="px-4 py-2 text-slate-700 max-w-[300px] truncate">{c.summary}</td>
+                  <td className="px-4 py-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${c.transcriptEmailStatus === 'sent' ? 'bg-emerald-100 text-emerald-800' : c.transcriptEmailStatus === 'failed' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-500'}`}>
+                      {c.transcriptEmailStatus ?? 'pending'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-slate-100 text-slate-700">{c.status}</span>
+                  </td>
+                  <td className="px-4 py-2 text-slate-500 tabular-nums">{dt(c.createdAt)}</td>
+                </tr>
+              ))}
+              {res.cases.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No support cases yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      <div className="text-[10px] text-slate-400 text-center">
+        Full reply/take-over UI ships next iteration — for now, respond to the transcript email or reach the user directly.
+      </div>
+    </div>
+  );
+};

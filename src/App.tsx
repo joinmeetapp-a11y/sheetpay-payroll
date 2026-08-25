@@ -73,6 +73,7 @@ import { ProGate } from './components/ProGate';
 import { openPaddleCheckout, isPaddleConfigured } from './lib/paddle';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { PayrollReminders } from './components/reminders/PayrollReminders';
+import { NiaWidget } from './components/nia/NiaWidget';
 import { InviteAcceptPage } from './components/invite/InviteAcceptPage';
 import { EmailPreviewPage } from './components/dev/EmailPreviewPage';
 import { isAdminEmail } from './lib/admin';
@@ -1737,6 +1738,16 @@ export default function App() {
           onCancel={() => setIsOnboardingOpen(false)}
         />
       )}
+
+      {/* Nia support widget — authenticated mode inside the app.
+          Positioned bottom-24 on mobile so it sits above the pill nav. */}
+      <NiaWidget
+        variant="app"
+        currentUid={currentUser?.uid}
+        currentPage={activeTab}
+        defaultContactName={currentUser?.displayName}
+        defaultContactEmail={currentUser?.email}
+      />
     </div>
   );
 }
