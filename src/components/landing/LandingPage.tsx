@@ -195,7 +195,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [ctaInputValue, setCtaInputValue] = useState('Run payroll for this month.');
 
   return (
-    <div className="min-h-screen bg-white text-slate-900 selection:bg-emerald-200 font-sans antialiased overflow-x-hidden">
+    <div className="min-h-screen bg-white text-slate-900 selection:bg-emerald-200 font-sans antialiased overflow-x-clip">
       {/* ------------------------------------------------------------- */}
       {/* TOP NAVIGATION BAR */}
       {/* ------------------------------------------------------------- */}

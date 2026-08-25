@@ -152,6 +152,10 @@ export interface Employee {
   ytdGross?: number;
   ytdPaye?: number;
   ytdNis?: number;
+  // Marks an employee as a preview/demo record. Real employees never carry this
+  // flag. `filterOutDemoOnceReal` in src/lib/employees.ts hides demo rows the
+  // moment at least one real employee exists in the account.
+  isDemo?: boolean;
 }
 
 export interface BusinessDetails {

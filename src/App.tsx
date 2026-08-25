@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import confetti from 'canvas-confetti';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useAction, useMutation, useQuery } from 'convex/react';
@@ -37,6 +37,7 @@ import {
 } from './lib/accountantData';
 import { CaylaAgentEngine } from './lib/caylaEngine';
 import { recalculateEmployee, recalculatePayrollRun, formatCurrency } from './lib/taxEngine';
+import { filterOutDemoOnceReal } from './lib/employees';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { CaylaTranscript } from './components/CaylaTranscript';
@@ -151,6 +152,11 @@ export default function App() {
     defaultPayslipCustomization
   );
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
+  // Preview/demo rows (isDemo === true) are dropped the moment at least one
+  // real employee exists. See src/lib/employees.ts. `employees` remains the raw
+  // state so mutations, imports, and Cayla actions still operate on the full
+  // list — only the render surface uses `visibleEmployees`.
+  const visibleEmployees = useMemo(() => filterOutDemoOnceReal(employees), [employees]);
 
   // Payroll State (null initially to preserve pure Cayla-centric empty hero state!)
   const [payrollRun, setPayrollRun] = useState<PayrollRun | null>(null);
@@ -976,7 +982,7 @@ export default function App() {
         {isOnboardingOpen && (
           <OnboardingFlow
             initialBusiness={business}
-            initialEmployees={employees}
+            initialEmployees={visibleEmployees}
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
@@ -1004,7 +1010,7 @@ export default function App() {
         {isOnboardingOpen && (
           <OnboardingFlow
             initialBusiness={business}
-            initialEmployees={employees}
+            initialEmployees={visibleEmployees}
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
@@ -1041,7 +1047,7 @@ export default function App() {
         {isOnboardingOpen && (
           <OnboardingFlow
             initialBusiness={business}
-            initialEmployees={employees}
+            initialEmployees={visibleEmployees}
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
@@ -1071,7 +1077,7 @@ export default function App() {
         {isOnboardingOpen && (
           <OnboardingFlow
             initialBusiness={business}
-            initialEmployees={employees}
+            initialEmployees={visibleEmployees}
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
@@ -1185,7 +1191,7 @@ export default function App() {
         {isOnboardingOpen && (
           <OnboardingFlow
             initialBusiness={business}
-            initialEmployees={employees}
+            initialEmployees={visibleEmployees}
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
@@ -1379,7 +1385,7 @@ export default function App() {
           {/* TAB: Employees Directory */}
           {activeTab === 'employees' && (
             <EmployeesView
-              employees={employees}
+              employees={visibleEmployees}
               onUpdateEmployee={handleUpdateEmployee}
               onAddEmployee={handleAddEmployee}
               onDeleteEmployee={handleDeleteEmployee}
@@ -1411,7 +1417,7 @@ export default function App() {
           {activeTab === 'payslips' && (
             <PayslipsPortalView
               payroll={payrollRun}
-              employees={employees}
+              employees={visibleEmployees}
               business={business}
               customization={customization}
               onUpdateCustomization={(c) => setCustomization((prev) => ({ ...prev, ...c }))}
@@ -1423,7 +1429,7 @@ export default function App() {
           {/* TAB: Tax Forms (TD4 / NIB / Health Surcharge) */}
           {activeTab === 'tax_forms' && (
             <TaxFormsView
-              employees={employees}
+              employees={visibleEmployees}
               business={business}
               currentPayroll={payrollRun}
               onOpenCayla={() => {
@@ -1448,14 +1454,14 @@ export default function App() {
                 onUpgrade={handleOpenCheckout}
               >
                 <ReportsView
-                  employees={employees}
+                  employees={visibleEmployees}
                   business={business}
                   currentPayroll={payrollRun}
                 />
               </ProGate>
             ) : (
               <ReportsView
-                employees={employees}
+                employees={visibleEmployees}
                 business={business}
                 currentPayroll={payrollRun}
               />
@@ -1465,7 +1471,7 @@ export default function App() {
           {/* TAB: Attendance & Biometric Timesheets */}
           {activeTab === 'attendance' && (
             <AttendanceView
-              employees={employees}
+              employees={visibleEmployees}
               onUpdateEmployee={handleUpdateEmployee}
               onOpenTimesheetModal={() => setIsTimesheetModalOpen(true)}
             />
@@ -1674,7 +1680,7 @@ export default function App() {
       {isOnboardingOpen && (
         <OnboardingFlow
           initialBusiness={business}
-          initialEmployees={employees}
+          initialEmployees={visibleEmployees}
           initialAccountType={accountType}
           onComplete={handleOnboardingComplete}
           onCancel={() => setIsOnboardingOpen(false)}

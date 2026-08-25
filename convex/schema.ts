@@ -63,6 +63,9 @@ export default defineSchema({
     status: v.string(),
     localId: v.string(),
     createdAt: v.number(),
+    // Marks a preview/demo row. Hidden from the dashboard as soon as at least
+    // one non-demo employee exists. Real employees never carry this flag.
+    isDemo: v.optional(v.boolean()),
   })
     .index("by_business", ["businessId"])
     .index("by_user", ["userId"]),
