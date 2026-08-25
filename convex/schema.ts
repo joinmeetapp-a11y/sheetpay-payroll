@@ -342,6 +342,35 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_token", ["token"]),
 
+  // ── Usage counters ─────────────────────────────────────────────────────────
+  // One row per (userId, period) — period is 'YYYY-MM' so a new month is a
+  // fresh row (no reset job needed). Counts increase only when the operation
+  // actually succeeds; enforcement lives server-side in convex/usage.ts.
+  usageCounters: defineTable({
+    userId: v.id("users"),
+    period: v.string(),
+    payslipsUsed: v.number(),
+    payrollRunsUsed: v.number(),
+    ocrScansUsed: v.number(),
+    caylaActionsUsed: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_period", ["userId", "period"]),
+
+  // Idempotency ledger for usage increments — one row per operation id so a
+  // retried mutation, duplicated webhook, or double-clicked button cannot
+  // double-count. See convex/usage.ts::incrementUsage.
+  usageIncrements: defineTable({
+    userId: v.id("users"),
+    period: v.string(),
+    kind: v.string(), // 'payslip' | 'payroll' | 'ocr' | 'cayla'
+    opId: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_op", ["opId"])
+    .index("by_user_kind_period", ["userId", "kind", "period"]),
+
   // Aggregated daily analytics (populated by a scheduled job — see
   // convex/analyticsAggregation.ts). Read by the admin dashboard instead of
   // scanning the users/payrollRuns tables at request time.

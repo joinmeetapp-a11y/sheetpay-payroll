@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { AccountType, BusinessDetails, Employee, PayrollRun } from '../../types';
 import {
   Settings,
@@ -28,6 +30,7 @@ interface SettingsViewProps {
   onUpgrade?: (plan: 'pro' | 'accountant') => void;
   plan?: 'free' | 'pro' | 'accountant';
   isPro?: boolean;
+  currentUid?: string;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -40,7 +43,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onUpgrade,
   plan = 'free',
   isPro = false,
+  currentUid,
 }) => {
+  // Live usage from Convex. Returns null until the user record exists.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const usage = useQuery((api as any).usage.getMonthlyUsage, currentUid ? { requesterUid: currentUid } : 'skip') as
+    | null
+    | {
+        plan: 'free' | 'pro' | 'accountant';
+        payslipsUsed: number;
+        payrollRunsUsed: number;
+        ocrScansUsed: number;
+        caylaActionsUsed: number;
+        limits: { payslip: number | null; payroll: number | null; ocr: number | null; cayla: number | null };
+      }
+    | undefined;
+  const isUnlimited = (usage?.plan ?? plan) !== 'free';
+  const u = {
+    payslip: usage?.payslipsUsed ?? 0,
+    payroll: usage?.payrollRunsUsed ?? 0,
+    ocr: usage?.ocrScansUsed ?? 0,
+  };
+  const lim = {
+    payslip: usage?.limits?.payslip ?? 10,
+    payroll: usage?.limits?.payroll ?? 10,
+    ocr: usage?.limits?.ocr ?? 3,
+  };
+  const pctOf = (used: number, limit: number | null | undefined) =>
+    !limit ? 8 : Math.min(100, Math.round((used / limit) * 100));
   const [formData, setFormData] = useState<BusinessDetails>(business);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showRoleConfirmModal, setShowRoleConfirmModal] = useState(false);
@@ -328,9 +358,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 ? 'Accountant Plan ($197/mo)'
                 : plan === 'pro'
                 ? 'Business Pro ($97/mo)'
-                : accountType === 'accountant'
-                ? 'Accountant Plan ($197/mo)'
-                : 'Free Product Trial ($0/mo)'}
+                : 'Free Plan'}
             </span>
           </div>
 
@@ -338,39 +366,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
               <div className="flex justify-between text-slate-700 font-bold">
                 <span>Monthly Payslips</span>
-                <span>{accountType === 'accountant' ? 'Unlimited' : '4 / 10 Used'}</span>
+                <span>{isUnlimited ? 'Unlimited' : `${u.payslip} / ${lim.payslip} Used`}</span>
               </div>
               <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-600 rounded-full" style={{ width: accountType === 'accountant' ? '10%' : '40%' }} />
+                <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${pctOf(u.payslip, lim.payslip)}%` }} />
               </div>
               <p className="text-[11px] text-slate-500">
-                {accountType === 'accountant' ? 'Unlimited payslips across all clients' : '10 free payslips per month included'}
+                {isUnlimited ? 'Unlimited payslips included' : `${lim.payslip} free payslips per month included`}
               </p>
             </div>
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
               <div className="flex justify-between text-slate-700 font-bold">
                 <span>Payroll Runs</span>
-                <span>{accountType === 'accountant' ? 'Unlimited' : '1 / 10 Runs'}</span>
+                <span>{isUnlimited ? 'Unlimited' : `${u.payroll} / ${lim.payroll} Runs`}</span>
               </div>
               <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-600 rounded-full" style={{ width: accountType === 'accountant' ? '5%' : '10%' }} />
+                <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${pctOf(u.payroll, lim.payroll)}%` }} />
               </div>
               <p className="text-[11px] text-slate-500">
-                {accountType === 'accountant' ? 'Unlimited payroll batches' : '10 payroll calculations per month'}
+                {isUnlimited ? 'Unlimited payroll batches' : `${lim.payroll} payroll calculations per month`}
               </p>
             </div>
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
               <div className="flex justify-between text-slate-700 font-bold">
                 <span>OCR Scans</span>
-                <span>{accountType === 'accountant' ? '8 / 150 Used' : '1 / 3 Used'}</span>
+                <span>{isUnlimited ? 'Unlimited' : `${u.ocr} / ${lim.ocr} Used`}</span>
               </div>
               <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-600 rounded-full" style={{ width: accountType === 'accountant' ? '5%' : '33%' }} />
+                <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${pctOf(u.ocr, lim.ocr)}%` }} />
               </div>
               <p className="text-[11px] text-slate-500">
-                {accountType === 'accountant' ? '150 monthly timesheet/receipt OCR scans' : '3 monthly OCR scans on Free tier'}
+                {isUnlimited ? 'Higher OCR quota included' : `${lim.ocr} monthly OCR scans on the Free plan`}
               </p>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { assertWithinLimit, incrementUsageIdempotent } from "./usage";
 
 export const getByBusiness = query({
   args: { businessId: v.id("businesses") },
@@ -30,11 +31,24 @@ export const create = mutation({
     totalNet: v.number(),
   },
   handler: async (ctx, args) => {
-    return ctx.db.insert("payrollRuns", {
+    // Enforce free-plan limit BEFORE inserting; throws FREE_LIMIT_REACHED:payroll
+    // which the UI translates into an upgrade prompt.
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new Error("Unauthorized");
+    await assertWithinLimit(ctx, user, "payroll");
+
+    const runId = await ctx.db.insert("payrollRuns", {
       ...args,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
+
+    // Increment usage idempotently on the run id — a retried mutation with a
+    // fresh runId would count twice, but rerunning the same insert isn't
+    // possible (Convex assigns a new id per insert). This still deduplicates
+    // if any orchestration layer replays the increment step.
+    await incrementUsageIdempotent(ctx, args.userId, "payroll", `payroll:${runId}`);
+    return runId;
   },
 });
 

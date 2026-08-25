@@ -203,6 +203,7 @@ export default function App() {
   const isAdmin = isAdminEmail(currentUser?.email);
   const plan = isAdmin ? 'accountant' : (entitlement?.plan ?? 'free');
   const isPro = isAdmin || (entitlement?.isPro ?? false);
+  const isAccountant = isAdmin || (entitlement?.isAccountant ?? false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Firebase auth state sync
@@ -304,9 +305,17 @@ export default function App() {
   };
 
   /**
-   * Handle switching account type from settings or onboarding
+   * Handle switching account type from settings or onboarding.
+   * Accountant workspace is gated on an active Accountant subscription — free
+   * users see the Paddle checkout for the Accountant plan instead of being
+   * silently switched. Server-side mutations (see convex/usage.ts requirePlan)
+   * are the authoritative gate; this frontend check only shapes the UX.
    */
   const handleSwitchAccountType = (newType: AccountType) => {
+    if (newType === 'accountant' && !isAccountant) {
+      handleOpenCheckout('accountant');
+      return;
+    }
     setAccountType(newType);
     if (newType === 'accountant') {
       setActiveTab('accountant_dashboard');
@@ -1488,6 +1497,7 @@ export default function App() {
               onUpgrade={handleOpenCheckout}
               plan={plan}
               isPro={isPro}
+              currentUid={currentUser?.uid}
               onImportData={(newBiz, newEmps, importedRuns) => {
                 setBusiness(newBiz);
                 setEmployees(newEmps);
