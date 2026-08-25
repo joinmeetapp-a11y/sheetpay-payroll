@@ -38,11 +38,15 @@ export const createOrUpdate = mutation({
       .first();
 
     if (existing) {
-      await ctx.db.patch(existing._id, {
-        email: args.email,
-        displayName: args.displayName,
-        accountType: args.accountType,
-      });
+      // Refresh Firebase-sourced identity fields on every call. Do NOT
+      // overwrite accountType — that's set at signup and switched via a
+      // dedicated flow. This lets us safely call createOrUpdate on every
+      // page load / auth state change without clobbering user data.
+      const patch: Record<string, unknown> = { email: args.email };
+      if (args.displayName && args.displayName !== existing.displayName) {
+        patch.displayName = args.displayName;
+      }
+      await ctx.db.patch(existing._id, patch);
       return existing._id;
     }
 

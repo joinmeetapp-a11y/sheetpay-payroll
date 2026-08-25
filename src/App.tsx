@@ -206,13 +206,41 @@ export default function App() {
   const isAccountant = isAdmin || (entitlement?.isAccountant ?? false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  // Firebase auth state sync
+  // Firebase auth state sync. Runs on cold load / session restore too, not
+  // just after a fresh sign-in — so this is where we make sure a Convex user
+  // row exists regardless of which provider Firebase used (Google popup,
+  // Google redirect, email/password, future Apple/Microsoft). users.createOrUpdate
+  // is idempotent (by firebaseUid) and fires the welcome email exactly once
+  // via idempotencyKey `welcome:${userId}`, so calling it here every time is
+  // safe and closes the race where handleAuthComplete would otherwise miss
+  // firing after a redirect callback.
+  const upsertedUidsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         const name = user.displayName || user.email?.split('@')[0] || 'User';
         setCurrentUser({ uid: user.uid, email: user.email!, displayName: name });
         setUserName(name);
+
+        // Ensure a Convex user row exists for every authenticated Firebase
+        // user — regardless of provider. Guarded so we only round-trip once
+        // per uid per browser session.
+        if (user.email && !upsertedUidsRef.current.has(user.uid)) {
+          upsertedUidsRef.current.add(user.uid);
+          convexCreateOrUpdateUser({
+            firebaseUid: user.uid,
+            email: user.email,
+            displayName: name,
+            // Insert-time default only; users.createOrUpdate never overwrites
+            // accountType on existing rows.
+            accountType: 'business',
+          }).catch((err) => {
+            console.error('[auth] Convex user upsert failed:', err);
+            // Allow a future auth-state change to retry.
+            upsertedUidsRef.current.delete(user.uid);
+          });
+        }
+
         // Returning authenticated user — go straight to app if on landing
         // (but never hijack the /admin route).
         if (
