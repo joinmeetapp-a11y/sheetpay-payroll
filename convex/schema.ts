@@ -200,7 +200,78 @@ export default defineSchema({
     estimatedCostUsd: v.number(),
     userMessage: v.string(),
     toolsCalled: v.optional(v.array(v.string())),
+    action: v.optional(v.string()),
     createdAt: v.number(),
   })
-    .index("by_user_id", ["userId"]),
+    .index("by_user_id", ["userId"])
+    .index("by_business_id", ["businessId"])
+    .index("by_created_at", ["createdAt"]),
+
+  // Paddle webhook idempotency + audit. One row per delivered event_id.
+  // Existence of a row = event already processed; do not re-apply.
+  paddleEvents: defineTable({
+    eventId: v.string(),
+    eventType: v.string(),
+    status: v.string(), // 'processed' | 'ignored' | 'failed'
+    paddleCustomerId: v.optional(v.string()),
+    paddleSubscriptionId: v.optional(v.string()),
+    paddleTransactionId: v.optional(v.string()),
+    firebaseUid: v.optional(v.string()),
+    plan: v.optional(v.string()),
+    planStatus: v.optional(v.string()),
+    rawEvent: v.string(), // JSON string of the event body
+    errorMessage: v.optional(v.string()),
+    receivedAt: v.number(),
+  })
+    .index("by_event_id", ["eventId"])
+    .index("by_customer", ["paddleCustomerId"])
+    .index("by_subscription", ["paddleSubscriptionId"])
+    .index("by_received_at", ["receivedAt"]),
+
+  // Admin RBAC. Presence in this table (with a role) grants access. The email
+  // allowlist in convex/admin.ts is only used to seed the initial super_admin.
+  adminRoles: defineTable({
+    userId: v.id("users"),
+    email: v.string(),
+    role: v.union(
+      v.literal("super_admin"),
+      v.literal("admin"),
+      v.literal("finance"),
+      v.literal("support"),
+      v.literal("analytics")
+    ),
+    grantedByUserId: v.optional(v.id("users")),
+    grantedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_email", ["email"]),
+
+  // Immutable admin action log. Never update or delete rows here.
+  adminAuditLogs: defineTable({
+    actorUserId: v.id("users"),
+    actorEmail: v.string(),
+    action: v.string(), // e.g. 'user.plan.override' | 'admin.role.grant'
+    targetType: v.optional(v.string()),
+    targetId: v.optional(v.string()),
+    details: v.optional(v.string()), // JSON string
+    createdAt: v.number(),
+  })
+    .index("by_actor", ["actorUserId"])
+    .index("by_created_at", ["createdAt"]),
+
+  // Aggregated daily analytics (populated by a scheduled job — see
+  // convex/analyticsAggregation.ts). Read by the admin dashboard instead of
+  // scanning the users/payrollRuns tables at request time.
+  dailyMetrics: defineTable({
+    date: v.string(), // 'YYYY-MM-DD'
+    signups: v.number(),
+    paidConversions: v.number(),
+    churned: v.number(),
+    activePayingUsers: v.number(),
+    mrr: v.number(),
+    payrollsProcessed: v.number(),
+    payslipsGenerated: v.number(),
+    caylaMessages: v.number(),
+    caylaCostUsd: v.number(),
+  }).index("by_date", ["date"]),
 });

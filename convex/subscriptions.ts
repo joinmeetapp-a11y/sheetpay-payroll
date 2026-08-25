@@ -89,6 +89,68 @@ export const activateFromCheckout = mutation({
 });
 
 /**
+ * Idempotency guard for Paddle webhooks. Returns { alreadyProcessed: true } if
+ * we've already seen this event_id; otherwise records a placeholder row and
+ * returns { alreadyProcessed: false, docId }. The webhook handler then applies
+ * the effect and calls markPaddleEventProcessed / markPaddleEventFailed.
+ */
+export const beginPaddleEvent = internalMutation({
+  args: {
+    eventId: v.string(),
+    eventType: v.string(),
+    paddleCustomerId: v.optional(v.string()),
+    paddleSubscriptionId: v.optional(v.string()),
+    paddleTransactionId: v.optional(v.string()),
+    rawEvent: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("paddleEvents")
+      .withIndex("by_event_id", (q) => q.eq("eventId", args.eventId))
+      .first();
+    if (existing) {
+      // Allow a Paddle retry to reprocess if the previous attempt errored.
+      if (existing.status === "failed") {
+        await ctx.db.patch(existing._id, { status: "pending", errorMessage: undefined });
+        return { alreadyProcessed: false as const, docId: existing._id };
+      }
+      return { alreadyProcessed: true as const, docId: existing._id };
+    }
+    const docId = await ctx.db.insert("paddleEvents", {
+      eventId: args.eventId,
+      eventType: args.eventType,
+      status: "pending",
+      paddleCustomerId: args.paddleCustomerId,
+      paddleSubscriptionId: args.paddleSubscriptionId,
+      paddleTransactionId: args.paddleTransactionId,
+      rawEvent: args.rawEvent,
+      receivedAt: Date.now(),
+    });
+    return { alreadyProcessed: false as const, docId };
+  },
+});
+
+export const finishPaddleEvent = internalMutation({
+  args: {
+    docId: v.id("paddleEvents"),
+    status: v.string(), // 'processed' | 'ignored' | 'failed'
+    firebaseUid: v.optional(v.string()),
+    plan: v.optional(v.string()),
+    planStatus: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.docId, {
+      status: args.status,
+      firebaseUid: args.firebaseUid,
+      plan: args.plan,
+      planStatus: args.planStatus,
+      errorMessage: args.errorMessage,
+    });
+  },
+});
+
+/**
  * Authoritative plan update from the verified Paddle webhook (see convex/http.ts).
  * Matches the user by custom_data.firebaseUid first, then by Paddle customer id.
  */

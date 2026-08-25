@@ -202,46 +202,103 @@ http.route({
 
     const type: string = event?.event_type ?? "";
     const data = event?.data ?? {};
+    const eventId: string | undefined = event?.event_id ?? event?.notification_id;
 
-    // Only react to payment/subscription lifecycle events.
+    // Every delivered event must carry an id we can dedupe on. Without one we
+    // cannot guarantee idempotency, so we refuse to process it.
+    if (!eventId) {
+      return new Response("Missing event_id", { status: 400 });
+    }
+
+    // Full lifecycle coverage per the admin brief.
     const relevant = new Set([
       "transaction.completed",
       "transaction.paid",
       "subscription.created",
       "subscription.activated",
       "subscription.updated",
+      "subscription.past_due",
+      "subscription.paused",
+      "subscription.resumed",
       "subscription.canceled",
     ]);
+
+    const paddleCustomerId: string | undefined = data?.customer_id ?? undefined;
+    const paddleSubscriptionId: string | undefined = type.startsWith("subscription")
+      ? data?.id
+      : data?.subscription_id;
+    const paddleTransactionId: string | undefined = type.startsWith("transaction")
+      ? data?.id
+      : undefined;
+
+    // Idempotency guard — insert a placeholder for this event_id or bail if
+    // we've already handled it. This survives at-least-once webhook delivery.
+    const guard = await ctx.runMutation(internal.subscriptions.beginPaddleEvent, {
+      eventId,
+      eventType: type,
+      paddleCustomerId,
+      paddleSubscriptionId,
+      paddleTransactionId,
+      rawEvent: rawBody,
+    });
+    if (guard.alreadyProcessed) {
+      return new Response("Duplicate", { status: 200 });
+    }
+
     if (!relevant.has(type)) {
+      await ctx.runMutation(internal.subscriptions.finishPaddleEvent, {
+        docId: guard.docId,
+        status: "ignored",
+      });
       return new Response("Ignored", { status: 200 });
     }
 
     const customData = data?.custom_data ?? {};
     const firebaseUid: string | undefined = customData?.firebaseUid;
-    const paddleCustomerId: string | undefined = data?.customer_id ?? undefined;
 
-    // Resolve which plan this maps to: prefer custom_data, else the priced item.
     const priceId: string | undefined = data?.items?.[0]?.price?.id;
     const plan =
       (customData?.plan as "pro" | "accountant" | undefined) ??
       planForPriceId(priceId) ??
       "pro";
 
-    // Map Paddle status → our planStatus.
+    // Map Paddle event/status → our planStatus.
     let planStatus = "active";
     if (type === "subscription.canceled") planStatus = "canceled";
-    else if (data?.status === "past_due") planStatus = "past_due";
+    else if (type === "subscription.paused") planStatus = "paused";
+    else if (type === "subscription.past_due" || data?.status === "past_due")
+      planStatus = "past_due";
+    else if (type === "subscription.resumed" || type === "subscription.activated")
+      planStatus = "active";
     else if (data?.status === "trialing") planStatus = "active";
 
-    await ctx.runMutation(internal.subscriptions.applyPaddleEvent, {
-      firebaseUid,
-      paddleCustomerId,
-      plan,
-      planStatus,
-      paddleSubscriptionId:
-        type.startsWith("subscription") ? data?.id : data?.subscription_id,
-      paddleTransactionId: type.startsWith("transaction") ? data?.id : undefined,
-    });
+    try {
+      await ctx.runMutation(internal.subscriptions.applyPaddleEvent, {
+        firebaseUid,
+        paddleCustomerId,
+        plan,
+        planStatus,
+        paddleSubscriptionId,
+        paddleTransactionId,
+      });
+      await ctx.runMutation(internal.subscriptions.finishPaddleEvent, {
+        docId: guard.docId,
+        status: "processed",
+        firebaseUid,
+        plan,
+        planStatus,
+      });
+    } catch (err: any) {
+      await ctx.runMutation(internal.subscriptions.finishPaddleEvent, {
+        docId: guard.docId,
+        status: "failed",
+        errorMessage: String(err?.message ?? err),
+      });
+      // Return 500 so Paddle retries. Our idempotency guard already noted the
+      // event id, so we clear the failed row on retry — see beginPaddleEvent
+      // when the row status is 'failed' we allow reprocessing.
+      throw err;
+    }
 
     return new Response("OK", { status: 200 });
   }),

@@ -6,6 +6,16 @@ import { api } from '../../../convex/_generated/api';
 import { isAdminEmail, ADMIN_EMAILS } from '../../lib/admin';
 import { CaylaPenMascot } from '../CaylaPenMascot';
 import {
+  AdminUsersView,
+  AdminSubscriptionsView,
+  AdminRevenueView,
+  AdminGaAnalyticsView,
+  AdminSeoView,
+  AdminPayrollView,
+  AdminCaylaView,
+  AdminSystemView,
+} from './sections';
+import {
   AreaChart,
   Area,
   BarChart,
@@ -33,12 +43,49 @@ import {
   LogOut,
   RefreshCw,
   Crown,
+  LayoutDashboard,
+  Receipt,
+  BarChart3,
+  Search,
+  Wallet,
+  Bot,
+  ActivitySquare,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
   currentUser: { uid: string; email: string; displayName: string } | null;
+  currentPath: string;
   onNavigate: (path: string) => void;
   onEnsureUser: (uid: string, email: string, displayName: string) => Promise<void>;
+}
+
+type AdminSection =
+  | 'overview'
+  | 'users'
+  | 'subscriptions'
+  | 'revenue'
+  | 'analytics'
+  | 'seo'
+  | 'payroll'
+  | 'cayla'
+  | 'system';
+
+const NAV: { section: AdminSection; label: string; path: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { section: 'overview', label: 'Overview', path: '/admin', icon: LayoutDashboard },
+  { section: 'users', label: 'Users', path: '/admin/users', icon: Users },
+  { section: 'subscriptions', label: 'Subscriptions', path: '/admin/subscriptions', icon: Receipt },
+  { section: 'revenue', label: 'Revenue', path: '/admin/revenue', icon: DollarSign },
+  { section: 'analytics', label: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+  { section: 'seo', label: 'SEO', path: '/admin/seo', icon: Search },
+  { section: 'payroll', label: 'Payroll', path: '/admin/payroll', icon: Wallet },
+  { section: 'cayla', label: 'Cayla', path: '/admin/cayla', icon: Bot },
+  { section: 'system', label: 'System', path: '/admin/system', icon: ActivitySquare },
+];
+
+function sectionForPath(path: string): AdminSection {
+  const tail = path.replace(/^\/admin\/?/, '');
+  const found = NAV.find((n) => n.section === tail);
+  return found ? found.section : 'overview';
 }
 
 const money = (n: number) => `$${(n || 0).toLocaleString('en-US')}`;
@@ -46,15 +93,17 @@ const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentUser,
+  currentPath,
   onNavigate,
   onEnsureUser,
 }) => {
   const isAdmin = isAdminEmail(currentUser?.email);
+  const section = sectionForPath(currentPath);
 
   // Analytics query (returns { authorized:false } for non-admins)
   const analytics = useQuery(
     (api as any).admin.getAnalytics,
-    isAdmin ? { requesterUid: currentUser?.uid } : 'skip'
+    isAdmin && section === 'overview' ? { requesterUid: currentUser?.uid } : 'skip'
   ) as any;
 
   // ── Admin login gate ────────────────────────────────────────────────────────
@@ -251,10 +300,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </header>
 
+      {/* Section tabs */}
+      <nav className="sticky top-16 z-20 bg-white border-b border-slate-200 overflow-x-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex items-center gap-1">
+          {NAV.map((n) => {
+            const Icon = n.icon;
+            const active = section === n.section;
+            return (
+              <button
+                key={n.section}
+                onClick={() => onNavigate(n.path)}
+                className={`flex items-center gap-2 px-3 py-3 text-xs font-bold whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                  active
+                    ? 'border-emerald-600 text-slate-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {n.label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
       <main className="max-w-7xl mx-auto px-4 sm:px-8 py-6 space-y-6">
+        {section !== 'overview' && (
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-black text-slate-900 tracking-tight capitalize">{section}</h1>
+              <p className="text-xs text-slate-500">Real production data · Convex + Paddle + Google</p>
+            </div>
+          </div>
+        )}
+
+        {section === 'users' && <AdminUsersView requesterUid={currentUser?.uid} />}
+        {section === 'subscriptions' && <AdminSubscriptionsView requesterUid={currentUser?.uid} />}
+        {section === 'revenue' && <AdminRevenueView requesterUid={currentUser?.uid} />}
+        {section === 'analytics' && <AdminGaAnalyticsView requesterUid={currentUser?.uid} />}
+        {section === 'seo' && <AdminSeoView requesterUid={currentUser?.uid} />}
+        {section === 'payroll' && <AdminPayrollView requesterUid={currentUser?.uid} />}
+        {section === 'cayla' && <AdminCaylaView requesterUid={currentUser?.uid} />}
+        {section === 'system' && <AdminSystemView requesterUid={currentUser?.uid} />}
+
+        {section === 'overview' && (<>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight">Revenue &amp; Users Analytics</h1>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight">Overview</h1>
             <p className="text-xs text-slate-500">Real-time data from Convex · paid vs free breakdown</p>
           </div>
           {loading && (
@@ -434,6 +526,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </>
         )}
+        </>)}
       </main>
     </div>
   );

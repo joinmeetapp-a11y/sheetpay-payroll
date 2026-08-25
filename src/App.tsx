@@ -210,7 +210,7 @@ export default function App() {
         if (
           viewMode === 'landing' &&
           !pendingOnboardingData &&
-          window.location.pathname !== '/admin'
+          !window.location.pathname.startsWith('/admin')
         ) {
           setViewMode('app');
           navigate('/app');
@@ -905,12 +905,13 @@ export default function App() {
   }
 
   // -------------------------------------------------------------
-  // Router Branch 0: Admin Console (/admin)
+  // Router Branch 0: Admin Console (/admin, /admin/*)
   // -------------------------------------------------------------
-  if (currentPath === '/admin') {
+  if (currentPath === '/admin' || currentPath.startsWith('/admin/')) {
     return (
       <AdminDashboard
         currentUser={currentUser}
+        currentPath={currentPath}
         onNavigate={(path) => {
           if (path === '/app') setViewMode('app');
           else setViewMode('landing');
