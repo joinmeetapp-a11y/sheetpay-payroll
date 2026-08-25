@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -6,6 +6,8 @@ import {
   sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
 } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 import { CaylaPenMascot } from '../CaylaPenMascot';
@@ -107,12 +109,57 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setResetSent(false);
   };
 
+  // Complete a pending Google redirect flow — runs once on mount so users
+  // returning from https://sheetpay.app/__/auth/handler land back on the app
+  // signed in. Silent on cold loads (no redirect pending) and safe to call
+  // multiple times.
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(auth)
+      .then((cred) => {
+        if (cancelled || !cred?.user) return;
+        onAuthComplete(
+          cred.user.uid,
+          cred.user.email!,
+          cred.user.displayName || cred.user.email!.split('@')[0]
+        );
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        // Only surface if the redirect actually failed — no pending redirect is
+        // not an error state.
+        if (err?.code && err.code !== 'auth/no-auth-event') {
+          setError(getAuthError(err.code));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [onAuthComplete]);
+
   const handleGoogleSignIn = async () => {
     setError('');
     setIsLoading(true);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    // Mobile browsers and in-app WebViews (Instagram, Facebook, iOS Safari with
+    // strict cross-origin popup blocking) reliably fail signInWithPopup. Prefer
+    // redirect there; fall back to redirect from popup on the specific error
+    // codes Firebase raises when a popup cannot open.
+    const isMobile =
+      typeof navigator !== 'undefined' &&
+      /Android|iPhone|iPad|iPod|Mobile|IEMobile/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      try {
+        await signInWithRedirect(auth, provider);
+      } catch (err: any) {
+        setError(getAuthError(err.code));
+        setIsLoading(false);
+      }
+      return;
+    }
+
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
       const cred = await signInWithPopup(auth, provider);
       onAuthComplete(
         cred.user.uid,
@@ -120,10 +167,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         cred.user.displayName || cred.user.email!.split('@')[0]
       );
     } catch (err: any) {
-      // Ignore user-closed popup — no need to surface as an error.
+      // User dismissed popup — silent.
       if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
         setIsLoading(false);
         return;
+      }
+      // Popup blocked or unsupported → fall back to redirect.
+      if (
+        err?.code === 'auth/popup-blocked' ||
+        err?.code === 'auth/operation-not-supported-in-this-environment' ||
+        err?.code === 'auth/web-storage-unsupported'
+      ) {
+        try {
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirectErr: any) {
+          setError(getAuthError(redirectErr.code));
+          setIsLoading(false);
+          return;
+        }
       }
       setError(getAuthError(err.code));
       setIsLoading(false);
