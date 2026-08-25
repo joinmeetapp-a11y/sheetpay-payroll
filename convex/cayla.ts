@@ -271,10 +271,113 @@ const CAYLA_TOOLS = [
       },
     },
   },
+  // ── Reminders ─────────────────────────────────────────────────────────────
+  {
+    type: "function" as const,
+    function: {
+      name: "list_reminders",
+      description: "List all reminders the current user has scheduled (payroll, attendance, timesheet, etc.).",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "create_reminder",
+      description:
+        "Create a scheduled reminder. Only call this AFTER the user has explicitly confirmed the schedule in chat — describe the proposed reminder first, wait for a yes, then call this tool. Times are in the user's local timezone.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: ["payroll", "attendance", "timesheet", "payslip", "tax_deadline", "custom"],
+            description: "Which category of reminder this is",
+          },
+          title: { type: "string", description: "Short user-facing title, e.g. 'Run weekly payroll'" },
+          frequency: {
+            type: "string",
+            enum: ["once", "daily", "weekly", "biweekly", "monthly", "before_payroll"],
+          },
+          dayOfWeek: {
+            type: "number",
+            description: "0=Sun, 1=Mon, …, 6=Sat. Required for weekly/biweekly.",
+          },
+          dayOfMonth: { type: "number", description: "1-31. Required for monthly." },
+          scheduledTime: {
+            type: "string",
+            description: "HH:MM 24-hour, e.g. '15:00' for 3 PM, in the user's timezone.",
+          },
+          timezone: {
+            type: "string",
+            description:
+              "IANA timezone id, e.g. 'America/Port_of_Spain'. Default to the business's timezone if unknown.",
+          },
+          fireOnceAt: {
+            type: "number",
+            description: "For frequency='once' only: UTC ms when to fire.",
+          },
+          daysBeforePayroll: {
+            type: "number",
+            description: "For frequency='before_payroll': how many days ahead of the payroll date.",
+          },
+          deepLink: {
+            type: "string",
+            description:
+              "Where tapping the notification opens: '/payroll' | '/payroll/current' | '/attendance' | '/payslips' | '/cayla'.",
+          },
+          messageTemplate: {
+            type: "string",
+            description: "Optional custom body text. Leave blank to use the default template for `type`.",
+          },
+        },
+        required: ["type", "title", "frequency", "scheduledTime", "timezone"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "update_reminder",
+      description: "Change a reminder's schedule or state. Confirm with the user first.",
+      parameters: {
+        type: "object",
+        properties: {
+          reminderId: { type: "string" },
+          title: { type: "string" },
+          enabled: { type: "boolean" },
+          frequency: { type: "string" },
+          dayOfWeek: { type: "number" },
+          dayOfMonth: { type: "number" },
+          scheduledTime: { type: "string" },
+          timezone: { type: "string" },
+          deepLink: { type: "string" },
+          messageTemplate: { type: "string" },
+        },
+        required: ["reminderId"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "delete_reminder",
+      description: "Permanently delete a reminder. Always confirm with the user first — this is destructive.",
+      parameters: {
+        type: "object",
+        properties: { reminderId: { type: "string" } },
+        required: ["reminderId"],
+      },
+    },
+  },
 ];
 
 // Sensitive tools that require user confirmation before execution
-const SENSITIVE_TOOLS = new Set(["run_payroll", "send_all_payslips"]);
+const SENSITIVE_TOOLS = new Set([
+  "run_payroll",
+  "send_all_payslips",
+  "delete_reminder",
+]);
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 function buildSystemPrompt(businessName: string, currency: string, currencySymbol: string): string {

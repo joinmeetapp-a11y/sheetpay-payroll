@@ -512,6 +512,80 @@ export const executeTool = internalAction({
         };
       }
 
+      // ── Reminders ───────────────────────────────────────────────────────────
+      case "list_reminders": {
+        // Uses internal query (no requesterUid roundtrip needed here since
+        // we're already inside a trusted server-side executeTool with a
+        // validated userId).
+        const rows: any[] = await ctx.runQuery(internal.reminders.listRemindersForCayla, {
+          userId: userId as any,
+        });
+        if (rows.length === 0) return { reminders: [], message: "No reminders set up yet." };
+        return {
+          reminders: rows.map((r: any) => ({
+            id: r._id,
+            title: r.title,
+            type: r.type,
+            frequency: r.frequency,
+            dayOfWeek: r.dayOfWeek ?? null,
+            dayOfMonth: r.dayOfMonth ?? null,
+            scheduledTime: r.scheduledTime,
+            timezone: r.timezone,
+            enabled: r.enabled,
+            nextRunAt: r.nextRunAt,
+            deepLink: r.deepLink ?? null,
+          })),
+        };
+      }
+
+      case "create_reminder": {
+        try {
+          const { id } = await ctx.runMutation(internal.reminders.createReminderForCayla, {
+            userId: userId as any,
+            type: args.type,
+            title: args.title,
+            frequency: args.frequency,
+            dayOfWeek: args.dayOfWeek,
+            dayOfMonth: args.dayOfMonth,
+            scheduledTime: args.scheduledTime,
+            timezone: args.timezone,
+            fireOnceAt: args.fireOnceAt,
+            daysBeforePayroll: args.daysBeforePayroll,
+            deepLink: args.deepLink,
+            messageTemplate: args.messageTemplate,
+          });
+          return { ok: true, reminderId: id, message: `Reminder "${args.title}" saved.` };
+        } catch (err: any) {
+          return { ok: false, error: String(err?.message ?? err) };
+        }
+      }
+
+      case "update_reminder": {
+        try {
+          const { reminderId, ...patch } = args;
+          await ctx.runMutation(internal.reminders.updateReminderForCayla, {
+            userId: userId as any,
+            reminderId: reminderId as any,
+            patch,
+          });
+          return { ok: true, message: "Reminder updated." };
+        } catch (err: any) {
+          return { ok: false, error: String(err?.message ?? err) };
+        }
+      }
+
+      case "delete_reminder": {
+        try {
+          await ctx.runMutation(internal.reminders.deleteReminderForCayla, {
+            userId: userId as any,
+            reminderId: args.reminderId as any,
+          });
+          return { ok: true, message: "Reminder deleted." };
+        } catch (err: any) {
+          return { ok: false, error: String(err?.message ?? err) };
+        }
+      }
+
       default:
         return { error: `Unknown tool: ${toolName}` };
     }

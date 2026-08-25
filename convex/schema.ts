@@ -259,6 +259,86 @@ export default defineSchema({
     .index("by_actor", ["actorUserId"])
     .index("by_created_at", ["createdAt"]),
 
+  // ── Reminders ──────────────────────────────────────────────────────────────
+  // User-scheduled prompts (created via Cayla or the /payroll/reminders UI).
+  // The cron finds due rows via the by_next_run_at index — never scans the
+  // whole table.
+  reminders: defineTable({
+    userId: v.id("users"),
+    businessId: v.optional(v.id("businesses")),
+    // 'payroll' | 'attendance' | 'timesheet' | 'payslip' | 'tax_deadline' | 'custom'
+    type: v.string(),
+    title: v.string(),
+    // Optional free-form instructions the user gave Cayla, used only for
+    // logging/audit — the message the user receives comes from `messageTemplate`.
+    instructions: v.optional(v.string()),
+    messageTemplate: v.optional(v.string()),
+    // 'once' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'before_payroll'
+    frequency: v.string(),
+    // 0=Sun … 6=Sat, for weekly/biweekly
+    dayOfWeek: v.optional(v.number()),
+    // 1–31, for monthly
+    dayOfMonth: v.optional(v.number()),
+    // 'HH:MM' in the user's timezone
+    scheduledTime: v.string(),
+    // IANA timezone id, e.g. 'America/Port_of_Spain'
+    timezone: v.string(),
+    // For 'before_payroll' — how many days before to send.
+    daysBeforePayroll: v.optional(v.number()),
+    // For 'once' — the exact UTC ms to fire.
+    fireOnceAt: v.optional(v.number()),
+    // Deep-link target relative path, e.g. '/payroll/current'
+    deepLink: v.optional(v.string()),
+    // Next UTC ms this reminder should fire. Cron reads this via
+    // by_next_run_at (asc) with q.lte("nextRunAt", now).
+    nextRunAt: v.number(),
+    lastRunAt: v.optional(v.number()),
+    enabled: v.boolean(),
+    createdByUserId: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_business", ["businessId"])
+    .index("by_next_run_at", ["nextRunAt"])
+    .index("by_enabled_next_run", ["enabled", "nextRunAt"]),
+
+  // One row per scheduled occurrence — the idempotency ledger. Before FCM
+  // send we look up (reminderId, occurrenceId); if a row exists we skip.
+  reminderOccurrences: defineTable({
+    reminderId: v.id("reminders"),
+    userId: v.id("users"),
+    occurrenceId: v.string(), // e.g. `${reminderId}:${scheduledFor}`
+    scheduledFor: v.number(),
+    sentAt: v.optional(v.number()),
+    // 'pending' | 'sent' | 'skipped' | 'failed' | 'suppressed'
+    status: v.string(),
+    fcmMessageIds: v.optional(v.array(v.string())),
+    skippedReason: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    attempts: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_reminder", ["reminderId"])
+    .index("by_occurrence", ["occurrenceId"])
+    .index("by_user", ["userId"]),
+
+  // Per-device FCM registration tokens.
+  fcmDeviceTokens: defineTable({
+    userId: v.id("users"),
+    token: v.string(),
+    platform: v.optional(v.string()), // 'web' | 'ios' | 'android'
+    userAgent: v.optional(v.string()),
+    // Set when the token is confirmed invalid by Firebase (unregistered, etc.)
+    // Disabled tokens are not deleted immediately — kept for audit.
+    disabledAt: v.optional(v.number()),
+    disabledReason: v.optional(v.string()),
+    lastSeenAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_token", ["token"]),
+
   // Aggregated daily analytics (populated by a scheduled job — see
   // convex/analyticsAggregation.ts). Read by the admin dashboard instead of
   // scanning the users/payrollRuns tables at request time.

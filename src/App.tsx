@@ -71,6 +71,7 @@ import { UpgradeBanner } from './components/UpgradeBanner';
 import { ProGate } from './components/ProGate';
 import { openPaddleCheckout, isPaddleConfigured } from './lib/paddle';
 import { AdminDashboard } from './components/admin/AdminDashboard';
+import { PayrollReminders } from './components/reminders/PayrollReminders';
 import { InviteAcceptPage } from './components/invite/InviteAcceptPage';
 import { EmailPreviewPage } from './components/dev/EmailPreviewPage';
 import { isAdminEmail } from './lib/admin';
@@ -210,7 +211,8 @@ export default function App() {
         if (
           viewMode === 'landing' &&
           !pendingOnboardingData &&
-          !window.location.pathname.startsWith('/admin')
+          !window.location.pathname.startsWith('/admin') &&
+          !window.location.pathname.startsWith('/payroll/')
         ) {
           setViewMode('app');
           navigate('/app');
@@ -928,6 +930,27 @@ export default function App() {
           } catch {
             /* Convex not configured — analytics will show unauthorized until reachable */
           }
+        }}
+      />
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Router Branch 0.5: Payroll Reminders (/payroll/reminders)
+  // -------------------------------------------------------------
+  if (currentPath === '/payroll/reminders') {
+    return (
+      <PayrollReminders
+        currentUser={currentUser}
+        onNavigate={(path) => {
+          if (path === '/app') setViewMode('app');
+          navigate(path);
+        }}
+        onOpenCayla={() => {
+          setViewMode('app');
+          navigate('/app');
+          // Cayla is opened from within the app via its normal trigger; the
+          // user lands on the workspace and can tap the Cayla button.
         }}
       />
     );
