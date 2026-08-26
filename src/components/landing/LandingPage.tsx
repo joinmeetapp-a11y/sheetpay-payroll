@@ -1944,15 +1944,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-16">
           {/* Section Header */}
           <div className="text-center max-w-3xl mx-auto space-y-4">
-            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-emerald-800 bg-emerald-100 px-4 py-1.5 rounded-full border border-emerald-200">
-              Simple, Transparent Pricing
+            <span className="inline-flex items-center gap-2 text-xs sm:text-sm font-black uppercase tracking-widest text-white bg-gradient-to-r from-rose-600 to-orange-500 px-4 py-1.5 rounded-full border border-rose-400 shadow-md shadow-rose-500/30">
+              <Sparkles className="w-3.5 h-3.5" />
+              Launch Special — 50% Off
             </span>
             <h2 className="text-3xl sm:text-5xl lg:text-6xl font-black text-slate-950 tracking-tight leading-tight">
               Try Cayla free on real payroll. <br className="hidden sm:inline" />
               <span className="text-emerald-600">Upgrade when you grow.</span>
             </h2>
             <p className="text-slate-600 text-sm sm:text-lg font-medium leading-relaxed max-w-2xl mx-auto">
-              No hidden per-employee fees or surprise add-ons. Start free with automatic statutory calculations, or unlock unlimited payroll volume.
+              No hidden per-employee fees or surprise add-ons. Start free with automatic statutory calculations, or unlock unlimited payroll volume — now 50% off during our launch.
+            </p>
+            <p className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500">
+              All prices are in USD
             </p>
           </div>
 
@@ -1985,8 +1989,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span className="font-semibold text-slate-900">Upgrade anytime to Business</span>
                   </div>
-                  <span className="text-emerald-700 font-black whitespace-nowrap text-xs">
-                    $97/mo &rarr;
+                  <span className="whitespace-nowrap flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 line-through">$194</span>
+                    <span className="text-emerald-700 font-black text-xs">$97/mo &rarr;</span>
                   </span>
                 </div>
 
@@ -2040,10 +2045,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <div>
                   <h3 className="text-2xl font-black text-slate-950">Business</h3>
                   <p className="text-sm text-slate-600 font-medium mt-1">Unlimited payroll, payslips &amp; full Cayla AI.</p>
-                  <div className="mt-4 flex items-baseline gap-1">
+                  <div className="mt-4 flex items-center gap-2 flex-wrap">
+                    <span className="text-lg font-bold text-slate-400 line-through">$194/month</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-white bg-rose-600 px-2 py-0.5 rounded-full">
+                      50% Off
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-1">
                     <span className="text-4xl sm:text-5xl font-black text-slate-950">$97</span>
                     <span className="text-sm font-bold text-slate-500">/month</span>
                   </div>
+                  <p className="text-[11px] font-semibold text-rose-700 mt-1">Launch Special pricing</p>
                 </div>
 
                 {/* Bullet Points */}
@@ -2100,10 +2112,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <div>
                   <h3 className="text-2xl font-black text-slate-950">Accountant</h3>
                   <p className="text-sm text-slate-500 font-medium mt-1">Multi-client command center for accounting firms.</p>
-                  <div className="mt-4 flex items-baseline gap-1">
+                  <div className="mt-4 flex items-center gap-2 flex-wrap">
+                    <span className="text-lg font-bold text-slate-400 line-through">$394/month</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-white bg-rose-600 px-2 py-0.5 rounded-full">
+                      50% Off
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-1">
                     <span className="text-4xl sm:text-5xl font-black text-slate-950">$197</span>
                     <span className="text-sm font-bold text-slate-500">/month</span>
                   </div>
+                  <p className="text-[11px] font-semibold text-rose-700 mt-1">Launch Special pricing</p>
                 </div>
 
                 {/* Bullet Points */}
@@ -2211,8 +2230,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <tr className="hover:bg-slate-50/60 transition-colors font-bold">
                     <td className="py-3.5 px-4 text-slate-900">Price</td>
                     <td className="py-3.5 px-4 text-center text-slate-900 bg-slate-50/40">$0</td>
-                    <td className="py-3.5 px-4 text-center text-emerald-700 bg-emerald-50/30">$97/mo</td>
-                    <td className="py-3.5 px-4 text-center text-slate-900 bg-slate-50/40 font-bold">$197/mo</td>
+                    <td className="py-3.5 px-4 text-center bg-emerald-50/30">
+                      <div className="flex flex-col items-center leading-tight">
+                        <span className="text-[10px] font-bold text-slate-400 line-through">$194/mo</span>
+                        <span className="text-emerald-700 font-bold">$97/mo</span>
+                        <span className="text-[9px] font-black uppercase text-rose-600">50% off</span>
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4 text-center bg-slate-50/40 font-bold">
+                      <div className="flex flex-col items-center leading-tight">
+                        <span className="text-[10px] font-bold text-slate-400 line-through">$394/mo</span>
+                        <span className="text-slate-900">$197/mo</span>
+                        <span className="text-[9px] font-black uppercase text-rose-600">50% off</span>
+                      </div>
+                    </td>
                   </tr>
                   <tr className="hover:bg-slate-50/60 transition-colors">
                     <td className="py-3 px-4 font-medium text-slate-700">Employees</td>
@@ -2391,6 +2422,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div className="font-black text-slate-900 uppercase tracking-wider text-xs">Product</div>
               <ul className="space-y-2.5 font-semibold">
                 <li><a href="#pricing" className="text-emerald-700 font-bold hover:text-emerald-800 transition-colors">Pricing &amp; Plans</a></li>
+                <li>
+                  <button
+                    onClick={() => onNavigate('/accountants')}
+                    className="text-left text-emerald-700 font-bold hover:text-emerald-800 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>For Accountants</span>
+                    <span className="text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-md">New</span>
+                  </button>
+                </li>
                 <li><a href="#how-it-works" className="hover:text-emerald-700 transition-colors">How Cayla Works</a></li>
                 <li><a href="#features" className="hover:text-emerald-700 transition-colors">Voice Payroll</a></li>
                 <li><a href="#caribbean-reviews" className="hover:text-emerald-700 transition-colors">Caribbean Reviews</a></li>
@@ -2513,6 +2553,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
       </footer>
+
+      {/* ------------------------------------------------------------- */}
+      {/* BIG BOLD SHEETPAY BRANDING                                    */}
+      {/* ------------------------------------------------------------- */}
+      <section className="relative bg-gradient-to-b from-white via-emerald-50/60 to-emerald-100/40 border-t border-emerald-100 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none opacity-40" aria-hidden="true">
+          <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-emerald-200/40 blur-3xl" />
+          <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full bg-emerald-300/30 blur-3xl" />
+        </div>
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20 md:py-24 flex flex-col items-center justify-center gap-6 text-center">
+          <div className="flex items-center gap-3 sm:gap-5 md:gap-6">
+            <div className="w-14 h-14 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-3xl bg-white border-2 border-emerald-200 flex items-center justify-center shadow-xl shadow-emerald-600/10">
+              <CaylaPenMascot size={64} />
+            </div>
+            <span className="font-black tracking-tighter text-slate-950 leading-none text-[3.5rem] sm:text-7xl md:text-8xl lg:text-9xl">
+              Sheetpay
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-black uppercase tracking-[0.35em] text-emerald-700">
+            <span className="h-px w-8 sm:w-12 bg-emerald-400" />
+            Powered by Cayla Agent
+            <span className="h-px w-8 sm:w-12 bg-emerald-400" />
+          </div>
+          <p className="text-sm sm:text-base font-semibold text-slate-500 max-w-xl">
+            Conversational payroll for the Caribbean and beyond.
+          </p>
+        </div>
+      </section>
 
       {/* Nia support widget — anonymous mode on landing */}
       <NiaWidget variant="landing" currentPage="landing" />
