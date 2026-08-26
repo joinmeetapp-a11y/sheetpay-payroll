@@ -78,6 +78,8 @@ import { InviteAcceptPage } from './components/invite/InviteAcceptPage';
 import { EmailPreviewPage } from './components/dev/EmailPreviewPage';
 import { isAdminEmail } from './lib/admin';
 import { LandingPage } from './components/landing/LandingPage';
+import { AccountantLandingPage } from './components/landing/AccountantLandingPage';
+import { GuestAccountantExperience } from './components/guest/GuestAccountantExperience';
 import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
 import { CalculatorPage } from './components/calculators/CalculatorPage';
 import { CalculatorHub } from './components/calculators/CalculatorHub';
@@ -1159,6 +1161,20 @@ export default function App() {
     const successUrl = `${origin}/app?upgraded=${checkoutPlan}`;
     const customData: Record<string, string> = { plan: checkoutPlan };
     if (currentUser?.uid) customData.firebaseUid = currentUser.uid;
+    // If the guest funnel initiated this checkout, propagate the anonymous
+    // session id so the Paddle webhook can migrate the guest client / employees
+    // / payroll / branding into the paying user's account after payment lands.
+    try {
+      const guestSessionId =
+        (window as any).__sheetpayGuestSessionId ||
+        window.sessionStorage.getItem('sheetpay_guest_session_id') ||
+        window.sessionStorage.getItem('sheetpay_guest_session_id_hint');
+      if (guestSessionId && typeof guestSessionId === 'string') {
+        customData.guestSessionId = guestSessionId;
+      }
+    } catch {
+      /* ignore — Paddle just proceeds without the guest link */
+    }
 
     // Primary: Paddle.js overlay checkout — opens directly in the browser and
     // does not depend on the Convex backend being reachable.
@@ -1201,6 +1217,79 @@ export default function App() {
       alert('Checkout is temporarily unavailable. Please try again in a moment or contact support.');
     }
   };
+
+  // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // Router Branch 4.4: Guest Accountant Dashboard (/try-accountant-dashboard)
+  //
+  // Public, unauthenticated preview of the REAL accountant dashboard. Enforces
+  // guest limits (1 client, 50 employees, 1 payroll run) via the guest shell
+  // and convex/guestDashboard.ts. Never break /app or /accountants.
+  // -------------------------------------------------------------
+  if (currentPath === '/try-accountant-dashboard' || currentPath === '/accountant-dashboard') {
+    return (
+      <GuestAccountantExperience
+        onNavigate={navigate}
+        onSignIn={() => {
+          setAuthMode('signin');
+          setViewMode('auth');
+        }}
+        onUnlock={(plan, guestSessionId) => {
+          // The Paddle webhook (convex/paddle_webhook.ts, follow-up task) will
+          // look up the guestSessions row by this id in custom_data and copy
+          // the client/employees/payroll into the paying user's real tables.
+          try {
+            (window as any).__sheetpayGuestSessionId = guestSessionId;
+            window.sessionStorage.setItem('sheetpay_guest_session_id_hint', guestSessionId);
+          } catch {
+            /* ignore */
+          }
+          // Paddle only distinguishes monthly/yearly on the price id; the
+          // entitlement plan itself remains 'accountant'. Once a yearly price
+          // is provisioned, add it to PADDLE_PRICE_IDS and pass it through here.
+          handleOpenCheckout('accountant');
+        }}
+      />
+    );
+  }
+
+  // Router Branch 4.5: Accountant Acquisition Funnel (/accountants)
+  //
+  // Dedicated Cayla-first acquisition page that lets accountants run a real
+  // sample payroll (using the deterministic tax engine) BEFORE paying. The
+  // paywall only appears when they try to Download / Print / WhatsApp the
+  // completed payslips. Checkout reuses handleOpenCheckout('accountant') so
+  // Paddle + Convex entitlement flow is identical to the rest of Sheetpay.
+  // -------------------------------------------------------------
+  if (currentPath === '/accountants') {
+    return (
+      <div className="min-h-screen bg-white">
+        <AccountantLandingPage
+          onNavigate={navigate}
+          onLaunchApp={() => {
+            setViewMode('app');
+            navigate('/app');
+          }}
+          onStartOnboarding={() => setIsOnboardingOpen(true)}
+          onLogin={() => {
+            setAuthMode('signin');
+            setViewMode('auth');
+          }}
+          onChoosePlan={handleOpenCheckout}
+        />
+
+        {isOnboardingOpen && (
+          <OnboardingFlow
+            initialBusiness={business}
+            initialEmployees={visibleEmployees}
+            initialAccountType="accountant"
+            onComplete={handleOnboardingComplete}
+            onCancel={() => setIsOnboardingOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
 
   // -------------------------------------------------------------
   // Router Branch 5a: Auth Screen (after onboarding completes)

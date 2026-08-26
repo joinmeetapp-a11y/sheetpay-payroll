@@ -437,4 +437,46 @@ export default defineSchema({
     caylaMessages: v.number(),
     caylaCostUsd: v.number(),
   }).index("by_date", ["date"]),
+
+  // Guest accountant funnel — one row per anonymous visitor exploring the
+  // /try-accountant-dashboard experience. Holds the client, employees, payroll
+  // run, branding and Cayla state the guest built up BEFORE paying, so nothing
+  // is lost when they authenticate and Paddle unlocks the full account.
+  //
+  // Limits (also enforced in convex/guestDashboard.ts, not just UI):
+  //   guestClientsUsed      <= 1
+  //   guestEmployeesUsed    <= 50
+  //   guestPayrollRunsUsed  <= 1
+  //
+  // `converted` flips to true once the linked Paddle payment lands and the
+  // data has been copied into the paying user's businesses/employees/payrollRuns.
+  guestSessions: defineTable({
+    anonSessionId: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    expiresAt: v.number(),
+    converted: v.optional(v.boolean()),
+    convertedUserId: v.optional(v.id("users")),
+    convertedAt: v.optional(v.number()),
+    guestClientsUsed: v.number(),
+    guestEmployeesUsed: v.number(),
+    guestPayrollRunsUsed: v.number(),
+    ocrScansUsed: v.number(),
+    // Serialized JSON blobs so we don't have to duplicate the shape of every
+    // domain type. Shape matches src/types.ts (AccountantClient, Employee,
+    // PayrollRun, PayslipCustomization).
+    client: v.optional(v.any()),
+    employees: v.optional(v.array(v.any())),
+    payrollRun: v.optional(v.any()),
+    payslipCustomization: v.optional(v.any()),
+    caylaMessages: v.optional(v.array(v.any())),
+    // The last locked action the user attempted (download / print / whatsapp /
+    // add_client_2 / run_payroll_2). Restored after checkout so the same
+    // action resumes on the paid dashboard.
+    pendingAction: v.optional(v.string()),
+    utm: v.optional(v.any()),
+  })
+    .index("by_anon", ["anonSessionId"])
+    .index("by_converted_user", ["convertedUserId"])
+    .index("by_expires_at", ["expiresAt"]),
 });
