@@ -346,15 +346,14 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     };
   }, [activeClient]);
 
-  // ── Render: hero ───────────────────────────────────────────────────────
-  if (!hasEntered && clients.length === 0) {
-    return <HeroScreen onStart={() => setHasEntered(true)} onSignIn={onSignIn} onNavigate={onNavigate} />;
-  }
-
   // ── Tab click interception ─────────────────────────────────────────────
   // The real Sidebar / MobileBottomNav emit every accountant tab id. We map
   // guest-supported ids straight through and open the paywall for paid-only
   // ones (batch payroll, firm staff, portfolio reports, practice settings).
+  //
+  // NOTE: This hook MUST stay above the early hero return below — moving it
+  // after the return causes React error #310 (hook count varies across
+  // renders of the same component).
   const handleTabChange = useCallback(
     (nextTab: string) => {
       const guestSupported: GuestTab[] = [
@@ -372,6 +371,11 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     },
     [triggerPaywall],
   );
+
+  // ── Render: hero ───────────────────────────────────────────────────────
+  if (!hasEntered && clients.length === 0) {
+    return <HeroScreen onStart={() => setHasEntered(true)} onSignIn={onSignIn} onNavigate={onNavigate} />;
+  }
 
   // ── Render: guest dashboard shell ──────────────────────────────────────
   return (
