@@ -25,13 +25,10 @@ import { api } from '../../../convex/_generated/api';
 import {
   ArrowRight,
   Sparkles,
-  ShieldCheck,
-  Zap,
   CheckCircle2,
   Building2,
   Users,
   PlayCircle,
-  LayoutDashboard,
   LogIn,
 } from 'lucide-react';
 import { CaylaPenMascot } from '../CaylaPenMascot';
@@ -57,6 +54,11 @@ import { AddClientModal } from '../accountant/AddClientModal';
 import { EmployeesView } from '../tabs/EmployeesView';
 import { PayrollWorkspace } from '../PayrollWorkspace';
 import { recalculatePayrollRun } from '../../lib/taxEngine';
+import { Sidebar } from '../Sidebar';
+import { MobileBottomNav } from '../MobileViews';
+import { ReviewRatingBadge } from '../landing/ReviewRatingBadge';
+import { AccountantMarketingFooter } from '../landing/AccountantMarketingFooter';
+import { SheetpayBigBranding } from '../landing/SheetpayBigBranding';
 
 interface Props {
   onNavigate: (path: string) => void;
@@ -64,7 +66,16 @@ interface Props {
   onUnlock: (plan: 'accountant' | 'accountant_yearly', guestSessionId: string) => void;
 }
 
-type GuestTab = 'dashboard' | 'clients' | 'employees' | 'payroll';
+/**
+ * Guest tab ids match the production Accountant sidebar ids so the real
+ * Sidebar and MobileBottomNav components render as-is. Paid-only sidebar
+ * entries (batch / team / reports / settings) trigger the paywall.
+ */
+type GuestTab =
+  | 'accountant_dashboard'
+  | 'accountant_clients'
+  | 'employees'
+  | 'payroll_runs';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -96,7 +107,8 @@ export const GuestAccountantExperience: React.FC<Props> = ({
 
   // ── UI state ───────────────────────────────────────────────────────────
   const [hasEntered, setHasEntered] = useState(false);
-  const [tab, setTab] = useState<GuestTab>('dashboard');
+  const [tab, setTab] = useState<GuestTab>('accountant_dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paywall, setPaywall] = useState<{ reason: GuestLockedAction | 'generic' } | null>(
     null,
   );
@@ -339,103 +351,144 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     return <HeroScreen onStart={() => setHasEntered(true)} onSignIn={onSignIn} onNavigate={onNavigate} />;
   }
 
+  // ── Tab click interception ─────────────────────────────────────────────
+  // The real Sidebar / MobileBottomNav emit every accountant tab id. We map
+  // guest-supported ids straight through and open the paywall for paid-only
+  // ones (batch payroll, firm staff, portfolio reports, practice settings).
+  const handleTabChange = useCallback(
+    (nextTab: string) => {
+      const guestSupported: GuestTab[] = [
+        'accountant_dashboard',
+        'accountant_clients',
+        'employees',
+        'payroll_runs',
+      ];
+      if (guestSupported.includes(nextTab as GuestTab)) {
+        setTab(nextTab as GuestTab);
+        return;
+      }
+      // Paid-only tab — surface the paywall instead of dropping the click.
+      triggerPaywall('download_all_payslips');
+    },
+    [triggerPaywall],
+  );
+
   // ── Render: guest dashboard shell ──────────────────────────────────────
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col md:flex-row antialiased">
       <meta name="robots" content="noindex, nofollow" />
-      <TopBar
-        onNavigate={onNavigate}
-        onSignIn={onSignIn}
-        onUnlock={() => triggerPaywall('download_all_payslips')}
+
+      {/* Real Sidebar in accountant mode — collapsible on desktop. Paid-only
+          tabs route through handleTabChange which opens the paywall. */}
+      <Sidebar
+        activeTab={tab}
+        onTabChange={handleTabChange}
+        isPayrollActive={!!activePayroll}
+        onOpenCayla={() => setTab('accountant_dashboard')}
+        accountType="accountant"
+        clientsCount={clientsUsed}
+        employeesCount={employeeCount}
+        activeClientName={activeClient?.companyName || activeClient?.name || 'Your Client'}
+        onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
       />
 
-      <GuestLimitsBar
-        clientsUsed={clientsUsed}
-        employeesUsed={employeeCount}
-        payrollRunsUsed={payrollRunsUsed}
-        onUpgrade={() => triggerPaywall('download_all_payslips')}
+      <div className="flex-1 flex flex-col min-w-0">
+        <GuestLimitsBar
+          clientsUsed={clientsUsed}
+          employeesUsed={employeeCount}
+          payrollRunsUsed={payrollRunsUsed}
+          onUpgrade={() => triggerPaywall('download_all_payslips')}
+        />
+
+        <main className="flex-1 pb-20 md:pb-6">
+          {tab === 'accountant_dashboard' && (
+            <AccountantDashboard
+              userName="Guest Accountant"
+              clients={clients}
+              teamMembers={[]}
+              attentionItems={[]}
+              batchJobs={[]}
+              activeClient={activeClient}
+              onSelectClient={(c) => {
+                if (typeof c === 'object' && c) setTab('employees');
+              }}
+              onRunBatchPayroll={() => triggerPaywall('run_payroll_2')}
+              onAddNewClient={handleAddClient}
+              onOpenAddClient={requestAddClient}
+              onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
+              onOpenInviteClient={() => triggerPaywall('download_all_payslips')}
+              onQuickExecuteCayla={() => {
+                if (!activeClient) requestAddClient();
+                else if (employeeCount === 0) setTab('employees');
+                else if (!activePayroll) handleStartPayroll();
+              }}
+              onUpdateClients={(updated) => setClients(updated.slice(0, 1))}
+              messages={[]}
+              isProcessing={false}
+            />
+          )}
+
+          {tab === 'accountant_clients' && (
+            <ClientsView
+              clients={clients}
+              onSelectClient={() => setTab('employees')}
+              onAddNewClient={handleAddClient}
+              onUpdateClients={(updated) => setClients(updated.slice(0, 1))}
+            />
+          )}
+
+          {tab === 'employees' && (
+            <EmployeesView
+              employees={activeClient?.employees ?? []}
+              business={businessFromClient}
+              onUpdateEmployee={handleUpdateEmployee}
+              onAddEmployee={(emp) => {
+                handleAddEmployees([emp]);
+              }}
+              onViewPayslip={() => triggerPaywall('download_payslip')}
+            />
+          )}
+
+          {tab === 'payroll_runs' && activePayroll && activeClient && (
+            <PayrollWorkspace
+              payroll={activePayroll}
+              selectedEmployeeId={selectedEmployeeId || activePayroll.employees[0]?.id || ''}
+              onSelectEmployee={setSelectedEmployeeId}
+              onUpdateEmployee={handleUpdateEmployee}
+              onFinalizePayroll={handleFinalizePayroll}
+              onOpenAudit={() => {}}
+              business={businessFromClient}
+              customization={customization}
+              onUpdateCustomization={handleUpdateCustomization}
+              onOpenEmailModal={() => triggerPaywall('whatsapp_share')}
+              onOpenBusinessEditModal={() => {}}
+            />
+          )}
+
+          {tab === 'payroll_runs' && !activePayroll && (
+            <EmptyPayroll
+              hasClient={!!activeClient}
+              hasEmployees={employeeCount > 0}
+              onAddClient={requestAddClient}
+              onGoEmployees={() => setTab('employees')}
+              onRunPayroll={handleStartPayroll}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Mobile floating bottom pill nav — same one paying accountants use */}
+      <MobileBottomNav
+        activeTab={tab}
+        onTabChange={handleTabChange}
+        onCaylaClick={() => setTab('accountant_dashboard')}
+        accountType="accountant"
+        onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
+        clientsCount={clientsUsed}
+        onOpenLanding={() => onNavigate('/')}
       />
-
-      <GuestTabs tab={tab} onChange={setTab} hasPayroll={!!activePayroll} />
-
-      <main className="max-w-7xl mx-auto">
-        {tab === 'dashboard' && (
-          <AccountantDashboard
-            userName="Guest Accountant"
-            clients={clients}
-            teamMembers={[]}
-            attentionItems={[]}
-            batchJobs={[]}
-            activeClient={activeClient}
-            onSelectClient={(c) => {
-              if (typeof c === 'object' && c) setTab('employees');
-            }}
-            onRunBatchPayroll={() => triggerPaywall('run_payroll_2')}
-            onAddNewClient={handleAddClient}
-            onOpenAddClient={requestAddClient}
-            onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
-            onOpenInviteClient={() => triggerPaywall('download_all_payslips')}
-            onQuickExecuteCayla={() => {
-              /* Anonymous Cayla NL is a follow-up task; for now nudge the user. */
-              if (!activeClient) requestAddClient();
-              else if (employeeCount === 0) setTab('employees');
-              else if (!activePayroll) handleStartPayroll();
-            }}
-            onUpdateClients={(updated) => setClients(updated.slice(0, 1))}
-            messages={[]}
-            isProcessing={false}
-          />
-        )}
-
-        {tab === 'clients' && (
-          <ClientsView
-            clients={clients}
-            onSelectClient={() => setTab('employees')}
-            onAddNewClient={handleAddClient}
-            onUpdateClients={(updated) => setClients(updated.slice(0, 1))}
-          />
-        )}
-
-        {tab === 'employees' && (
-          <EmployeesView
-            employees={activeClient?.employees ?? []}
-            business={businessFromClient}
-            onUpdateEmployee={handleUpdateEmployee}
-            onAddEmployee={(emp) => {
-              // Single-employee add path. handleAddEmployees enforces the 50-cap
-              // and opens the paywall if the addition would push us past it.
-              handleAddEmployees([emp]);
-            }}
-            onViewPayslip={() => triggerPaywall('download_payslip')}
-          />
-        )}
-
-        {tab === 'payroll' && activePayroll && activeClient && (
-          <PayrollWorkspace
-            payroll={activePayroll}
-            selectedEmployeeId={selectedEmployeeId || activePayroll.employees[0]?.id || ''}
-            onSelectEmployee={setSelectedEmployeeId}
-            onUpdateEmployee={handleUpdateEmployee}
-            onFinalizePayroll={handleFinalizePayroll}
-            onOpenAudit={() => {}}
-            business={businessFromClient}
-            customization={customization}
-            onUpdateCustomization={handleUpdateCustomization}
-            onOpenEmailModal={() => triggerPaywall('whatsapp_share')}
-            onOpenBusinessEditModal={() => {}}
-          />
-        )}
-
-        {tab === 'payroll' && !activePayroll && (
-          <EmptyPayroll
-            hasClient={!!activeClient}
-            hasEmployees={employeeCount > 0}
-            onAddClient={requestAddClient}
-            onGoEmployees={() => setTab('employees')}
-            onRunPayroll={handleStartPayroll}
-          />
-        )}
-      </main>
 
       {/* Real client-creation modal, reused from production */}
       <AddClientModal
@@ -446,7 +499,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
 
       {/* Persistent upgrade CTA after first payroll */}
       {activePayroll && (
-        <div className="fixed bottom-4 right-4 z-40 hidden sm:block">
+        <div className="fixed bottom-24 md:bottom-4 right-4 z-40 hidden sm:block">
           <button
             onClick={() => triggerPaywall('download_all_payslips')}
             className="inline-flex items-center gap-2 px-4 py-3 bg-slate-950 hover:bg-slate-800 text-white text-sm font-black rounded-2xl shadow-2xl shadow-emerald-600/20 hover:-translate-y-0.5 transition-all cursor-pointer"
@@ -476,8 +529,8 @@ const HeroScreen: React.FC<{
   onSignIn: () => void;
   onNavigate: (path: string) => void;
 }> = ({ onStart, onSignIn, onNavigate }) => (
-  <div className="min-h-screen bg-gradient-to-b from-white via-emerald-50/40 to-emerald-100/30">
-    <header className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+  <div className="min-h-screen bg-white flex flex-col">
+    <header className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <button
         onClick={() => onNavigate('/')}
         className="flex items-center gap-2.5 cursor-pointer"
@@ -501,33 +554,37 @@ const HeroScreen: React.FC<{
       </button>
     </header>
 
-    <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24 text-center">
-      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-black uppercase tracking-widest mb-6">
-        <Sparkles className="w-3.5 h-3.5" />
-        Free — no credit card
-      </div>
-      <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tighter text-slate-950 leading-[1.05]">
-        Run Your First Client Payroll With Cayla
-      </h1>
-      <p className="mt-6 text-base sm:text-lg text-slate-600 font-medium max-w-2xl mx-auto leading-relaxed">
-        Add up to 50 employees, run a real payroll and preview branded payslips before you
-        pay. It’s the real Sheetpay Accountant dashboard — with a preview cap.
-      </p>
-      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
-        <button
-          onClick={onStart}
-          className="inline-flex items-center gap-2 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-black rounded-2xl shadow-lg shadow-emerald-600/20 hover:shadow-emerald-600/30 hover:-translate-y-0.5 transition-all cursor-pointer"
-        >
-          Start Free Payroll
-          <ArrowRight className="w-4 h-4" />
-        </button>
-        <div className="text-xs text-slate-500 font-semibold">
-          1 client · up to 50 employees · 1 real payroll
+    <section className="bg-gradient-to-b from-white via-emerald-50/40 to-emerald-100/30">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24 text-center flex flex-col items-center gap-6">
+        <ReviewRatingBadge align="center" />
+
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-black uppercase tracking-widest">
+          <Sparkles className="w-3.5 h-3.5" />
+          Free — no credit card
+        </div>
+        <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tighter text-slate-950 leading-[1.05]">
+          Run Your First Client Payroll With Cayla
+        </h1>
+        <p className="text-base sm:text-lg text-slate-600 font-medium max-w-2xl mx-auto leading-relaxed">
+          Add up to 50 employees, run a real payroll and preview branded payslips before you
+          pay. It’s the real Sheetpay Accountant dashboard — with a preview cap.
+        </p>
+        <div className="mt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <button
+            onClick={onStart}
+            className="inline-flex items-center gap-2 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-black rounded-2xl shadow-lg shadow-emerald-600/20 hover:shadow-emerald-600/30 hover:-translate-y-0.5 transition-all cursor-pointer"
+          >
+            Start Free Payroll
+            <ArrowRight className="w-4 h-4" />
+          </button>
+          <div className="text-xs text-slate-500 font-semibold">
+            1 client · up to 50 employees · 1 real payroll
+          </div>
         </div>
       </div>
     </section>
 
-    <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 grid sm:grid-cols-3 gap-3">
+    <section className="max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-16 grid sm:grid-cols-3 gap-3">
       <HeroCard
         icon={<Building2 className="w-4 h-4" />}
         title="Add one real client"
@@ -544,6 +601,12 @@ const HeroScreen: React.FC<{
         body="Deterministic PAYE / NIS / Health Surcharge — never invented by an LLM."
       />
     </section>
+
+    {/* Reused marketing footer (previously the /accountants page footer) */}
+    <AccountantMarketingFooter onNavigate={onNavigate} onStartOnboarding={onStart} />
+
+    {/* Big bold Sheetpay wordmark, same as the homepage below-footer branding */}
+    <SheetpayBigBranding tagline="AI payroll for Caribbean accountants and their clients." />
   </div>
 );
 
@@ -560,98 +623,6 @@ const HeroCard: React.FC<{ icon: React.ReactNode; title: string; body: string }>
     <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">{body}</p>
   </div>
 );
-
-// ---------------------------------------------------------------------------
-// Top bar — a stripped-down header replacement while inside the guest shell
-// ---------------------------------------------------------------------------
-const TopBar: React.FC<{
-  onNavigate: (path: string) => void;
-  onSignIn: () => void;
-  onUnlock: () => void;
-}> = ({ onNavigate, onSignIn, onUnlock }) => (
-  <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-      <button
-        onClick={() => onNavigate('/')}
-        className="flex items-center gap-2 cursor-pointer"
-      >
-        <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center">
-          <CaylaPenMascot size="xs" />
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="font-black text-slate-950 tracking-tight">Sheetpay</span>
-          <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-md">
-            Preview
-          </span>
-        </div>
-      </button>
-      <div className="flex items-center gap-2">
-        <div className="hidden md:flex items-center gap-1.5 text-[11px] text-slate-500 font-semibold">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-          Real tax engine · real payslips
-        </div>
-        <button
-          onClick={onSignIn}
-          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 text-xs font-bold rounded-lg transition-all cursor-pointer"
-        >
-          <LogIn className="w-3 h-3" />
-          Sign in
-        </button>
-        <button
-          onClick={onUnlock}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg shadow-sm shadow-emerald-600/20 transition-all cursor-pointer"
-        >
-          <Zap className="w-3 h-3" />
-          Unlock Sheetpay
-        </button>
-      </div>
-    </div>
-  </header>
-);
-
-// ---------------------------------------------------------------------------
-// Tab bar — the guest experience only exposes 4 tabs; the paid dashboard's
-// other tabs (reports, tax forms, team) are outside the free preview scope.
-// ---------------------------------------------------------------------------
-const GuestTabs: React.FC<{
-  tab: GuestTab;
-  onChange: (t: GuestTab) => void;
-  hasPayroll: boolean;
-}> = ({ tab, onChange, hasPayroll }) => {
-  const items: { id: GuestTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'dashboard', label: 'Practice Command', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
-    { id: 'clients', label: 'Client Directory', icon: <Building2 className="w-3.5 h-3.5" /> },
-    { id: 'employees', label: 'Employees', icon: <Users className="w-3.5 h-3.5" /> },
-    {
-      id: 'payroll',
-      label: hasPayroll ? 'Payroll Run' : 'Run Payroll',
-      icon: <PlayCircle className="w-3.5 h-3.5" />,
-    },
-  ];
-  return (
-    <div className="bg-white border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto">
-        {items.map((item) => {
-          const active = tab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onChange(item.id)}
-              className={`inline-flex items-center gap-1.5 px-3 py-3 text-xs font-black uppercase tracking-wider border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                active
-                  ? 'border-emerald-600 text-emerald-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
 
 const EmptyPayroll: React.FC<{
   hasClient: boolean;

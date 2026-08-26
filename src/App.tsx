@@ -78,7 +78,6 @@ import { InviteAcceptPage } from './components/invite/InviteAcceptPage';
 import { EmailPreviewPage } from './components/dev/EmailPreviewPage';
 import { isAdminEmail } from './lib/admin';
 import { LandingPage } from './components/landing/LandingPage';
-import { AccountantLandingPage } from './components/landing/AccountantLandingPage';
 import { GuestAccountantExperience } from './components/guest/GuestAccountantExperience';
 import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
 import { CalculatorPage } from './components/calculators/CalculatorPage';
@@ -1253,41 +1252,31 @@ export default function App() {
     );
   }
 
-  // Router Branch 4.5: Accountant Acquisition Funnel (/accountants)
-  //
-  // Dedicated Cayla-first acquisition page that lets accountants run a real
-  // sample payroll (using the deterministic tax engine) BEFORE paying. The
-  // paywall only appears when they try to Download / Print / WhatsApp the
-  // completed payslips. Checkout reuses handleOpenCheckout('accountant') so
-  // Paddle + Convex entitlement flow is identical to the rest of Sheetpay.
+  // Router Branch 4.5: legacy /accountants — replaced by the guest dashboard
+  // funnel above. Route kept as a permanent redirect so any backlinks (docs,
+  // ads, referrals, email footers) land on the new experience.
   // -------------------------------------------------------------
   if (currentPath === '/accountants') {
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, '', '/try-accountant-dashboard');
+    }
     return (
-      <div className="min-h-screen bg-white">
-        <AccountantLandingPage
-          onNavigate={navigate}
-          onLaunchApp={() => {
-            setViewMode('app');
-            navigate('/app');
-          }}
-          onStartOnboarding={() => setIsOnboardingOpen(true)}
-          onLogin={() => {
-            setAuthMode('signin');
-            setViewMode('auth');
-          }}
-          onChoosePlan={handleOpenCheckout}
-        />
-
-        {isOnboardingOpen && (
-          <OnboardingFlow
-            initialBusiness={business}
-            initialEmployees={visibleEmployees}
-            initialAccountType="accountant"
-            onComplete={handleOnboardingComplete}
-            onCancel={() => setIsOnboardingOpen(false)}
-          />
-        )}
-      </div>
+      <GuestAccountantExperience
+        onNavigate={navigate}
+        onSignIn={() => {
+          setAuthMode('signin');
+          setViewMode('auth');
+        }}
+        onUnlock={(_plan, guestSessionId) => {
+          try {
+            (window as any).__sheetpayGuestSessionId = guestSessionId;
+            window.sessionStorage.setItem('sheetpay_guest_session_id_hint', guestSessionId);
+          } catch {
+            /* ignore */
+          }
+          handleOpenCheckout('accountant');
+        }}
+      />
     );
   }
 
