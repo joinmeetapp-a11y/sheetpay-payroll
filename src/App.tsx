@@ -1405,6 +1405,7 @@ export default function App() {
           {accountType === 'accountant' && activeTab === 'accountant_dashboard' && (
             <AccountantDashboard
               userName={userName}
+              firebaseUid={currentUser?.uid}
               clients={clients}
               teamMembers={teamMembers}
               batchJobs={batchJobs}

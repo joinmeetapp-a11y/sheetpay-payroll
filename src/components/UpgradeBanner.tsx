@@ -62,9 +62,16 @@ export const UpgradeBanner: React.FC<UpgradeBannerProps> = ({
           <Sparkles className="w-4.5 h-4.5" />
         </div>
         <div className="space-y-0.5 min-w-0">
-          <div className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+          <div className="font-extrabold text-sm text-slate-900 flex items-center gap-2 flex-wrap">
             <span>Upgrade to Business Pro</span>
-            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">$97/mo</span>
+            <span className="text-[10px] bg-rose-600 text-white font-black uppercase tracking-wider px-2 py-0.5 rounded-full">
+              Launch Special · 50% Off
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[11px] font-bold text-slate-400 line-through">$194/mo</span>
+            <span className="text-[11px] font-black text-emerald-700">$97/mo</span>
+            <span className="text-[10px] font-semibold text-slate-500">USD</span>
           </div>
           <p className="text-[11px] sm:text-xs text-slate-600 leading-snug">
             Unlock unlimited payroll runs &amp; payslips, all payslip templates, full Cayla AI agent,

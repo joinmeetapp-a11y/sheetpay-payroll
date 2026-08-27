@@ -54,9 +54,14 @@ export const ProGate: React.FC<ProGateProps> = ({
             className="mt-6 w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
           >
             <Crown className="w-4 h-4" />
-            <span>Upgrade to Pro — $97/mo</span>
+            <span className="flex items-center gap-1.5">
+              <span>Upgrade to Pro —</span>
+              <span className="line-through opacity-70 font-semibold">$194</span>
+              <span>$97/mo</span>
+            </span>
           </button>
-          <p className="text-[11px] text-slate-400 mt-3">Cancel anytime · Secure checkout by Paddle</p>
+          <p className="text-[11px] text-rose-600 font-bold mt-2 uppercase tracking-wider">Launch Special · 50% Off</p>
+          <p className="text-[11px] text-slate-400 mt-1">Cancel anytime · Secure checkout by Paddle · USD</p>
         </div>
       </div>
     </div>

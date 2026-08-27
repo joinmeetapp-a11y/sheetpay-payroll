@@ -421,6 +421,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onRunBatchPayroll={() => triggerPaywall('run_payroll_2')}
               onAddNewClient={handleAddClient}
               onOpenAddClient={requestAddClient}
+              onOpenImport={requestAddClient}
               onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
               onOpenInviteClient={() => triggerPaywall('download_all_payslips')}
               onQuickExecuteCayla={() => {
@@ -564,26 +565,33 @@ const HeroScreen: React.FC<{
 
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-black uppercase tracking-widest">
           <Sparkles className="w-3.5 h-3.5" />
-          Free — no credit card
+          One file is enough
         </div>
         <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tighter text-slate-950 leading-[1.05]">
-          Run Your First Client Payroll With Cayla
+          Bring your existing payroll. Sheetpay does the setup.
         </h1>
         <p className="text-base sm:text-lg text-slate-600 font-medium max-w-2xl mx-auto leading-relaxed">
-          Add up to 50 employees, run a real payroll and preview branded payslips before you
-          pay. It’s the real Sheetpay Accountant dashboard — with a preview cap.
+          Upload the payroll files you already use. Sheetpay reads your client and employee
+          information and prepares everything for review — no template, no rebuilding.
         </p>
         <div className="mt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
             onClick={onStart}
             className="inline-flex items-center gap-2 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-black rounded-2xl shadow-lg shadow-emerald-600/20 hover:shadow-emerald-600/30 hover:-translate-y-0.5 transition-all cursor-pointer"
           >
-            Start Free Payroll
+            Upload Payroll or Employee File
             <ArrowRight className="w-4 h-4" />
           </button>
-          <div className="text-xs text-slate-500 font-semibold">
-            1 client · up to 50 employees · 1 real payroll
-          </div>
+          <button
+            onClick={onStart}
+            className="inline-flex items-center gap-2 px-5 py-3.5 bg-white hover:bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-black rounded-2xl transition-all cursor-pointer"
+          >
+            <CaylaPenMascot size="xs" />
+            Ask Cayla
+          </button>
+        </div>
+        <div className="text-xs text-slate-500 font-semibold">
+          Preview cap: 1 client · up to 50 employees · 1 real payroll — nothing saved to production until you sign up.
         </div>
       </div>
     </section>
@@ -591,18 +599,18 @@ const HeroScreen: React.FC<{
     <section className="max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-16 grid sm:grid-cols-3 gap-3">
       <HeroCard
         icon={<Building2 className="w-4 h-4" />}
-        title="Add one real client"
-        body="Country, business info, brand colors — everything Sheetpay stores."
+        title="Upload"
+        body="PDF payslip, CSV, Excel or previous payroll export. Sheetpay reads the file — no template required."
       />
       <HeroCard
         icon={<Users className="w-4 h-4" />}
-        title="Import up to 50 employees"
-        body="OCR, CSV, Excel or add them manually. The 50 cap is per free payroll."
+        title="Review"
+        body="See the detected client, employees, salaries and NIS numbers. Fix anything uncertain before it saves."
       />
       <HeroCard
         icon={<PlayCircle className="w-4 h-4" />}
-        title="Run one real payroll"
-        body="Deterministic PAYE / NIS / Health Surcharge — never invented by an LLM."
+        title="Run Payroll"
+        body="Deterministic PAYE / NIS / Health Surcharge — same tax engine paying accountants use, never invented by an LLM."
       />
     </section>
 

@@ -1,8 +1,6 @@
-"use node";
-
 import { action } from "./_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { buildNiaSystemPrompt, looksLikePromptInjection, NIA_SUPPORT_PHONE_DISPLAY } from "./lib/niaPrompt";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -116,15 +114,18 @@ export const chat = action({
       });
     }
 
-    // Recent context — cap history to keep tokens bounded.
+    // Recent context — cap history to keep tokens bounded. Groq rejects
+    // messages with empty content, so filter those out defensively.
     const history: any[] = await ctx.runQuery(internal.niaInternal.recentMessages, {
       conversationId: bootstrap.conversationId,
       limit: 20,
     });
     for (const m of history) {
+      const content = typeof m.content === "string" ? m.content.trim() : "";
+      if (!content) continue;
       guarded.push({
         role: m.senderType === "user" ? "user" : "assistant",
-        content: m.content,
+        content,
       });
     }
 

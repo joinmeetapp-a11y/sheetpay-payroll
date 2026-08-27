@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   AccountantClient,
   AttentionItem,
@@ -14,28 +14,31 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  ArrowRight,
   Search,
-  Sparkles,
   Mic,
   Send,
-  SlidersHorizontal,
   ChevronRight,
   Layers,
   FileCheck2,
   Plus,
   ExternalLink,
-  DollarSign,
-  ShieldCheck,
-  ChevronDown,
+  Upload,
+  FileSpreadsheet,
+  UserPlus,
+  Sparkles,
+  X,
+  ArrowRight,
+  FileText,
 } from 'lucide-react';
 import { CaylaPenMascot } from '../CaylaPenMascot';
 import { AddClientModal } from './AddClientModal';
 import { ClientInviteModal } from './ClientInviteModal';
 import { BatchPayrollModal } from './BatchPayrollModal';
+import { AccountantImportModal } from './AccountantImportModal';
 
 interface AccountantDashboardProps {
   userName?: string;
+  firebaseUid?: string;
   clients?: AccountantClient[];
   teamMembers?: FirmTeamMember[];
   attentionItems?: AttentionItem[];
@@ -45,6 +48,7 @@ interface AccountantDashboardProps {
   onRunBatchPayroll?: () => void;
   onAddNewClient?: (client: AccountantClient) => void;
   onOpenAddClient?: () => void;
+  onOpenImport?: () => void;
   onOpenBatchPayroll?: () => void;
   onOpenInviteClient?: (client: AccountantClient) => void;
   onQuickExecuteCayla?: (prompt: string) => void;
@@ -79,8 +83,122 @@ export const getStatusBadgeStyle = (status: PayrollQueueStatus) => {
   }
 };
 
+type LaunchMethod = 'upload_payroll' | 'csv' | 'ask_cayla' | 'manual';
+
+interface ImportLauncherProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onPick: (method: LaunchMethod) => void;
+}
+
+const ImportLauncher: React.FC<ImportLauncherProps> = ({ isOpen, onClose, onPick }) => {
+  if (!isOpen) return null;
+
+  const options: Array<{
+    id: LaunchMethod;
+    label: string;
+    subtitle: string;
+    Icon: React.ComponentType<{ className?: string }>;
+    accent: string;
+    bg: string;
+  }> = [
+    {
+      id: 'upload_payroll',
+      label: 'Upload Previous Payroll',
+      subtitle: 'Drop a payroll report, payslip PDF, or export. Sheetpay reads it and prepares the client and employees for review.',
+      Icon: Upload,
+      accent: 'text-emerald-700',
+      bg: 'bg-emerald-50 border-emerald-200 hover:border-emerald-400',
+    },
+    {
+      id: 'csv',
+      label: 'Upload Employee Spreadsheet',
+      subtitle: 'CSV or Excel. Columns are auto-mapped to Sheetpay employee fields — no template required.',
+      Icon: FileSpreadsheet,
+      accent: 'text-blue-700',
+      bg: 'bg-blue-50 border-blue-200 hover:border-blue-400',
+    },
+    {
+      id: 'ask_cayla',
+      label: 'Ask Cayla',
+      subtitle: 'Describe the client in plain language. Cayla can set up the client and import employees from files you attach.',
+      Icon: Sparkles,
+      accent: 'text-amber-700',
+      bg: 'bg-amber-50 border-amber-200 hover:border-amber-400',
+    },
+    {
+      id: 'manual',
+      label: 'Add Manually',
+      subtitle: 'Type in the client details yourself. Best for a client with just a few employees you already know.',
+      Icon: UserPlus,
+      accent: 'text-slate-700',
+      bg: 'bg-slate-50 border-slate-200 hover:border-slate-400',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+      <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95">
+        <div className="flex items-start justify-between p-6 border-b border-slate-100">
+          <div>
+            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-wider">
+              One file is enough
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mt-2">
+              Add Client / Import Payroll
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
+              Pick how you want to bring this client into Sheetpay.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {options.map((opt) => {
+            const Icon = opt.Icon;
+            return (
+              <button
+                key={opt.id}
+                onClick={() => onPick(opt.id)}
+                className={`text-left rounded-2xl border p-4 transition-all cursor-pointer ${opt.bg} focus:outline-none focus:ring-2 focus:ring-emerald-500/30`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-200/80 flex items-center justify-center shrink-0 shadow-2xs">
+                    <Icon className={`w-5 h-5 ${opt.accent}`} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                      {opt.label}
+                      <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-1 leading-relaxed font-medium">
+                      {opt.subtitle}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="px-6 pb-5 -mt-1 text-[11px] text-slate-500 font-medium">
+          Sheetpay reviews everything before it saves — no records are created without your confirmation.
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
   userName = 'Accountant',
+  firebaseUid,
   clients = [],
   teamMembers = [],
   attentionItems = [],
@@ -89,6 +207,7 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
   onRunBatchPayroll = () => {},
   onAddNewClient = (_client: AccountantClient) => {},
   onOpenAddClient,
+  onOpenImport,
   onOpenBatchPayroll,
   onOpenInviteClient,
   onQuickExecuteCayla,
@@ -100,22 +219,33 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
 }) => {
   const [inputText, setInputText] = useState('');
   const [isMicActive, setIsMicActive] = useState(false);
+  const [isLauncherOpen, setIsLauncherOpen] = useState(false);
   const [isAddClientOpen, setIsAddClientOpen] = useState(false);
+  const [addClientInitialMethod, setAddClientInitialMethod] = useState<
+    'manual' | 'csv' | 'upload_payroll' | 'payslips' | undefined
+  >(undefined);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [selectedInviteClient, setSelectedInviteClient] = useState<AccountantClient | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [activeDeadlineTab, setActiveDeadlineTab] = useState<'this_week' | 'next_week' | 'today'>('this_week');
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+
+  const caylaInputRef = useRef<HTMLInputElement | null>(null);
 
   const firstName = (userName || 'Accountant').split(' ')[0] || 'Accountant';
 
-  // Cross-Client Calculations
   const totalClients = clients.length;
-  const totalEmployees = clients.reduce((acc, c) => acc + c.employeeCount, 0);
-  const totalPayrollValue = clients.reduce((acc, c) => acc + c.monthlyPayrollValue, 0);
-  const payrollsDue = clients.filter((c) => c.payrollStatus !== 'Completed' && c.payrollStatus !== 'Finalized').length;
-  const readyForApproval = clients.filter((c) => c.payrollStatus === 'Ready for Approval' || c.payrollStatus === 'Ready to Run').length;
+  const totalEmployees = clients.reduce((acc, c) => acc + (c.employeeCount || 0), 0);
+  const totalPayrollValue = clients.reduce((acc, c) => acc + (c.monthlyPayrollValue || 0), 0);
+  const payrollsDue = clients.filter(
+    (c) => c.payrollStatus && c.payrollStatus !== 'Completed' && c.payrollStatus !== 'Finalized'
+  ).length;
+  const readyForApproval = clients.filter(
+    (c) => c.payrollStatus === 'Ready for Approval' || c.payrollStatus === 'Ready to Run'
+  ).length;
   const needsAttention = attentionItems.length;
+  const hasAnyData = totalClients > 0;
 
   const filteredClients = clients.filter((c) => {
     const search = (searchQuery || '').toLowerCase();
@@ -127,6 +257,48 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
     return matchesSearch && matchesStatus;
   });
 
+  const upcomingDeadlines = clients
+    .filter((c) => c.nextPayrollDate)
+    .slice(0, 4);
+
+  const openLauncher = () => {
+    setIsLauncherOpen(true);
+  };
+
+  const handleLauncherPick = (method: LaunchMethod) => {
+    setIsLauncherOpen(false);
+    if (method === 'ask_cayla') {
+      focusCayla('Set up a new client for me. I can attach their existing payroll or employee file.');
+      return;
+    }
+    if (method === 'upload_payroll' || method === 'csv') {
+      if (onOpenImport) {
+        onOpenImport();
+        return;
+      }
+      if (onOpenAddClient) {
+        onOpenAddClient();
+        return;
+      }
+      setIsImportModalOpen(true);
+      return;
+    }
+    if (onOpenAddClient) {
+      onOpenAddClient();
+      return;
+    }
+    setAddClientInitialMethod(method);
+    setIsAddClientOpen(true);
+  };
+
+  const focusCayla = (prefill?: string) => {
+    if (prefill) setInputText(prefill);
+    setTimeout(() => {
+      caylaInputRef.current?.focus();
+      caylaInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+
   const handleCaylaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || isProcessing) return;
@@ -136,108 +308,175 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
 
   const handleVoiceSimulation = () => {
     setIsMicActive(true);
-    const simulatedPrompts = [
-      'Which clients have payroll due this week?',
-      'Prepare all ready payrolls.',
-      'Show my assigned clients.',
-      'How much PAYE is due across my clients?',
-      'Check statutory compliance status.',
-    ];
-    const picked = simulatedPrompts[Math.floor(Math.random() * simulatedPrompts.length)];
-    let i = 0;
-    setInputText('');
-    const timer = setInterval(() => {
-      if (i < picked.length) {
-        setInputText(picked.slice(0, i + 1));
-        i++;
-      } else {
-        clearInterval(timer);
-        setIsMicActive(false);
-      }
-    }, 35);
+    setTimeout(() => setIsMicActive(false), 1200);
   };
 
+  const closeQuickAdd = () => setIsQuickAddOpen(false);
+
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-6 space-y-8 select-none animate-in fade-in">
-      
-      {/* 1. Header & Greeting */}
+    <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-6 space-y-6 select-none animate-in fade-in">
+
+      {/* Header & Greeting */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-100">
         <div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-wider">
-              Accountant Command Center
+              Accountant
             </span>
-            <span className="text-xs text-slate-400 font-medium">Multi-Client Engine</span>
+            <span className="text-xs text-slate-400 font-medium">Sheetpay</span>
           </div>
           <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight mt-1">
-            Good morning, {firstName} 👋
+            Good day, {firstName} 👋
           </h1>
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-0.5">
-            Here&apos;s what&apos;s happening across your clients.
+            Upload a file, review it, run payroll. That&apos;s the whole workflow.
           </p>
         </div>
 
-        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-2.5 w-full sm:w-auto">
-          <button
-            onClick={() => setIsBatchModalOpen(true)}
-            className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
-          >
-            <Layers className="w-4 h-4 shrink-0" />
-            <span className="truncate">Batch ({readyForApproval})</span>
-          </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          {readyForApproval > 0 && onOpenBatchPayroll && (
+            <button
+              onClick={onOpenBatchPayroll}
+              className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-white hover:bg-slate-50 active:scale-98 text-slate-900 text-xs font-bold rounded-xl border border-slate-200 shadow-2xs transition-all cursor-pointer"
+              title="Batch payroll runs"
+            >
+              <Layers className="w-4 h-4 shrink-0" />
+              <span className="truncate">Batch ({readyForApproval})</span>
+            </button>
+          )}
 
           <button
-            onClick={() => setIsAddClientOpen(true)}
+            onClick={openLauncher}
             className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-slate-900 hover:bg-slate-800 active:scale-98 text-white text-xs font-bold rounded-xl shadow-md shadow-slate-900/10 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4 shrink-0" />
-            <span className="truncate">Add Client</span>
+            <span className="truncate">Add Client / Import Payroll</span>
           </button>
         </div>
       </div>
 
-      {/* 2. Prominent Headline & Large Cayla Live Transcript Box (Grey & White Mix Canvas) */}
-      <div className="bg-gradient-to-b from-slate-50 via-white to-slate-100/90 text-slate-900 rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/60 border border-slate-200/90 relative overflow-hidden space-y-5">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-100/30 rounded-full blur-3xl pointer-events-none" />
+      {/* Primary Import Card */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 via-emerald-700 to-emerald-800 text-white rounded-3xl p-6 sm:p-10 shadow-xl shadow-emerald-900/20 border border-emerald-500/20">
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-32 -left-16 w-96 h-96 bg-emerald-900/30 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="space-y-1.5 relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold shadow-2xs">
-            <CaylaPenMascot size="xs" isProcessing={isProcessing} />
-            <span>Conversational Firm AI Agent</span>
+        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6 lg:gap-10 items-center">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 border border-white/20 text-[11px] font-bold uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5" /> One file is enough
+            </div>
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight leading-tight">
+              Run payroll for a new client.
+            </h2>
+            <p className="text-sm sm:text-base text-emerald-50/90 leading-relaxed max-w-xl">
+              Upload their existing payroll, employee spreadsheet, or payslips and
+              Sheetpay will prepare everything for review — client, employees,
+              salaries, statutory deductions.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+              <button
+                onClick={openLauncher}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white text-emerald-800 hover:bg-emerald-50 active:scale-98 text-sm font-black rounded-2xl shadow-lg transition-all cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Add Client / Import Payroll</span>
+              </button>
+              <button
+                onClick={() => focusCayla('Set up a new client and import their employees for me.')}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 border border-white/25 text-white text-sm font-bold rounded-2xl transition-all cursor-pointer"
+              >
+                <CaylaPenMascot size="xs" />
+                <span>Ask Cayla</span>
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-emerald-50/80 pt-1">
+              <span className="inline-flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> PDF payslips</span>
+              <span className="inline-flex items-center gap-1.5"><FileSpreadsheet className="w-3.5 h-3.5" /> CSV / Excel</span>
+              <span className="inline-flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> Prior payroll exports</span>
+            </div>
           </div>
-          <h2 className="text-xl sm:text-2xl font-black text-slate-950 tracking-tight">
-            Manage every client&apos;s payroll with Cayla
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed font-medium">
-            Ask Cayla to run multi-client payrolls, identify missing timesheets, calculate cross-border statutory liabilities, or switch workspaces instantly.
-          </p>
+
+          {/* Preview of the 4 launcher options */}
+          <div className="hidden lg:grid grid-cols-2 gap-3">
+            {[
+              { Icon: Upload, label: 'Previous payroll' },
+              { Icon: FileSpreadsheet, label: 'Employee sheet' },
+              { Icon: Sparkles, label: 'Ask Cayla' },
+              { Icon: UserPlus, label: 'Add manually' },
+            ].map((opt) => (
+              <div
+                key={opt.label}
+                className="bg-white/10 border border-white/20 rounded-2xl p-4 backdrop-blur-sm"
+              >
+                <opt.Icon className="w-5 h-5 mb-2" />
+                <div className="text-xs font-bold">{opt.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Compact real-data stat strip */}
+      {hasAnyData && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Clients</span>
+            <div className="text-xl font-black text-slate-900 font-mono">{totalClients}</div>
+          </div>
+          <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Employees</span>
+            <div className="text-xl font-black text-slate-900 font-mono">{totalEmployees}</div>
+          </div>
+          <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Payrolls Due</span>
+            <div className="text-xl font-black text-emerald-700 font-mono">{payrollsDue}</div>
+          </div>
+          <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Needs Attention</span>
+            <div className="text-xl font-black text-amber-700 font-mono">{needsAttention}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Ask Cayla surface (compact) */}
+      <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CaylaPenMascot size="xs" isProcessing={isProcessing} />
+            <h2 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">
+              Ask Cayla
+            </h2>
+          </div>
+          <span className="text-[11px] text-slate-500 font-semibold">
+            Reuses your existing Sheetpay tax engine and OCR
+          </span>
         </div>
 
-        {/* Live Conversation Stream (Last messages) */}
         {messages.length > 0 && (
-          <div className="bg-slate-100/80 backdrop-blur-md rounded-2xl p-4 border border-slate-200/90 max-h-48 overflow-y-auto space-y-3 font-sans text-xs">
+          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 max-h-40 overflow-y-auto space-y-3 text-xs">
             {messages.slice(-3).map((m) => (
               <div
                 key={m.id}
                 className={`flex gap-2.5 ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {m.sender === 'cayla' && (
-                  <div className="w-6 h-6 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                  <div className="w-6 h-6 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center shrink-0 mt-0.5">
                     <CaylaPenMascot size="xs" />
                   </div>
                 )}
                 <div
-                  className={`p-3.5 rounded-2xl max-w-xl text-xs leading-relaxed ${
+                  className={`p-3 rounded-2xl max-w-xl text-xs leading-relaxed ${
                     m.sender === 'user'
-                      ? 'bg-emerald-700 text-white font-semibold rounded-br-none shadow-xs'
-                      : 'bg-white text-slate-800 border border-slate-200/90 rounded-bl-none shadow-2xs font-medium'
+                      ? 'bg-emerald-700 text-white font-semibold rounded-br-none'
+                      : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none font-medium'
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{m.text}</p>
                   {m.actionSummary && (
-                    <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-emerald-800 font-bold flex items-center gap-1">
-                      <span>✓</span>
-                      <span>{m.actionSummary.title}: {m.actionSummary.description}</span>
+                    <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-emerald-800 font-bold">
+                      ✓ {m.actionSummary.title}: {m.actionSummary.description}
                     </div>
                   )}
                 </div>
@@ -246,61 +485,52 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
           </div>
         )}
 
-        {/* Cayla Main Input Box with Voice & Text */}
         <form
           onSubmit={handleCaylaSubmit}
-          className="relative flex items-center gap-2 bg-white border border-slate-300 hover:border-slate-400 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 rounded-2xl p-2 sm:p-2.5 shadow-sm transition-all"
+          className="flex items-center gap-2 bg-white border border-slate-300 hover:border-slate-400 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 rounded-2xl p-2 transition-all"
         >
           <input
+            ref={caylaInputRef}
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Ask Cayla about any client... (e.g. 'Which clients have payroll due this week?' or 'Prepare all ready payrolls')"
+            placeholder="e.g. Create ABC Construction as a weekly payroll client…"
             className="flex-1 bg-transparent px-3 py-2 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none font-medium"
           />
-
           <button
             type="button"
             onClick={handleVoiceSimulation}
             className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
               isMicActive
                 ? 'bg-rose-500 text-white animate-pulse'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
             }`}
-            title="Simulate Voice Prompt"
+            title="Voice"
           >
             <Mic className="w-4 h-4" />
           </button>
-
           <button
             type="submit"
             disabled={!inputText.trim() || isProcessing}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer shrink-0"
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer shrink-0"
           >
-            {isProcessing ? (
-              <CaylaPenMascot size="xs" isProcessing={true} />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-            <span className="hidden sm:inline">Ask Cayla</span>
+            {isProcessing ? <CaylaPenMascot size="xs" isProcessing={true} /> : <Send className="w-4 h-4" />}
+            <span className="hidden sm:inline">Send</span>
           </button>
         </form>
 
-        {/* Quick Suggestion Chips */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] font-bold text-slate-500 mr-1">Try:</span>
           {[
+            'Create ABC Construction as a weekly payroll client.',
+            'Import these employees for Trini Builders.',
             'Which clients have payroll due this week?',
-            'Prepare all ready payrolls',
-            'How much PAYE is due across my clients?',
-            'Check statutory tax deadlines',
-            'How do I add a new client?',
           ].map((chip) => (
             <button
               key={chip}
               type="button"
               onClick={() => onSendMessage(chip)}
-              className="text-[11px] font-semibold bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300 text-slate-700 border border-slate-200/90 px-3 py-1.5 rounded-xl transition-all shadow-2xs cursor-pointer"
+              className="text-[11px] font-semibold bg-slate-50 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer"
             >
               &ldquo;{chip}&rdquo;
             </button>
@@ -308,61 +538,21 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
         </div>
       </div>
 
-      {/* 3. Minimal Overview Stat Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total Clients</span>
-          <div className="text-xl font-black text-slate-900 font-mono">{totalClients}</div>
-          <span className="text-[10px] text-emerald-700 font-semibold">Active enterprise accounts</span>
-        </div>
-
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Active Employees</span>
-          <div className="text-xl font-black text-slate-900 font-mono">{totalEmployees}</div>
-          <span className="text-[10px] text-slate-500">Across {totalClients} businesses</span>
-        </div>
-
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Payrolls Due</span>
-          <div className="text-xl font-black text-emerald-700 font-mono">{payrollsDue}</div>
-          <span className="text-[10px] text-emerald-700 font-semibold">This pay cycle</span>
-        </div>
-
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Ready for Approval</span>
-          <div className="text-xl font-black text-blue-700 font-mono">{readyForApproval}</div>
-          <span className="text-[10px] text-blue-700 font-semibold">Awaiting sign-off</span>
-        </div>
-
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Needs Attention</span>
-          <div className="text-xl font-black text-amber-700 font-mono">{needsAttention}</div>
-          <span className="text-[10px] text-amber-700 font-semibold">Exceptions flagged</span>
-        </div>
-
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Monthly Payroll Value</span>
-          <div className="text-xl font-black text-slate-900 font-mono truncate">{formatCurrency(totalPayrollValue)}</div>
-          <span className="text-[10px] text-slate-500 font-mono">Managed volume</span>
-        </div>
-      </div>
-
-      {/* 4. "Needs Your Attention" Section (Actionable operational problems) */}
+      {/* Needs Attention — only when there's real data */}
       {attentionItems.length > 0 && (
-        <div className="bg-amber-50/70 border border-amber-200/80 rounded-3xl p-5 sm:p-6 space-y-4">
+        <div className="bg-amber-50/70 border border-amber-200/80 rounded-3xl p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-amber-900">
               <AlertTriangle className="w-5 h-5 text-amber-600" />
-              <h2 className="text-base font-black tracking-tight">Needs Your Attention ({attentionItems.length})</h2>
+              <h2 className="text-sm font-black tracking-tight">Needs Your Attention ({attentionItems.length})</h2>
             </div>
-            <span className="text-xs text-amber-700 font-bold">Automatic Cayla Exception Detection</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {attentionItems.map((item) => (
               <div
                 key={item.id}
-                className="bg-white p-4 rounded-2xl border border-amber-200/70 shadow-2xs space-y-3 flex flex-col justify-between"
+                className="bg-white p-4 rounded-2xl border border-amber-200/70 shadow-2xs space-y-3"
               >
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -394,7 +584,6 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
                     <span>Open Client</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
-
                   <button
                     onClick={() => {
                       if (item.actionType === 'ask_cayla') {
@@ -407,9 +596,9 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
                         onSendMessage(`Run payroll for ${item.clientName}`);
                       }
                     }}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold rounded-lg cursor-pointer"
                   >
-                    {item.actionLabel}
+                    {item.actionLabel || 'Take action'}
                   </button>
                 </div>
               </div>
@@ -418,109 +607,106 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
         </div>
       )}
 
-      {/* 5. Client Payroll Queue (Main Work Component) */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+      {/* Recent Clients — real data only */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
-            <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <span>Payroll Queue</span>
-              <span className="text-xs bg-slate-100 text-slate-700 font-mono px-2 py-0.5 rounded-full font-bold">
-                {filteredClients.length} Clients
-              </span>
+            <h2 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-slate-500" />
+              <span>Your Clients</span>
+              {hasAnyData && (
+                <span className="text-xs bg-slate-100 text-slate-700 font-mono px-2 py-0.5 rounded-full font-bold">
+                  {filteredClients.length}
+                </span>
+              )}
             </h2>
-            <p className="text-xs text-slate-500">
-              Operational work queue across your accounting portfolio
+            <p className="text-xs text-slate-500 mt-0.5">
+              {hasAnyData ? 'Recent activity across your portfolio' : 'You haven’t added any clients yet.'}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Search */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search clients..."
-                className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-emerald-600 focus:outline-none"
-              />
+          {hasAnyData && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search clients..."
+                  className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-emerald-600 focus:outline-none"
+              >
+                <option value="all">All statuses</option>
+                <option value="Ready to Run">Ready to Run</option>
+                <option value="Ready for Approval">Ready for Approval</option>
+                <option value="Waiting on Client">Waiting on Client</option>
+                <option value="Missing Information">Missing Information</option>
+                <option value="Approved">Approved</option>
+              </select>
             </div>
-
-            {/* Status Filter */}
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-emerald-600 focus:outline-none"
-            >
-              <option value="all">All Statuses</option>
-              <option value="Ready to Run">Ready to Run</option>
-              <option value="Ready for Approval">Ready for Approval</option>
-              <option value="Waiting on Client">Waiting on Client</option>
-              <option value="Missing Information">Missing Information</option>
-              <option value="Approved">Approved</option>
-            </select>
-          </div>
+          )}
         </div>
 
-        {/* Client Queue Items List */}
-        <div className="space-y-3">
-          {filteredClients.length === 0 ? (
-            <div className="p-12 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 space-y-3">
-              <Building2 className="w-10 h-10 text-slate-300 mx-auto" />
-              <div className="text-sm font-bold text-slate-700">No clients found in queue</div>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                {clients.length === 0
-                  ? 'Add your first client to start running automated payrolls, managing timesheets, and preparing statutory reports.'
-                  : 'No clients match the current search or status filter.'}
-              </p>
-              {clients.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => setIsAddClientOpen(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Add New Client</span>
-                </button>
-              )}
+        {!hasAnyData ? (
+          <div className="p-8 sm:p-12 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 mx-auto flex items-center justify-center">
+              <Upload className="w-6 h-6 text-emerald-700" />
             </div>
-          ) : (
-            filteredClients.map((client) => {
+            <div>
+              <div className="text-sm font-black text-slate-900">No clients yet</div>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                Add your first client by uploading their existing payroll — Sheetpay will read the file and prepare everything for review.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={openLauncher}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Client / Import Payroll</span>
+            </button>
+          </div>
+        ) : filteredClients.length === 0 ? (
+          <div className="p-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+            <div className="text-xs font-bold text-slate-600">No clients match this filter.</div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredClients.map((client) => {
               const hasMissing = client.missingInformation && client.missingInformation.length > 0;
               return (
                 <div
                   key={client.id}
-                  className="p-4 bg-slate-50/70 hover:bg-slate-50 border border-slate-200/80 rounded-2xl transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-4 group"
+                  className="p-4 bg-slate-50/70 hover:bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-4 group transition-all"
                 >
-                  {/* Client Core Information */}
                   <div className="flex items-start sm:items-center gap-3.5">
                     <div className="w-11 h-11 rounded-2xl bg-white border border-slate-200 flex items-center justify-center font-black text-slate-900 text-sm shrink-0 shadow-2xs">
-                      {client.name.slice(0, 2).toUpperCase()}
+                      {(client.name || 'CL').slice(0, 2).toUpperCase()}
                     </div>
-
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-extrabold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
                           {client.name}
                         </span>
-                        <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
-                          {client.country} ({client.currency})
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-medium">
-                          • Assigned: <strong>{client.assignedTo || 'Unassigned'}</strong>
-                        </span>
+                        {client.country && (
+                          <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
+                            {client.country}{client.currency ? ` (${client.currency})` : ''}
+                          </span>
+                        )}
                       </div>
-
-                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 mt-1">
-                        <span>{client.employeeCount} employees</span>
-                        <span>•</span>
-                        <span className="capitalize">{client.payFrequency}</span>
-                        <span>•</span>
-                        <span className="font-bold text-slate-700">Due: {client.nextPayrollDate || 'Not scheduled'}</span>
-                        <span>•</span>
-                        <span>Last: {client.lastPayroll || 'None'}</span>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500 mt-1">
+                        <span>{client.employeeCount || 0} employees</span>
+                        {client.payFrequency && <><span>•</span><span className="capitalize">{client.payFrequency}</span></>}
+                        {client.nextPayrollDate && <><span>•</span><span className="font-bold text-slate-700">Next: {client.nextPayrollDate}</span></>}
+                        {client.lastPayroll && <><span>•</span><span>Last: {client.lastPayroll}</span></>}
                       </div>
-
                       {hasMissing && (
                         <div className="mt-1.5 text-[11px] text-amber-700 font-semibold flex items-center gap-1.5">
                           <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
@@ -530,141 +716,153 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* Status & Actions */}
                   <div className="flex flex-wrap items-center gap-3 self-end lg:self-center">
-                    {/* Status Badge */}
-                    <span
-                      className={`text-[10px] font-extrabold px-3 py-1 rounded-full border uppercase tracking-wider font-mono ${getStatusBadgeStyle(
-                        client.payrollStatus
-                      )}`}
-                    >
-                      {client.payrollStatus}
-                    </span>
+                    {client.payrollStatus && (
+                      <span
+                        className={`text-[10px] font-extrabold px-3 py-1 rounded-full border uppercase tracking-wider font-mono ${getStatusBadgeStyle(
+                          client.payrollStatus
+                        )}`}
+                      >
+                        {client.payrollStatus}
+                      </span>
+                    )}
 
-                    {/* Primary Context Action */}
                     {client.payrollStatus === 'Ready to Run' && (
                       <button
                         onClick={() => onSelectClient(client)}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
                       >
                         <CaylaPenMascot size="xs" />
                         <span>Run Payroll</span>
                       </button>
                     )}
-
                     {client.payrollStatus === 'Waiting on Client' && (
                       <button
                         onClick={() => onSendMessage(`Request timesheet for ${client.name}`)}
-                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
                       >
                         <Clock className="w-3.5 h-3.5" />
                         <span>Request Timesheet</span>
                       </button>
                     )}
-
                     {client.payrollStatus === 'Ready for Approval' && (
                       <button
                         onClick={() => onSelectClient(client)}
-                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
                       >
                         <FileCheck2 className="w-3.5 h-3.5" />
                         <span>Review &amp; Approve</span>
                       </button>
                     )}
-
                     {client.payrollStatus === 'Approved' && (
                       <button
                         onClick={() => onSelectClient(client)}
-                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Finalize &amp; Payslips</span>
+                        <span>Finalize</span>
                       </button>
                     )}
-
-                    {/* Workspace Switcher Button */}
                     <button
                       onClick={() => onSelectClient(client)}
-                      className="p-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 transition-colors cursor-pointer"
-                      title="Open Isolated Client Workspace"
+                      className="p-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
+                      title="Open client workspace"
                     >
                       <ExternalLink className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               );
-            })
-          )}
-        </div>
-      </div>
-
-      {/* 6. Deadline View (Calendar / Timeline) */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-emerald-600" />
-            <h2 className="text-base font-black text-slate-900">Payroll &amp; Statutory Deadlines</h2>
-          </div>
-
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
-            <button
-              onClick={() => setActiveDeadlineTab('this_week')}
-              className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
-                activeDeadlineTab === 'this_week' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              This Week
-            </button>
-            <button
-              onClick={() => setActiveDeadlineTab('next_week')}
-              className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
-                activeDeadlineTab === 'next_week' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Next Week
-            </button>
-            <button
-              onClick={() => setActiveDeadlineTab('today')}
-              className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
-                activeDeadlineTab === 'today' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Today
-            </button>
-          </div>
-        </div>
-
-        {clients.filter((c) => c.nextPayrollDate).length === 0 ? (
-          <div className="p-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-            <Clock className="w-7 h-7 text-slate-300 mx-auto mb-2" />
-            <div className="text-xs font-bold text-slate-600">No scheduled payroll deadlines</div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Client pay dates and statutory deadlines will automatically appear here once scheduled.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-            {clients
-              .filter((c) => c.nextPayrollDate)
-              .slice(0, 4)
-              .map((c) => (
-                <div key={c.id} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
-                  <span className="text-[10px] font-bold uppercase text-emerald-700">Due {c.nextPayrollDate}</span>
-                  <div className="font-extrabold text-slate-900 truncate">{c.name}</div>
-                  <div className="text-[11px] text-slate-500">
-                    {c.payFrequency} • {c.employeeCount} workers ({formatCurrency(c.monthlyPayrollValue, c.currencySymbol)})
-                  </div>
-                </div>
-              ))}
+            })}
           </div>
         )}
       </div>
 
+      {/* Deadlines — only when real */}
+      {upcomingDeadlines.length > 0 && (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-emerald-600" />
+              <h2 className="text-sm font-black text-slate-900">Upcoming Payroll</h2>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            {upcomingDeadlines.map((c) => (
+              <div key={c.id} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
+                <span className="text-[10px] font-bold uppercase text-emerald-700">Due {c.nextPayrollDate}</span>
+                <div className="font-extrabold text-slate-900 truncate">{c.name}</div>
+                <div className="text-[11px] text-slate-500">
+                  {c.payFrequency || 'monthly'} • {c.employeeCount || 0} workers
+                  {c.monthlyPayrollValue ? ` • ${formatCurrency(c.monthlyPayrollValue, c.currencySymbol)}` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Persistent Quick Add (bottom-right, above mobile pill) */}
+      <div className="fixed right-4 bottom-24 md:bottom-6 z-40">
+        {isQuickAddOpen && (
+          <div className="mb-2 w-64 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+            <div className="px-4 py-2.5 text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-100 bg-slate-50/50">
+              Quick add
+            </div>
+            <button
+              onClick={() => { closeQuickAdd(); openLauncher(); }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-xs font-bold text-slate-800 hover:bg-slate-50 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-slate-500" /> Add Client
+            </button>
+            <button
+              onClick={() => { closeQuickAdd(); handleLauncherPick('upload_payroll'); }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-xs font-bold text-slate-800 hover:bg-slate-50 cursor-pointer"
+            >
+              <Upload className="w-4 h-4 text-emerald-700" /> Import Payroll
+            </button>
+            <button
+              onClick={() => { closeQuickAdd(); handleLauncherPick('csv'); }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-xs font-bold text-slate-800 hover:bg-slate-50 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-blue-700" /> Upload Employees
+            </button>
+            <button
+              onClick={() => { closeQuickAdd(); handleLauncherPick('manual'); }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-xs font-bold text-slate-800 hover:bg-slate-50 cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4 text-slate-700" /> Add Employee Manually
+            </button>
+            <button
+              onClick={() => { closeQuickAdd(); focusCayla('Help me set up a new client.'); }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-xs font-bold text-slate-800 hover:bg-slate-50 cursor-pointer border-t border-slate-100"
+            >
+              <Sparkles className="w-4 h-4 text-amber-600" /> Ask Cayla
+            </button>
+          </div>
+        )}
+        <button
+          onClick={() => setIsQuickAddOpen((v) => !v)}
+          className="w-14 h-14 rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-xl shadow-slate-900/30 flex items-center justify-center transition-all cursor-pointer active:scale-95"
+          title="Quick add"
+          aria-label="Quick add"
+        >
+          {isQuickAddOpen ? <X className="w-5 h-5" /> : <Plus className="w-6 h-6" />}
+        </button>
+      </div>
+
       {/* Modals */}
+      <ImportLauncher
+        isOpen={isLauncherOpen}
+        onClose={() => setIsLauncherOpen(false)}
+        onPick={handleLauncherPick}
+      />
+
       <AddClientModal
         isOpen={isAddClientOpen}
-        onClose={() => setIsAddClientOpen(false)}
+        onClose={() => { setIsAddClientOpen(false); setAddClientInitialMethod(undefined); }}
         onAddClient={onAddNewClient}
+        initialImportMethod={addClientInitialMethod}
       />
 
       <ClientInviteModal
@@ -679,6 +877,13 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
         onClose={() => setIsBatchModalOpen(false)}
         clients={clients}
         onCompleteBatch={onUpdateClients}
+      />
+
+      <AccountantImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        firebaseUid={firebaseUid}
+        onClientImported={(client) => onAddNewClient(client)}
       />
     </div>
   );

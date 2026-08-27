@@ -17,12 +17,14 @@ interface AddClientModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAddClient: (newClient: AccountantClient) => void;
+  initialImportMethod?: 'manual' | 'csv' | 'upload_payroll' | 'payslips';
 }
 
 export const AddClientModal: React.FC<AddClientModalProps> = ({
   isOpen,
   onClose,
   onAddClient,
+  initialImportMethod,
 }) => {
   const [step, setStep] = useState<'details' | 'tax' | 'employees'>('details');
 
@@ -41,7 +43,13 @@ export const AddClientModal: React.FC<AddClientModalProps> = ({
   const [nisNumber, setNisNumber] = useState('');
   const [signatoryName, setSignatoryName] = useState('');
   const [signatoryTitle, setSignatoryTitle] = useState('Managing Director');
-  const [importMethod, setImportMethod] = useState<'manual' | 'csv' | 'upload_payroll' | 'payslips'>('csv');
+  const [importMethod, setImportMethod] = useState<'manual' | 'csv' | 'upload_payroll' | 'payslips'>(initialImportMethod ?? 'csv');
+
+  React.useEffect(() => {
+    if (isOpen && initialImportMethod) {
+      setImportMethod(initialImportMethod);
+    }
+  }, [isOpen, initialImportMethod]);
   const [employeeCount, setEmployeeCount] = useState(10);
   const [assignedTo, setAssignedTo] = useState('Sarah Mohammed');
 
