@@ -190,6 +190,68 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     [guestSessionId, upsertClient],
   );
 
+  // Guest funnel handler for the new AccountantImportModal (Phase 2 review UX).
+  // Runs after the visitor has uploaded a file, seen the review screen, and
+  // hit Confirm. Never touches production Convex tables — saves to the guest
+  // session row and enforces GUEST_LIMITS.
+  const handleGuestImport = useCallback(
+    async (
+      business: BusinessDetails,
+      importedEmployees: Employee[],
+      payrollRuns: PayrollRun[],
+    ) => {
+      if (clientsUsed >= GUEST_LIMITS.maxClients) {
+        triggerPaywall('add_client_2');
+        return;
+      }
+      const capped = importedEmployees.slice(0, GUEST_LIMITS.maxEmployees);
+      const rejected = importedEmployees.length - capped.length;
+
+      const totalMonthly = capped.reduce((s, e) => s + (e.grossPay || 0), 0);
+      const inferredFreq = (capped[0]?.payFrequency as any) || 'monthly';
+
+      const client: AccountantClient = {
+        id: `guest-client-${Date.now()}`,
+        name: business.name?.trim() || 'Untitled Client',
+        country: 'Trinidad & Tobago',
+        countryCode: 'TT',
+        currency: business.currency || 'TTD',
+        currencySymbol: business.currencySymbol || '$',
+        payFrequency: inferredFreq,
+        employeeCount: capped.length,
+        nextPayrollDate: '',
+        payrollStatus: capped.length > 0 ? 'Ready to Run' : 'Missing Information',
+        lastPayroll: '',
+        monthlyPayrollValue: totalMonthly,
+        assignedTo: '',
+        contactName: business.signatoryName || '',
+        contactEmail: business.email || '',
+        contactPhone: business.phone || '',
+        businessAddress: business.address || '',
+        taxRegistrationId: business.taxRegistrationId || '',
+        nisNumber: business.nisNumber || '',
+        signatoryName: business.signatoryName || '',
+        signatoryTitle: business.signatoryTitle || 'Managing Director',
+        employees: capped,
+        payrollRun: payrollRuns[0] || null,
+        payrollRuns,
+      };
+
+      setClients([client]);
+      upsertClient({ anonSessionId: guestSessionId, client }).catch(() => {});
+      setEmployees({ anonSessionId: guestSessionId, employees: capped }).catch(() => {});
+
+      if (rejected > 0) triggerPaywall('add_employee_51');
+    },
+    [
+      clientsUsed,
+      guestSessionId,
+      setEmployees,
+      triggerPaywall,
+      upsertClient,
+    ],
+  );
+
   // ── Employee management ────────────────────────────────────────────────
   const handleAddEmployees = useCallback(
     (newEmployees: Employee[]) => {
@@ -421,7 +483,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onRunBatchPayroll={() => triggerPaywall('run_payroll_2')}
               onAddNewClient={handleAddClient}
               onOpenAddClient={requestAddClient}
-              onOpenImport={requestAddClient}
+              onGuestImport={handleGuestImport}
               onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
               onOpenInviteClient={() => triggerPaywall('download_all_payslips')}
               onQuickExecuteCayla={() => {

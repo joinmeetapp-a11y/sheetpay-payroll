@@ -2,9 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   AccountantClient,
   AttentionItem,
+  BusinessDetails,
   CaylaMessage,
+  Employee,
   FirmTeamMember,
   PayrollQueueStatus,
+  PayrollRun,
 } from '../../types';
 import { formatCurrency } from '../../lib/taxEngine';
 import {
@@ -49,6 +52,11 @@ interface AccountantDashboardProps {
   onAddNewClient?: (client: AccountantClient) => void;
   onOpenAddClient?: () => void;
   onOpenImport?: () => void;
+  onGuestImport?: (
+    business: BusinessDetails,
+    employees: Employee[],
+    payrollRuns: PayrollRun[]
+  ) => void | Promise<void>;
   onOpenBatchPayroll?: () => void;
   onOpenInviteClient?: (client: AccountantClient) => void;
   onQuickExecuteCayla?: (prompt: string) => void;
@@ -208,6 +216,7 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
   onAddNewClient = (_client: AccountantClient) => {},
   onOpenAddClient,
   onOpenImport,
+  onGuestImport,
   onOpenBatchPayroll,
   onOpenInviteClient,
   onQuickExecuteCayla,
@@ -274,6 +283,13 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
     if (method === 'upload_payroll' || method === 'csv') {
       if (onOpenImport) {
         onOpenImport();
+        return;
+      }
+      // Guest funnel: onGuestImport signals the internal review modal should
+      // handle upload + review, then hand the extraction to the parent to
+      // save in the guest session (never production Convex).
+      if (onGuestImport) {
+        setIsImportModalOpen(true);
         return;
       }
       if (onOpenAddClient) {
@@ -884,6 +900,7 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
         onClose={() => setIsImportModalOpen(false)}
         firebaseUid={firebaseUid}
         onClientImported={(client) => onAddNewClient(client)}
+        onGuestImport={onGuestImport}
       />
     </div>
   );

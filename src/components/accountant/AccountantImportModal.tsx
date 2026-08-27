@@ -10,6 +10,17 @@ interface AccountantImportModalProps {
   onClose: () => void;
   firebaseUid?: string;
   onClientImported?: (client: AccountantClient) => void;
+  /**
+   * When provided, the modal skips the Convex mutations entirely and delegates
+   * the save to the parent. Used by the guest funnel so uploaded payroll never
+   * touches production tables — only the guest session — while still showing
+   * the full extraction → review UX.
+   */
+  onGuestImport?: (
+    business: BusinessDetails,
+    employees: Employee[],
+    payrollRuns: PayrollRun[]
+  ) => void | Promise<void>;
 }
 
 const EMPTY_BUSINESS: BusinessDetails = {
@@ -27,6 +38,7 @@ export const AccountantImportModal: React.FC<AccountantImportModalProps> = ({
   onClose,
   firebaseUid,
   onClientImported,
+  onGuestImport,
 }) => {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -48,6 +60,20 @@ export const AccountantImportModal: React.FC<AccountantImportModalProps> = ({
     _summary: any
   ) => {
     setError(null);
+
+    // Guest funnel — bypass Convex production mutations, delegate to parent.
+    if (onGuestImport) {
+      setIsSaving(true);
+      try {
+        await onGuestImport(business, employees, payrollRuns);
+        onClose();
+      } catch (err: any) {
+        setError(err?.message || 'Import failed.');
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
 
     if (!userRow?._id) {
       setError('You need to be signed in for Sheetpay to save this client. Nothing was created.');
