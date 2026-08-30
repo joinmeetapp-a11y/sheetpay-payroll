@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signOut,
+} from 'firebase/auth';
 import { useQuery } from 'convex/react';
 import { auth } from '../../lib/firebase';
 import { api } from '../../../convex/_generated/api';
@@ -115,11 +120,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [noAccount, setNoAccount] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     if (!isAdminEmail(email)) {
       setError('This email is not authorized for admin access.');
       return;
@@ -142,12 +150,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       // App's auth listener will flip currentUser → dashboard renders.
     } catch (err: any) {
       const code = err?.code as string | undefined;
-      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-        setError('Invalid email or password.');
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
+        // No Firebase account exists for this allowlisted email yet — offer
+        // to create it in-place so the founder can bootstrap without leaving
+        // this screen.
+        setNoAccount(true);
+        setError('No admin account exists for this email yet. Set a password to create it.');
+      } else if (code === 'auth/wrong-password') {
+        setError('Incorrect password. Use "Forgot password?" to reset it.');
       } else if (code === 'auth/too-many-requests') {
         setError('Too many attempts. Please try again later.');
       } else {
         setError('Sign in failed. Please try again.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateAccount = async () => {
+    setError('');
+    setInfo('');
+    if (!isAdminEmail(email)) {
+      setError('This email is not authorized for admin access.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const signedEmail = cred.user.email || email;
+      await onEnsureUser(
+        cred.user.uid,
+        signedEmail,
+        cred.user.displayName || signedEmail.split('@')[0]
+      ).catch(() => {});
+      setNoAccount(false);
+      // Auth listener will render the dashboard.
+    } catch (err: any) {
+      const code = err?.code as string | undefined;
+      if (code === 'auth/email-already-in-use') {
+        // Account exists after all — go back to the normal sign-in path.
+        setNoAccount(false);
+        setError('An account with this email already exists. Enter its password, or use "Forgot password?".');
+      } else if (code === 'auth/weak-password') {
+        setError('Password must be at least 6 characters.');
+      } else {
+        setError('Could not create admin account. Please try again.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setError('');
+    setInfo('');
+    if (!isAdminEmail(email)) {
+      setError('Enter your admin email first.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setInfo(`Password reset link sent to ${email.trim()}. Check your inbox (and spam folder).`);
+    } catch (err: any) {
+      const code = err?.code as string | undefined;
+      if (code === 'auth/user-not-found') {
+        setNoAccount(true);
+        setError('No admin account exists for this email yet. Set a password below to create it.');
+      } else if (code === 'auth/too-many-requests') {
+        setError('Too many attempts. Please try again later.');
+      } else {
+        setError('Could not send reset email. Please try again.');
       }
     } finally {
       setIsLoading(false);
@@ -193,7 +271,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700">Password</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700">
+                  {noAccount ? 'Set Password (min. 6 characters)' : 'Password'}
+                </label>
+                {!noAccount && (
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={isLoading || !email}
+                    className="text-[11px] text-emerald-700 font-bold hover:underline disabled:opacity-50 cursor-pointer"
+                  >
+                    Forgot password?
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
@@ -201,7 +293,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  autoComplete="current-password"
+                  autoComplete={noAccount ? 'new-password' : 'current-password'}
                   className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-emerald-500 focus:outline-none"
                 />
                 <button
@@ -220,20 +312,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={isLoading || !email || !password}
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {isLoading ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Enter Admin Console</span>
-                </>
-              )}
-            </button>
+            {info && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold">
+                {info}
+              </div>
+            )}
+
+            {noAccount ? (
+              <button
+                type="button"
+                onClick={handleCreateAccount}
+                disabled={isLoading || !email || password.length < 6}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Create Admin Account</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={isLoading || !email || !password}
+                className="w-full py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Enter Admin Console</span>
+                  </>
+                )}
+              </button>
+            )}
 
             <button
               type="button"
