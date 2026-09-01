@@ -209,6 +209,7 @@ export const AccountantImportModal: React.FC<AccountantImportModalProps> = ({
             onImportComplete={handleImportComplete}
             onManualSetup={onClose}
             isAccountantMode={true}
+            firebaseUid={firebaseUid}
           />
         </div>
 

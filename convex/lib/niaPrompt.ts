@@ -1,6 +1,6 @@
 /**
  * Central Nia knowledge + persona. Keep all Nia system-prompt content here
- * so drift stays impossible — every Groq call reads from this one file.
+ * so drift stays impossible — every OpenAI call reads from this one file.
  */
 
 export const NIA_SUPPORT_PHONE_DISPLAY = "1-868-292-3787";

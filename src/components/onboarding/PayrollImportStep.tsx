@@ -50,6 +50,13 @@ interface PayrollImportStepProps {
   onManualSetup: () => void;
   onBack?: () => void;
   isAccountantMode?: boolean;
+  /**
+   * Firebase UID of the signed-in caller. Forwarded to the Convex OCR action
+   * so the free-plan cap is enforced and successful scans are counted against
+   * the right account. Omit for the anonymous / guest funnel — the OCR action
+   * skips both checks in that case.
+   */
+  firebaseUid?: string;
 }
 
 export const PayrollImportStep: React.FC<PayrollImportStepProps> = ({
@@ -58,6 +65,7 @@ export const PayrollImportStep: React.FC<PayrollImportStepProps> = ({
   onManualSetup,
   onBack,
   isAccountantMode = false,
+  firebaseUid,
 }) => {
   // Sub-stages within the import workflow:
   // 'upload' -> 'processing' -> 'review' -> 'confirmation' -> 'complete'
@@ -178,9 +186,21 @@ export const PayrollImportStep: React.FC<PayrollImportStepProps> = ({
           fileBase64,
           mimeType: file.type,
           fileName: file.name,
+          requesterUid: firebaseUid,
         });
 
         if (!ocr.ok || !ocr.employees || ocr.employees.length === 0) {
+          // Distinguish the free-plan cap from a soft extraction failure so
+          // the UI can nudge the user to upgrade instead of showing a
+          // deceptive "we scaffolded something" state.
+          if (ocr.error && ocr.error.startsWith('FREE_LIMIT_REACHED')) {
+            setOcrError(
+              ocr.reason ||
+                'You have used all of your free OCR scans this month. Upgrade to keep scanning payroll files.'
+            );
+            setStage('upload');
+            return;
+          }
           setOcrError(
             ocr.error ||
               'OCR did not return any employees — falling back to deterministic scaffolding.'

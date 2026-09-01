@@ -1038,6 +1038,7 @@ export default function App() {
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
+            firebaseUid={currentUser?.uid}
           />
         )}
       </div>
@@ -1066,6 +1067,7 @@ export default function App() {
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
+            firebaseUid={currentUser?.uid}
           />
         )}
       </div>
@@ -1103,6 +1105,7 @@ export default function App() {
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
+            firebaseUid={currentUser?.uid}
           />
         )}
       </div>
@@ -1133,6 +1136,7 @@ export default function App() {
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
+            firebaseUid={currentUser?.uid}
           />
         )}
       </div>
@@ -1324,6 +1328,7 @@ export default function App() {
             initialAccountType={accountType}
             onComplete={handleOnboardingComplete}
             onCancel={() => setIsOnboardingOpen(false)}
+            firebaseUid={currentUser?.uid}
           />
         )}
       </div>
@@ -1815,6 +1820,7 @@ export default function App() {
           initialAccountType={accountType}
           onComplete={handleOnboardingComplete}
           onCancel={() => setIsOnboardingOpen(false)}
+          firebaseUid={currentUser?.uid}
         />
       )}
 

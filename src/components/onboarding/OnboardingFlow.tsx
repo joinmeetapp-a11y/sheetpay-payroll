@@ -32,6 +32,8 @@ interface OnboardingFlowProps {
     importedPayrollRuns?: PayrollRun[]
   ) => void;
   onCancel: () => void;
+  /** Firebase UID of the signed-in caller, forwarded to the OCR action. */
+  firebaseUid?: string;
 }
 
 export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
@@ -40,6 +42,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   initialAccountType = 'business',
   onComplete,
   onCancel,
+  firebaseUid,
 }) => {
   // Step tracker:
   // 1: Meet Cayla
@@ -592,6 +595,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               onManualSetup={() => setCurrentStep(5)}
               onBack={() => setCurrentStep(3)}
               isAccountantMode={accountType === 'accountant'}
+              firebaseUid={firebaseUid}
             />
           )}
 

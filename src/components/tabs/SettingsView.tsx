@@ -549,6 +549,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onManualSetup={() => setShowImportModal(false)}
                 onBack={() => setShowImportModal(false)}
                 isAccountantMode={accountType === 'accountant'}
+                firebaseUid={currentUid}
               />
             </div>
           </div>
