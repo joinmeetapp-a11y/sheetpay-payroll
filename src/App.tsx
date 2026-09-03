@@ -194,6 +194,8 @@ export default function App() {
   const convexCreateAccountantClient = useMutation((api as any).accountantClients.create);
   const convexUpdateAccountantClient = useMutation((api as any).accountantClients.update);
   const convexDeleteAccountantClient = useMutation((api as any).accountantClients.deleteClient);
+  const convexUpdateAccountType = useMutation((api as any).users.updateAccountType);
+  const convexSetOnboardingCompleted = useMutation((api as any).users.setOnboardingCompleted);
 
   // Convex reactive reads — restore persisted data on login / page refresh
   const convexUserData = useQuery(
@@ -569,16 +571,19 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser || entitlement === undefined || viewMode !== 'app') return;
+    if (convexUserData === undefined) return; // wait for user data to resolve
     if (hasRoutedAfterLoginRef.current) return;
     hasRoutedAfterLoginRef.current = true;
-    if (isAccountant) {
+    // Route to accountant dashboard if plan is accountant OR if user selected accountant type
+    const goToAccountant = isAccountant || convexUserData?.accountType === 'accountant';
+    if (goToAccountant) {
       setAccountType('accountant');
       setActiveTab('accountant_dashboard');
     } else {
       setAccountType('business');
       setActiveTab('dashboard');
     }
-  }, [currentUser?.uid, entitlement, viewMode, isAccountant]);
+  }, [currentUser?.uid, entitlement, viewMode, isAccountant, convexUserData]);
 
   // ── Re-route after a Paddle payment upgrades the plan ───────────────────────
   const prevPlanRef = useRef<string | undefined>(undefined);
@@ -596,6 +601,25 @@ export default function App() {
       setActiveTab('dashboard');
     }
   }, [entitlement?.plan]);
+
+  // Auto-show onboarding for authenticated users who have no business data yet.
+  // This covers: (1) users who signed up directly without going through onboarding,
+  // (2) users whose onboarding was interrupted before data was saved.
+  // Guard: if onboardingCompleted=true in Convex, we know they've been through onboarding
+  // (even if the business reactive query hasn't updated yet — this prevents re-triggering).
+  useEffect(() => {
+    if (!currentUser || !isAuthInitialized) return;
+    if (viewMode !== 'app') return;
+    if (isOnboardingOpen) return;
+    if (pendingOnboardingData) return; // handleAuthComplete is mid-flight
+    if (convexUserData === undefined || convexUserData === null) return; // user query loading
+    if ((convexUserData as any).onboardingCompleted) return; // already did onboarding
+    if (convexBusinessData === undefined) return; // business query loading (or skipped)
+    if (convexBusinessData === null) {
+      setIsOnboardingOpen(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.uid, isAuthInitialized, viewMode, isOnboardingOpen, pendingOnboardingData, convexUserData, convexBusinessData]);
 
   // Pending confirmation state for Cayla sensitive actions
   const [pendingCaylaConfirmation, setPendingCaylaConfirmation] = useState<CaylaMessage['confirmationRequired'] | null>(null);
@@ -1144,24 +1168,37 @@ export default function App() {
       newAccountType: AccountType,
       importedPayrollRuns?: PayrollRun[]
     ) => {
-      setPendingOnboardingData({
+      const collected = {
         business: newBiz,
         employees: newEmps,
         accountType: newAccountType,
         payrollRuns: importedPayrollRuns,
-      });
+      };
       setIsOnboardingOpen(false);
-      setViewMode('auth');
+
+      if (currentUser) {
+        // Already authenticated — bypass auth screen and persist data directly
+        handleAuthComplete(currentUser.uid, currentUser.email!, currentUser.displayName || '', collected);
+      } else {
+        setPendingOnboardingData(collected);
+        setViewMode('auth');
+      }
     },
-    []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentUser]
   );
 
   const handleAuthComplete = useCallback(
-    async (uid: string, email: string, displayName: string) => {
+    async (uid: string, email: string, displayName: string, directPendingData?: {
+      business: BusinessDetails;
+      employees: Employee[];
+      accountType: AccountType;
+      payrollRuns?: PayrollRun[];
+    }) => {
       setCurrentUser({ uid, email, displayName });
       setUserName(displayName || email.split('@')[0]);
 
-      const pending = pendingOnboardingData;
+      const pending = directPendingData ?? pendingOnboardingData;
       setPendingOnboardingData(null);
 
       let convexUserId: any = null;
@@ -1182,10 +1219,23 @@ export default function App() {
         setBusiness(newBiz);
         setEmployees(newEmps);
         if (newEmps.length > 0) setSelectedEmployeeId(newEmps[0].id);
-        handleSwitchAccountType(newAccountType);
+        // Set accountType directly — bypasses the paywall check in handleSwitchAccountType
+        // which would open checkout instead of setting state during initial onboarding.
+        setAccountType(newAccountType as AccountType);
 
         try {
           if (convexUserId) {
+            // Explicitly update accountType in Convex — fixes the race where onAuthStateChanged
+            // creates the user with 'business' before handleAuthComplete runs.
+            if (newAccountType === 'accountant') {
+              await convexUpdateAccountType({ firebaseUid: uid, accountType: 'accountant' }).catch(() => {});
+            }
+
+            // Mark onboarding complete NOW (before creating the business) so the
+            // auto-onboarding effect can't re-trigger in the gap between user creation
+            // and business creation — it checks convexUserData?.onboardingCompleted.
+            await convexSetOnboardingCompleted({ firebaseUid: uid }).catch(() => {});
+
             convexBusinessId = await convexCreateBusiness({
               userId: convexUserId,
               name: newBiz.name,
@@ -1198,6 +1248,17 @@ export default function App() {
               signatoryTitle: newBiz.signatoryTitle,
               currency: newBiz.currency || 'TTD',
               currencySymbol: newBiz.currencySymbol || '$',
+              logo: newBiz.logo,
+              signatureUrl: newBiz.signatureUrl,
+              templateId: customization.templateId,
+              primaryColor: customization.primaryColor,
+              accentColor: customization.accentColor,
+              showCompanyLogo: customization.showCompanyLogo,
+              showSignature: customization.showSignature,
+              showYTD: customization.showYTD,
+              showBankDetails: customization.showBankDetails,
+              showTaxId: customization.showTaxId,
+              showQrVerification: customization.showQrVerification,
             });
             if (newEmps.length > 0) {
               await convexBulkCreateEmployees({
@@ -1256,13 +1317,14 @@ export default function App() {
             handleSendMessage('Run payroll for this month');
           }
         }
+
       }
 
       setViewMode('app');
       navigate('/app');
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pendingOnboardingData, accountType]
+    [pendingOnboardingData, accountType, customization]
   );
 
   // ── Loading screen: show until Firebase resolves auth on cold load ───────────

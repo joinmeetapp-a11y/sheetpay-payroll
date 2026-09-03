@@ -72,3 +72,30 @@ export const createOrUpdate = mutation({
     return id;
   },
 });
+
+export const updateAccountType = mutation({
+  args: {
+    firebaseUid: v.string(),
+    accountType: v.union(v.literal("business"), v.literal("accountant")),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid))
+      .first();
+    if (!user) return;
+    await ctx.db.patch(user._id, { accountType: args.accountType });
+  },
+});
+
+export const setOnboardingCompleted = mutation({
+  args: { firebaseUid: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid))
+      .first();
+    if (!user) return;
+    await ctx.db.patch(user._id, { onboardingCompleted: true });
+  },
+});

@@ -8,6 +8,8 @@ export default defineSchema({
     displayName: v.optional(v.string()),
     accountType: v.optional(v.union(v.literal("business"), v.literal("accountant"))),
     createdAt: v.optional(v.number()),
+    onboardingCompleted: v.optional(v.boolean()),
+    onboardingStep: v.optional(v.number()),
     // ─── Billing / entitlement (Paddle) ──────────────────────────────────────
     plan: v.optional(
       v.union(v.literal("free"), v.literal("pro"), v.literal("accountant"))
