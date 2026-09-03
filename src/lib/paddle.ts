@@ -89,6 +89,17 @@ export interface OpenCheckoutOptions {
 }
 
 /**
+ * Initialize Paddle.js on a page that has a `?_ptxn=` query parameter.
+ * Paddle's default payment link redirects here; Paddle.js auto-detects `_ptxn`
+ * and resumes the checkout overlay without a second `Checkout.open()` call.
+ * Do NOT strip `_ptxn` from the URL before calling this.
+ */
+export async function initPaddleAndHandleTransaction(onComplete?: () => void): Promise<void> {
+  completeHandler = onComplete ?? null;
+  await getPaddle(); // loads script + calls Paddle.Initialize() — Paddle reads _ptxn automatically
+}
+
+/**
  * Opens the Paddle checkout overlay. Resolves once the overlay has been opened
  * (not once payment completes — use onComplete / successUrl for that).
  */

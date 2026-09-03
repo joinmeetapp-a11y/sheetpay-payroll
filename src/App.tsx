@@ -70,7 +70,7 @@ import { BatchPayrollModal } from './components/accountant/BatchPayrollModal';
 import { CaylaPenMascot } from './components/CaylaPenMascot';
 import { UpgradeBanner } from './components/UpgradeBanner';
 import { ProGate } from './components/ProGate';
-import { openPaddleCheckout, isPaddleConfigured } from './lib/paddle';
+import { openPaddleCheckout, isPaddleConfigured, initPaddleAndHandleTransaction } from './lib/paddle';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { PayrollReminders } from './components/reminders/PayrollReminders';
 import { NiaWidget } from './components/nia/NiaWidget';
@@ -289,7 +289,9 @@ export default function App() {
         }
 
         // Returning authenticated user — go straight to app if on landing
-        // (but never hijack the /admin route).
+        // (but never hijack /admin, /payroll/*, or any existing /app/* path
+        // such as /app/billing?_ptxn=... which Paddle uses as its default
+        // payment link; navigating away strips the transaction parameter).
         if (
           viewMode === 'landing' &&
           !pendingOnboardingData &&
@@ -297,7 +299,9 @@ export default function App() {
           !window.location.pathname.startsWith('/payroll/')
         ) {
           setViewMode('app');
-          navigate('/app');
+          if (!window.location.pathname.startsWith('/app')) {
+            navigate('/app');
+          }
         }
       } else {
         setCurrentUser(null);
@@ -308,9 +312,14 @@ export default function App() {
   }, []);
 
   // Route protection: unauthenticated users on /app → redirect to landing.
+  // Exceptions: (1) wait until Firebase has resolved auth; (2) never redirect
+  // while a Paddle transaction (_ptxn) is in the URL — Paddle may land here
+  // before our Firebase session is fully restored.
   useEffect(() => {
     if (!isAuthInitialized) return;
     if (currentUser) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('_ptxn')) return; // let Paddle finish its checkout redirect
     if (window.location.pathname.startsWith('/app')) {
       navigate('/');
       setViewMode('landing');
@@ -339,6 +348,29 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.uid]);
+
+  // Handle Paddle's default-payment-link redirect (?_ptxn=txn_xxx).
+  // Paddle.js auto-opens the checkout for the transaction once initialized.
+  // Do NOT strip _ptxn before calling this — Paddle reads it from the URL.
+  useEffect(() => {
+    if (!isAuthInitialized) return;
+    const params = new URLSearchParams(window.location.search);
+    const ptxn = params.get('_ptxn');
+    if (!ptxn || !isPaddleConfigured()) return;
+
+    initPaddleAndHandleTransaction(() => {
+      // checkout.completed — Convex webhook does the authoritative activation.
+      // Just clean up the URL and return the user to the app.
+      params.delete('_ptxn');
+      const clean = '/app' + (params.toString() ? `?${params}` : '');
+      window.history.replaceState({}, '', clean);
+      setCurrentPath('/app');
+      setViewMode('app');
+    }).catch((err) => {
+      console.error('[paddle] _ptxn init failed:', err);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthInitialized]);
 
   // Show floating Cayla trigger when scrolling down into payroll results
   useEffect(() => {
@@ -1342,31 +1374,42 @@ export default function App() {
 
       }
 
-      // If the user clicked a paid pricing CTA before authenticating, open the
+      // If the user clicked a paid pricing CTA before authenticating, open
       // Paddle checkout now that we have their verified uid + email.
       if (pendingPlanAfterAuth) {
-        const plan = pendingPlanAfterAuth;
+        const planToOpen = pendingPlanAfterAuth;
         setPendingPlanAfterAuth(null);
-        // Route to app first so the dashboard is visible after checkout redirect.
         setViewMode('app');
         navigate('/app');
-        // Then open checkout — use uid/email from auth params directly (not from
-        // currentUser state which may not have updated yet in this render cycle).
-        const origin = window.location.origin;
-        const successUrl = `${origin}/app?upgraded=${plan}`;
-        createCheckoutSession({
-          priceId: PADDLE_PRICE_IDS[plan],
-          plan,
-          firebaseUid: uid,
-          customerEmail: email,
-          successUrl,
-        }).then((result: any) => {
-          if (result?.url) {
-            window.location.href = result.url;
-          }
-        }).catch((err: any) => {
-          console.error('[checkout-after-auth] Error:', err);
-        });
+
+        if (isPaddleConfigured()) {
+          // Overlay checkout — stays on /app, no page navigation.
+          openPaddleCheckout({
+            priceId: PADDLE_PRICE_IDS[planToOpen],
+            email,
+            customData: { firebaseUid: uid, plan: planToOpen },
+            successUrl: `${window.location.origin}/app`,
+            onComplete: () => {
+              activateFromCheckout({ firebaseUid: uid, plan: planToOpen }).catch(() => {});
+              confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'] });
+            },
+          }).catch((err: any) => {
+            console.error('[checkout-after-auth]', err);
+          });
+        } else {
+          // Fallback: server-side transaction URL.
+          createCheckoutSession({
+            priceId: PADDLE_PRICE_IDS[planToOpen],
+            plan: planToOpen,
+            firebaseUid: uid,
+            customerEmail: email,
+            successUrl: `${window.location.origin}/app?upgraded=${planToOpen}`,
+          }).then((result: any) => {
+            if (result?.url) window.location.href = result.url;
+          }).catch((err: any) => {
+            console.error('[checkout-after-auth]', err);
+          });
+        }
         return;
       }
 
@@ -1647,8 +1690,7 @@ export default function App() {
   };
 
   const handleOpenCheckout = async (checkoutPlan: 'pro' | 'accountant') => {
-    // If the user is not signed in, save the plan and route to auth first.
-    // After sign-in/sign-up, handleAuthComplete will open checkout automatically.
+    // Gate on auth — save plan and show sign-up if not yet authenticated.
     if (!currentUser) {
       setPendingPlanAfterAuth(checkoutPlan);
       setAuthMode('signup');
@@ -1660,34 +1702,47 @@ export default function App() {
     if (isCheckoutLoading) return;
     setIsCheckoutLoading(true);
 
+    // Capture values for use inside async callbacks (avoids stale-closure risk).
+    const uid = currentUser.uid;
+    const email = currentUser.email;
+    const plan = checkoutPlan;
+
     try {
-      const origin = window.location.origin;
-      const successUrl = `${origin}/app?upgraded=${checkoutPlan}`;
-
-      // Carry over the guest session id when relevant (guest→paid migration).
-      let guestSessionId: string | null = null;
-      try {
-        guestSessionId =
-          (window as any).__sheetpayGuestSessionId ||
-          window.sessionStorage.getItem('sheetpay_guest_session_id') ||
-          window.sessionStorage.getItem('sheetpay_guest_session_id_hint');
-      } catch { /* sessionStorage unavailable */ }
-
-      const result = await createCheckoutSession({
-        priceId: PADDLE_PRICE_IDS[checkoutPlan],
-        plan: checkoutPlan,
-        firebaseUid: currentUser.uid,
-        customerEmail: currentUser.email,
-        successUrl,
-      });
-
-      if (result?.url) {
-        // Navigate in the same tab — avoids popup-blocker issues and works on mobile.
-        // The Paddle success_url redirects back to /app?upgraded=... automatically.
-        window.location.href = result.url;
+      if (isPaddleConfigured()) {
+        // Primary path: client-side Paddle.js overlay.
+        // Paddle.Checkout.open() shows a modal on the current page — no full-page
+        // redirect, no popup. After checkout.completed the onComplete callback fires.
+        await openPaddleCheckout({
+          priceId: PADDLE_PRICE_IDS[plan],
+          email: email ?? undefined,
+          customData: { firebaseUid: uid, plan },
+          successUrl: `${window.location.origin}/app`,
+          onComplete: () => {
+            // Optimistic activation — the Convex Paddle webhook is authoritative
+            // and will set the subscription once Paddle calls it.
+            activateFromCheckout({ firebaseUid: uid, plan }).catch(() => {});
+            confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'] });
+            setViewMode('app');
+            navigate('/app');
+          },
+        });
+        // isCheckoutLoading is cleared below — the overlay is now open.
       } else {
-        console.error('[checkout] No URL returned from Paddle', result);
-        alert('Could not open checkout. Please try again.');
+        // Fallback: server-side Paddle transaction URL (when VITE_PADDLE_CLIENT_TOKEN
+        // is not set in the build). Paddle redirects back via the default payment
+        // link (/app/billing?_ptxn=...) which the _ptxn effect handles.
+        const result = await createCheckoutSession({
+          priceId: PADDLE_PRICE_IDS[plan],
+          plan,
+          firebaseUid: uid,
+          customerEmail: email,
+          successUrl: `${window.location.origin}/app?upgraded=${plan}`,
+        });
+        if (result?.url) {
+          window.location.href = result.url; // same-tab, avoids popup blocker
+        } else {
+          alert('Could not open checkout. Please try again.');
+        }
       }
     } catch (err) {
       console.error('[checkout] Error:', err);
