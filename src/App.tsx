@@ -187,9 +187,13 @@ export default function App() {
   // Convex Mutations (graceful no-op when Convex URL not configured)
   const convexCreateOrUpdateUser = useMutation(api.users.createOrUpdate);
   const convexCreateBusiness = useMutation(api.businesses.create);
+  const convexUpdateBusiness = useMutation(api.businesses.update);
   const convexBulkCreateEmployees = useMutation(api.employees.bulkCreate);
   const convexCreatePayrollRun = useMutation(api.payrollRuns.create);
   const convexCreateEmployee = useMutation(api.employees.create);
+  const convexCreateAccountantClient = useMutation((api as any).accountantClients.create);
+  const convexUpdateAccountantClient = useMutation((api as any).accountantClients.update);
+  const convexDeleteAccountantClient = useMutation((api as any).accountantClients.deleteClient);
 
   // Convex reactive reads — restore persisted data on login / page refresh
   const convexUserData = useQuery(
@@ -204,11 +208,22 @@ export default function App() {
     api.employees.getByBusiness,
     convexBusinessData?._id ? { businessId: convexBusinessData._id } : 'skip'
   );
+  const convexPayrollRunsData = useQuery(
+    api.payrollRuns.getByBusiness,
+    convexBusinessData?._id ? { businessId: convexBusinessData._id } : 'skip'
+  );
+  const convexAccountantClientsData = useQuery(
+    (api as any).accountantClients.getByUser,
+    convexUserData?._id ? { userId: convexUserData._id } : 'skip'
+  );
 
   // Convex Actions — AI, email, and payments
   const caylaChatAction = useAction(api.cayla.chat);
   const sendEmailAction = useAction(api.emailService.sendEmail);
   const createCheckoutSession = useAction((api as any).paddle.createCheckoutSession);
+
+  // True until Firebase auth reports its first state (prevents white-flash on cold load)
+  const [isAuthInitialized, setIsAuthInitialized] = useState(false);
 
   // Convex — reactive billing entitlement (unlocks features the moment plan changes)
   const activateFromCheckout = useMutation((api as any).subscriptions.activateFromCheckout);
@@ -234,6 +249,7 @@ export default function App() {
   const upsertedUidsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setIsAuthInitialized(true);
       if (user) {
         const name = user.displayName || user.email?.split('@')[0] || 'User';
         setCurrentUser({ uid: user.uid, email: user.email!, displayName: name });
@@ -395,13 +411,31 @@ export default function App() {
       address: convexBusinessData.address || '',
       phone: convexBusinessData.phone || '',
       email: convexBusinessData.email || '',
+      website: (convexBusinessData as any).website || '',
       taxRegistrationId: convexBusinessData.taxRegistrationId || '',
       nisNumber: convexBusinessData.nisNumber || '',
       signatoryName: convexBusinessData.signatoryName || '',
       signatoryTitle: convexBusinessData.signatoryTitle || '',
       currency: convexBusinessData.currency || 'TTD',
       currencySymbol: convexBusinessData.currencySymbol || '$',
+      logo: (convexBusinessData as any).logo || '',
+      signatureUrl: (convexBusinessData as any).signatureUrl || '',
     });
+    // Restore payslip customization if it was saved
+    const cbd = convexBusinessData as any;
+    if (cbd.templateId || cbd.primaryColor) {
+      setCustomization({
+        templateId: cbd.templateId || 'template_01',
+        primaryColor: cbd.primaryColor || '#059669',
+        accentColor: cbd.accentColor || '#10b981',
+        showCompanyLogo: cbd.showCompanyLogo ?? true,
+        showSignature: cbd.showSignature ?? true,
+        showYTD: cbd.showYTD ?? true,
+        showBankDetails: cbd.showBankDetails ?? true,
+        showTaxId: cbd.showTaxId ?? true,
+        showQrVerification: cbd.showQrVerification ?? true,
+      });
+    }
   }, [convexBusinessData?._id, currentUser?.uid]);
 
   // ── Restore persisted employees from Convex on login / page refresh ─────────
@@ -439,6 +473,93 @@ export default function App() {
       }))
     );
   }, [convexEmployeesData, currentUser?.uid]);
+
+  // ── Restore most-recent payroll run from Convex on login / page refresh ───────
+  const payrollRunRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser) { payrollRunRestoredRef.current = false; }
+  }, [currentUser]);
+  useEffect(() => {
+    if (!convexPayrollRunsData || convexPayrollRunsData.length === 0 || !currentUser) return;
+    if (payrollRunRestoredRef.current) return;
+    payrollRunRestoredRef.current = true;
+    // convexPayrollRunsData is ordered desc (newest first)
+    const r = convexPayrollRunsData[0];
+    setPayrollRun({
+      id: String(r._id),
+      periodLabel: r.periodLabel || `${r.month} ${r.year}`,
+      month: r.month,
+      year: r.year,
+      payDate: '',
+      periodStart: '',
+      periodEnd: '',
+      currency: 'TTD',
+      currencySymbol: '$',
+      status: r.status as any,
+      employeesCount: (r.employeesSnapshot || []).length,
+      grossPay: r.totalGross,
+      totalTax: r.totalPaye,
+      totalNis: r.totalNis,
+      totalHealthSurcharge: r.totalHealthSurcharge,
+      totalDeductions: r.totalDeductions,
+      netPay: r.totalNet,
+      payeTotal: r.totalPaye,
+      nisTotal: r.totalNis,
+      hsTotal: r.totalHealthSurcharge,
+      otherDeductionsTotal: 0,
+      employees: (r.employeesSnapshot || []) as any,
+      createdAt: new Date(r.createdAt).toISOString(),
+    });
+  }, [convexPayrollRunsData, currentUser?.uid]);
+
+  // ── Restore accountant clients from Convex on login / page refresh ────────────
+  const clientsRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser) { clientsRestoredRef.current = false; }
+  }, [currentUser]);
+  useEffect(() => {
+    if (!convexAccountantClientsData || convexAccountantClientsData.length === 0 || !currentUser) return;
+    if (clientsRestoredRef.current) return;
+    clientsRestoredRef.current = true;
+    setClients(
+      convexAccountantClientsData.map((c: any) => ({
+        id: c.localId,
+        _convexId: c._id,
+        name: c.name,
+        companyName: c.companyName || '',
+        country: c.country,
+        countryCode: c.countryCode,
+        currency: c.currency,
+        currencySymbol: c.currencySymbol,
+        payFrequency: c.payFrequency as any,
+        payrollSchedule: c.payFrequency as any,
+        employeeCount: c.employeeCount || 0,
+        nextPayrollDate: c.nextPayrollDate || '',
+        payrollStatus: (c.payrollStatus || 'Not Started') as any,
+        monthlyPayrollValue: c.monthlyPayrollValue || 0,
+        totalMonthlyPayroll: c.totalMonthlyPayroll || 0,
+        assignedTo: c.assignedTo || '',
+        assignedToAvatar: c.assignedToAvatar || '',
+        contactName: c.contactName || '',
+        contactEmail: c.contactEmail || '',
+        contactPhone: c.contactPhone || '',
+        businessAddress: c.businessAddress || '',
+        taxRegistrationId: c.taxRegistrationId || '',
+        nisNumber: c.nisNumber || '',
+        signatoryName: c.signatoryName || '',
+        signatoryTitle: c.signatoryTitle || '',
+        approvalStatus: (c.approvalStatus || 'not_requested') as any,
+        notes: c.notes || '',
+        employees: c.employeesJson ? JSON.parse(c.employeesJson) : [],
+        payrollRun: c.payrollRunJson ? JSON.parse(c.payrollRunJson) : null,
+        payrollRuns: c.payrollRunsJson ? JSON.parse(c.payrollRunsJson) : [],
+        missingInformation: [],
+        anomalies: [],
+        clientPermissions: [],
+        lastPayroll: '',
+      }))
+    );
+  }, [convexAccountantClientsData, currentUser?.uid]);
 
   // ── Route to the correct dashboard the moment entitlement resolves after login
   const hasRoutedAfterLoginRef = useRef(false);
@@ -897,16 +1018,87 @@ export default function App() {
       origin: { y: 0.6 },
       colors: ['#059669', '#10b981'],
     });
+    // Persist to Convex
+    if (convexUserData?._id && currentUser?.uid) {
+      convexCreateAccountantClient({
+        accountantUserId: convexUserData._id,
+        accountantFirebaseUid: currentUser.uid,
+        localId: newClient.id,
+        name: newClient.name,
+        companyName: newClient.companyName,
+        country: newClient.country,
+        countryCode: newClient.countryCode,
+        currency: newClient.currency,
+        currencySymbol: newClient.currencySymbol,
+        payFrequency: newClient.payFrequency,
+        employeeCount: newClient.employeeCount,
+        nextPayrollDate: newClient.nextPayrollDate,
+        payrollStatus: newClient.payrollStatus,
+        monthlyPayrollValue: newClient.monthlyPayrollValue,
+        totalMonthlyPayroll: newClient.totalMonthlyPayroll,
+        assignedTo: newClient.assignedTo,
+        contactName: newClient.contactName,
+        contactEmail: newClient.contactEmail,
+        contactPhone: newClient.contactPhone,
+        businessAddress: newClient.businessAddress,
+        taxRegistrationId: newClient.taxRegistrationId,
+        nisNumber: newClient.nisNumber,
+        signatoryName: newClient.signatoryName,
+        signatoryTitle: newClient.signatoryTitle,
+        notes: newClient.notes,
+        employeesJson: newClient.employees?.length ? JSON.stringify(newClient.employees) : undefined,
+        payrollRunJson: newClient.payrollRun ? JSON.stringify(newClient.payrollRun) : undefined,
+        payrollRunsJson: newClient.payrollRuns?.length ? JSON.stringify(newClient.payrollRuns) : undefined,
+      }).catch((err) => console.error('[clients] Convex create failed:', err));
+    }
   };
 
   const handleUpdateClient = (updatedClient: AccountantClient) => {
     setClients((prev) =>
       prev.map((c) => (c.id === updatedClient.id ? updatedClient : c))
     );
+    // Persist to Convex — find the Convex ID from the current clients list
+    const existing = convexAccountantClientsData?.find((c: any) => c.localId === updatedClient.id);
+    if (existing?._id) {
+      convexUpdateAccountantClient({
+        clientId: existing._id,
+        name: updatedClient.name,
+        companyName: updatedClient.companyName,
+        country: updatedClient.country,
+        countryCode: updatedClient.countryCode,
+        currency: updatedClient.currency,
+        currencySymbol: updatedClient.currencySymbol,
+        payFrequency: updatedClient.payFrequency,
+        employeeCount: updatedClient.employeeCount,
+        nextPayrollDate: updatedClient.nextPayrollDate,
+        payrollStatus: updatedClient.payrollStatus,
+        monthlyPayrollValue: updatedClient.monthlyPayrollValue,
+        totalMonthlyPayroll: updatedClient.totalMonthlyPayroll,
+        assignedTo: updatedClient.assignedTo,
+        contactName: updatedClient.contactName,
+        contactEmail: updatedClient.contactEmail,
+        contactPhone: updatedClient.contactPhone,
+        businessAddress: updatedClient.businessAddress,
+        taxRegistrationId: updatedClient.taxRegistrationId,
+        nisNumber: updatedClient.nisNumber,
+        signatoryName: updatedClient.signatoryName,
+        signatoryTitle: updatedClient.signatoryTitle,
+        notes: updatedClient.notes,
+        employeesJson: updatedClient.employees?.length ? JSON.stringify(updatedClient.employees) : undefined,
+        payrollRunJson: updatedClient.payrollRun ? JSON.stringify(updatedClient.payrollRun) : undefined,
+        payrollRunsJson: updatedClient.payrollRuns?.length ? JSON.stringify(updatedClient.payrollRuns) : undefined,
+      }).catch((err) => console.error('[clients] Convex update failed:', err));
+    }
   };
 
   const handleDeleteClient = (clientId: string) => {
     setClients((prev) => prev.filter((c) => c.id !== clientId));
+    // Delete from Convex
+    const existing = convexAccountantClientsData?.find((c: any) => c.localId === clientId);
+    if (existing?._id) {
+      convexDeleteAccountantClient({ clientId: existing._id })
+        .catch((err) => console.error('[clients] Convex delete failed:', err));
+    }
   };
 
   const handleAddTeamMember = (member: FirmTeamMember) => {
@@ -1072,6 +1264,20 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pendingOnboardingData, accountType]
   );
+
+  // ── Loading screen: show until Firebase resolves auth on cold load ───────────
+  if (!isAuthInitialized) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-600 flex items-center justify-center animate-pulse">
+            <span className="text-white font-black text-sm">S</span>
+          </div>
+          <p className="text-xs text-slate-400 font-medium">Loading Sheetpay…</p>
+        </div>
+      </div>
+    );
+  }
 
   // -------------------------------------------------------------
   // Router Branch: Team invitation acceptance (/invite/[token])
@@ -1278,9 +1484,48 @@ export default function App() {
     );
   }
 
+  const handleUpdateCustomization = (c: Partial<PayslipCustomization>) => {
+    setCustomization((prev) => {
+      const next = { ...prev, ...c };
+      if (convexBusinessData?._id) {
+        convexUpdateBusiness({
+          businessId: convexBusinessData._id,
+          templateId: next.templateId,
+          primaryColor: next.primaryColor,
+          accentColor: next.accentColor,
+          showCompanyLogo: next.showCompanyLogo,
+          showSignature: next.showSignature,
+          showYTD: next.showYTD,
+          showBankDetails: next.showBankDetails,
+          showTaxId: next.showTaxId,
+          showQrVerification: next.showQrVerification,
+        }).catch((e) => console.error('[customization] Convex update failed:', e));
+      }
+      return next;
+    });
+  };
+
   const handleLogout = async () => {
     await signOut(auth).catch(() => {});
     setCurrentUser(null);
+    // Clear all user-specific state so a subsequent login with a different
+    // account never sees another user's data.
+    setBusiness(initialBusinessDetails);
+    setCustomization(defaultPayslipCustomization);
+    setEmployees(initialEmployees);
+    setPayrollRun(null);
+    setClients([]);
+    setTeamMembers([]);
+    setBatchJobs([]);
+    setAttentionItems([]);
+    setMessages([]);
+    setAuditLogs([]);
+    setUserName('User');
+    setUserAvatar('');
+    dataRestoredRef.current = false;
+    hasRoutedAfterLoginRef.current = false;
+    payrollRunRestoredRef.current = false;
+    clientsRestoredRef.current = false;
     setViewMode('landing');
     if (window.location.pathname !== '/') {
       navigate('/');
@@ -1314,29 +1559,8 @@ export default function App() {
       /* ignore — Paddle just proceeds without the guest link */
     }
 
-    // Primary: Paddle.js overlay checkout — opens directly in the browser and
-    // does not depend on the Convex backend being reachable.
-    if (isPaddleConfigured()) {
-      try {
-        await openPaddleCheckout({
-          priceId: PADDLE_PRICE_IDS[checkoutPlan],
-          email,
-          customData,
-          successUrl,
-          onComplete: () => {
-            if (currentUser?.uid) {
-              activateFromCheckout({ firebaseUid: currentUser.uid, plan: checkoutPlan }).catch(() => {});
-            }
-          },
-        });
-        return;
-      } catch (err) {
-        console.error('Paddle.js checkout error, falling back to server checkout:', err);
-      }
-    }
-
-    // Fallback: server-created transaction checkout URL (needs a default payment
-    // link configured in the Paddle dashboard and a reachable Convex backend).
+    // Use Convex server-side Paddle API to create a hosted checkout session.
+    // This is the primary path — no client token required.
     try {
       const result = await createCheckoutSession({
         priceId: PADDLE_PRICE_IDS[checkoutPlan],
@@ -1348,11 +1572,13 @@ export default function App() {
       if (result?.url) {
         window.open(result.url, '_blank', 'noopener,noreferrer');
       } else {
-        window.location.href = '/#pricing';
+        console.error('Paddle checkout: no URL returned', result);
+        alert('Could not open checkout. Please refresh and try again.');
       }
     } catch (err) {
       console.error('Paddle checkout error:', err);
-      alert('Checkout is temporarily unavailable. Please try again in a moment or contact support.');
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Checkout unavailable: ${msg}`);
     }
   };
 
@@ -1555,7 +1781,32 @@ export default function App() {
               onOpenBatchPayroll={() => setIsBatchModalOpen(true)}
               onOpenInviteClient={(c) => setInviteModalClient(c)}
               onAddNewClient={handleAddClient}
-              onUpdateClients={(updated) => setClients(updated)}
+              onUpdateClients={(updated) => {
+                setClients(updated);
+                // Persist each updated client to Convex
+                updated.forEach((updatedClient) => {
+                  const existing = convexAccountantClientsData?.find((c: any) => c.localId === updatedClient.id);
+                  if (existing?._id) {
+                    convexUpdateAccountantClient({
+                      clientId: existing._id,
+                      name: updatedClient.name,
+                      companyName: updatedClient.companyName,
+                      country: updatedClient.country,
+                      countryCode: updatedClient.countryCode,
+                      currency: updatedClient.currency,
+                      currencySymbol: updatedClient.currencySymbol,
+                      payFrequency: updatedClient.payFrequency,
+                      employeeCount: updatedClient.employeeCount,
+                      nextPayrollDate: updatedClient.nextPayrollDate,
+                      payrollStatus: updatedClient.payrollStatus,
+                      monthlyPayrollValue: updatedClient.monthlyPayrollValue,
+                      employeesJson: updatedClient.employees?.length ? JSON.stringify(updatedClient.employees) : undefined,
+                      payrollRunJson: updatedClient.payrollRun ? JSON.stringify(updatedClient.payrollRun) : undefined,
+                      payrollRunsJson: updatedClient.payrollRuns?.length ? JSON.stringify(updatedClient.payrollRuns) : undefined,
+                    }).catch((e: any) => console.error('[clients] bulk update failed:', e));
+                  }
+                });
+              }}
               messages={messages}
               onSendMessage={handleSendMessage}
               isProcessing={isProcessing}
@@ -1631,7 +1882,7 @@ export default function App() {
                       onOpenAudit={() => setIsAuditModalOpen(true)}
                       business={business}
                       customization={customization}
-                      onUpdateCustomization={(c) => setCustomization((prev) => ({ ...prev, ...c }))}
+                      onUpdateCustomization={handleUpdateCustomization}
                       onOpenEmailModal={(emp) => setEmailModalEmployee(emp)}
                       onOpenBusinessEditModal={() => setIsBusinessModalOpen(true)}
                     />
@@ -1689,7 +1940,7 @@ export default function App() {
               employees={visibleEmployees}
               business={business}
               customization={customization}
-              onUpdateCustomization={(c) => setCustomization((prev) => ({ ...prev, ...c }))}
+              onUpdateCustomization={handleUpdateCustomization}
               onOpenEmailModal={(emp) => setEmailModalEmployee(emp)}
               onOpenBusinessEditModal={() => setIsBusinessModalOpen(true)}
             />
@@ -1750,7 +2001,20 @@ export default function App() {
           {activeTab === 'settings' && (
             <SettingsView
               business={business}
-              onSaveBusiness={(b) => setBusiness(b)}
+              onSaveBusiness={(b) => {
+                setBusiness(b);
+                if (convexBusinessData?._id) {
+                  convexUpdateBusiness({
+                    businessId: convexBusinessData._id,
+                    name: b.name, address: b.address, phone: b.phone, email: b.email,
+                    website: b.website, taxRegistrationId: b.taxRegistrationId,
+                    nisNumber: b.nisNumber, signatoryName: b.signatoryName,
+                    signatoryTitle: b.signatoryTitle, currency: b.currency,
+                    currencySymbol: b.currencySymbol, logo: b.logo,
+                    signatureUrl: b.signatureUrl,
+                  }).catch((e) => console.error('[business] settings save failed:', e));
+                }
+              }}
               accountType={accountType}
               onSwitchAccountType={handleSwitchAccountType}
               onLogout={handleLogout}
@@ -1872,7 +2136,7 @@ export default function App() {
           payroll={payrollRun}
           business={business}
           customization={customization}
-          onUpdateCustomization={(c) => setCustomization((prev) => ({ ...prev, ...c }))}
+          onUpdateCustomization={handleUpdateCustomization}
           onOpenEmailModal={(emp) => setEmailModalEmployee(emp)}
           onOpenBusinessEditModal={() => setIsBusinessModalOpen(true)}
         />
@@ -1944,7 +2208,20 @@ export default function App() {
         isOpen={isBusinessModalOpen}
         onClose={() => setIsBusinessModalOpen(false)}
         business={business}
-        onSave={setBusiness}
+        onSave={(b) => {
+          setBusiness(b);
+          if (convexBusinessData?._id) {
+            convexUpdateBusiness({
+              businessId: convexBusinessData._id,
+              name: b.name, address: b.address, phone: b.phone, email: b.email,
+              website: b.website, taxRegistrationId: b.taxRegistrationId,
+              nisNumber: b.nisNumber, signatoryName: b.signatoryName,
+              signatoryTitle: b.signatoryTitle, currency: b.currency,
+              currencySymbol: b.currencySymbol, logo: b.logo,
+              signatureUrl: b.signatureUrl,
+            }).catch((e) => console.error('[business] modal save failed:', e));
+          }
+        }}
       />
 
       {isOnboardingOpen && (

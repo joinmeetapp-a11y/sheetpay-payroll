@@ -27,12 +27,26 @@ export default defineSchema({
     address: v.optional(v.string()),
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
+    website: v.optional(v.string()),
     taxRegistrationId: v.optional(v.string()),
     nisNumber: v.optional(v.string()),
     signatoryName: v.optional(v.string()),
     signatoryTitle: v.optional(v.string()),
     currency: v.string(),
     currencySymbol: v.string(),
+    // Persisted branding / media (base64 or public URL strings)
+    logo: v.optional(v.string()),
+    signatureUrl: v.optional(v.string()),
+    // Payslip customization saved with the business so it survives refresh
+    templateId: v.optional(v.string()),
+    primaryColor: v.optional(v.string()),
+    accentColor: v.optional(v.string()),
+    showCompanyLogo: v.optional(v.boolean()),
+    showSignature: v.optional(v.boolean()),
+    showYTD: v.optional(v.boolean()),
+    showBankDetails: v.optional(v.boolean()),
+    showTaxId: v.optional(v.boolean()),
+    showQrVerification: v.optional(v.boolean()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 
@@ -479,4 +493,43 @@ export default defineSchema({
     .index("by_anon", ["anonSessionId"])
     .index("by_converted_user", ["convertedUserId"])
     .index("by_expires_at", ["expiresAt"]),
+
+  // Accountant workspace: one row per client the accountant manages.
+  // Employees, payroll run, and payroll history are serialized as JSON for
+  // simplicity; they can be normalized into separate tables in a future migration.
+  accountantClients: defineTable({
+    accountantUserId: v.id("users"),
+    accountantFirebaseUid: v.string(),
+    localId: v.string(),       // client-side UUID for React keying
+    name: v.string(),
+    companyName: v.optional(v.string()),
+    country: v.string(),
+    countryCode: v.string(),
+    currency: v.string(),
+    currencySymbol: v.string(),
+    payFrequency: v.string(),
+    employeeCount: v.optional(v.number()),
+    nextPayrollDate: v.optional(v.string()),
+    payrollStatus: v.optional(v.string()),
+    monthlyPayrollValue: v.optional(v.number()),
+    totalMonthlyPayroll: v.optional(v.number()),
+    assignedTo: v.optional(v.string()),
+    assignedToAvatar: v.optional(v.string()),
+    contactName: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    contactPhone: v.optional(v.string()),
+    businessAddress: v.optional(v.string()),
+    taxRegistrationId: v.optional(v.string()),
+    nisNumber: v.optional(v.string()),
+    signatoryName: v.optional(v.string()),
+    signatoryTitle: v.optional(v.string()),
+    approvalStatus: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    // Serialized employee/payroll data to avoid schema explosion
+    employeesJson: v.optional(v.string()),
+    payrollRunJson: v.optional(v.string()),
+    payrollRunsJson: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_accountant_user", ["accountantUserId"]),
 });

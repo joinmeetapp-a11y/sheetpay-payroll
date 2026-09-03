@@ -2,18 +2,19 @@
 import { action } from "./_generated/server";
 import { v } from "convex/values";
 
-const PADDLE_BASE = "https://api.paddle.com";
+// Use sandbox-api.paddle.com when PADDLE_SANDBOX=true or the key starts with
+// the sandbox prefix. All other keys hit the live API.
+function getPaddleBase(apiKey: string): string {
+  if (process.env.PADDLE_SANDBOX === "true" || apiKey.startsWith("pdl_sdbx_")) {
+    return "https://sandbox-api.paddle.com";
+  }
+  return "https://api.paddle.com";
+}
 
 /**
- * Creates a live Paddle Billing checkout.
- *
- * Paddle Billing has no "/checkout-sessions" endpoint — the correct server-side
- * flow is to create a Transaction and use the hosted `checkout.url` it returns.
- * That URL requires a default payment link to be configured once in the Paddle
- * dashboard (Checkout settings → Default payment link).
- *
- * `custom_data.firebaseUid` / `custom_data.plan` are echoed back on the Paddle
- * webhook (convex/http.ts) so we can unlock the exact plan the user paid for.
+ * Creates a Paddle Billing hosted checkout session via the server-side API.
+ * Returns the `checkout.url` from the transaction response, or constructs one
+ * from the transaction ID when Paddle omits it (no default payment link).
  */
 export const createCheckoutSession = action({
   args: {
@@ -25,7 +26,9 @@ export const createCheckoutSession = action({
   },
   handler: async (_ctx, args) => {
     const apiKey = process.env.PADDLE_API_KEY;
-    if (!apiKey) throw new Error("PADDLE_API_KEY not configured");
+    if (!apiKey) throw new Error("PADDLE_API_KEY not configured in Convex environment variables");
+
+    const paddleBase = getPaddleBase(apiKey);
 
     const customData: Record<string, string> = {};
     if (args.firebaseUid) customData.firebaseUid = args.firebaseUid;
@@ -35,9 +38,24 @@ export const createCheckoutSession = action({
       items: [{ price_id: args.priceId, quantity: 1 }],
       collection_mode: "automatic",
     };
-    if (Object.keys(customData).length > 0) body.custom_data = customData;
 
-    const res = await fetch(`${PADDLE_BASE}/transactions`, {
+    // Associate the purchase with the customer's email so Paddle shows it on
+    // the hosted checkout page and the customer receives a receipt email.
+    if (args.customerEmail) {
+      body.customer = { email: args.customerEmail };
+    }
+
+    // Set the success redirect URL directly on the checkout — this also causes
+    // Paddle to always return checkout.url in the transaction response.
+    if (args.successUrl) {
+      body.checkout = { success_url: args.successUrl };
+    }
+
+    if (Object.keys(customData).length > 0) {
+      body.custom_data = customData;
+    }
+
+    const res = await fetch(`${paddleBase}/transactions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -47,17 +65,27 @@ export const createCheckoutSession = action({
     });
 
     if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Paddle transaction error ${res.status}: ${err}`);
+      const errText = await res.text();
+      throw new Error(`Paddle API error ${res.status}: ${errText}`);
     }
 
     const json = await res.json();
-    const url = json?.data?.checkout?.url as string | undefined;
-    if (!url) {
-      throw new Error(
-        "Paddle did not return a checkout URL. Configure a default payment link in the Paddle dashboard (Checkout settings → Default payment link)."
-      );
+    const txnId = json?.data?.id as string | undefined;
+    let url = json?.data?.checkout?.url as string | undefined;
+
+    // Fallback: construct a hosted-checkout URL from the transaction ID when
+    // Paddle omits checkout.url (e.g. no default payment link configured).
+    if (!url && txnId) {
+      const checkoutBase = paddleBase.includes("sandbox")
+        ? "https://sandbox-checkout.paddle.com"
+        : "https://checkout.paddle.com";
+      url = `${checkoutBase}/checkout/custom/${txnId}`;
     }
-    return { url, transactionId: json?.data?.id as string | undefined };
+
+    if (!url) {
+      throw new Error("Paddle did not return a checkout URL for this transaction.");
+    }
+
+    return { url, transactionId: txnId };
   },
 });

@@ -164,6 +164,7 @@ export interface BusinessDetails {
   address: string;
   phone: string;
   email: string;
+  website?: string;
   taxRegistrationId: string;
   nisNumber?: string;
   currency: string;
