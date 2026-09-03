@@ -189,6 +189,21 @@ export default function App() {
   const convexCreateBusiness = useMutation(api.businesses.create);
   const convexBulkCreateEmployees = useMutation(api.employees.bulkCreate);
   const convexCreatePayrollRun = useMutation(api.payrollRuns.create);
+  const convexCreateEmployee = useMutation(api.employees.create);
+
+  // Convex reactive reads — restore persisted data on login / page refresh
+  const convexUserData = useQuery(
+    api.users.getByFirebaseUid,
+    currentUser?.uid ? { firebaseUid: currentUser.uid } : 'skip'
+  );
+  const convexBusinessData = useQuery(
+    api.businesses.getByUser,
+    convexUserData?._id ? { userId: convexUserData._id } : 'skip'
+  );
+  const convexEmployeesData = useQuery(
+    api.employees.getByBusiness,
+    convexBusinessData?._id ? { businessId: convexBusinessData._id } : 'skip'
+  );
 
   // Convex Actions — AI, email, and payments
   const caylaChatAction = useAction(api.cayla.chat);
@@ -366,6 +381,100 @@ export default function App() {
       setActiveTab('dashboard');
     }
   }, [entitlement, accountType, isAccountant]);
+
+  // ── Restore persisted business details from Convex on login / page refresh ─
+  const dataRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser) { dataRestoredRef.current = false; }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!convexBusinessData || !currentUser) return;
+    setBusiness({
+      name: convexBusinessData.name,
+      address: convexBusinessData.address || '',
+      phone: convexBusinessData.phone || '',
+      email: convexBusinessData.email || '',
+      taxRegistrationId: convexBusinessData.taxRegistrationId || '',
+      nisNumber: convexBusinessData.nisNumber || '',
+      signatoryName: convexBusinessData.signatoryName || '',
+      signatoryTitle: convexBusinessData.signatoryTitle || '',
+      currency: convexBusinessData.currency || 'TTD',
+      currencySymbol: convexBusinessData.currencySymbol || '$',
+    });
+  }, [convexBusinessData?._id, currentUser?.uid]);
+
+  // ── Restore persisted employees from Convex on login / page refresh ─────────
+  useEffect(() => {
+    if (!convexEmployeesData || convexEmployeesData.length === 0 || !currentUser) return;
+    if (dataRestoredRef.current) return;
+    dataRestoredRef.current = true;
+    setEmployees(
+      convexEmployeesData.map((e) => ({
+        id: e.localId,
+        name: e.name,
+        employeeId: e.employeeId,
+        position: e.position,
+        department: e.department,
+        avatar: e.avatar || '',
+        email: e.email || '',
+        phone: e.phone || '',
+        payFrequency: (e.payFrequency as any) || 'monthly',
+        basicPay: e.basicPay,
+        frequencySalary: e.frequencySalary,
+        overtimeHours: e.overtimeHours,
+        overtimeRate: e.overtimeRate,
+        bonus: e.bonus,
+        commission: e.commission,
+        allowances: e.allowances,
+        paye: e.paye,
+        nis: e.nis,
+        healthSurcharge: e.healthSurcharge,
+        otherDeductions: e.otherDeductions,
+        grossPay: e.grossPay,
+        netPay: e.netPay,
+        status: (e.status as any) || 'active',
+        changedFields: [],
+        isDemo: false,
+      }))
+    );
+  }, [convexEmployeesData, currentUser?.uid]);
+
+  // ── Route to the correct dashboard the moment entitlement resolves after login
+  const hasRoutedAfterLoginRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser) { hasRoutedAfterLoginRef.current = false; }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || entitlement === undefined || viewMode !== 'app') return;
+    if (hasRoutedAfterLoginRef.current) return;
+    hasRoutedAfterLoginRef.current = true;
+    if (isAccountant) {
+      setAccountType('accountant');
+      setActiveTab('accountant_dashboard');
+    } else {
+      setAccountType('business');
+      setActiveTab('dashboard');
+    }
+  }, [currentUser?.uid, entitlement, viewMode, isAccountant]);
+
+  // ── Re-route after a Paddle payment upgrades the plan ───────────────────────
+  const prevPlanRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const newPlan = entitlement?.plan;
+    if (prevPlanRef.current === newPlan) return;
+    const prev = prevPlanRef.current;
+    prevPlanRef.current = newPlan;
+    if (!prev || !currentUser || viewMode !== 'app') return;
+    if (newPlan === 'accountant') {
+      setAccountType('accountant');
+      setActiveTab('accountant_dashboard');
+    } else if (prev === 'accountant' && newPlan !== 'accountant') {
+      setAccountType('business');
+      setActiveTab('dashboard');
+    }
+  }, [entitlement?.plan]);
 
   // Pending confirmation state for Cayla sensitive actions
   const [pendingCaylaConfirmation, setPendingCaylaConfirmation] = useState<CaylaMessage['confirmationRequired'] | null>(null);
@@ -617,6 +726,36 @@ export default function App() {
         employees: [newEmp, ...payrollRun.employees],
       });
       setPayrollRun(updatedPayroll);
+    }
+    // Persist to Convex so the employee survives page refresh
+    if (convexBusinessData?._id && convexUserData?._id) {
+      convexCreateEmployee({
+        businessId: convexBusinessData._id,
+        userId: convexUserData._id,
+        name: newEmp.name,
+        employeeId: newEmp.employeeId || `EMP-${Date.now()}`,
+        position: newEmp.position || 'Team Member',
+        department: newEmp.department || 'General',
+        avatar: newEmp.avatar,
+        email: newEmp.email,
+        phone: newEmp.phone,
+        payFrequency: newEmp.payFrequency || 'monthly',
+        basicPay: newEmp.basicPay || 0,
+        frequencySalary: newEmp.frequencySalary || newEmp.basicPay || 0,
+        overtimeHours: newEmp.overtimeHours || 0,
+        overtimeRate: newEmp.overtimeRate || 0,
+        bonus: newEmp.bonus || 0,
+        commission: newEmp.commission || 0,
+        allowances: newEmp.allowances || 0,
+        paye: newEmp.paye || 0,
+        nis: newEmp.nis || 0,
+        healthSurcharge: newEmp.healthSurcharge || 0,
+        otherDeductions: newEmp.otherDeductions || 0,
+        grossPay: newEmp.grossPay || 0,
+        netPay: newEmp.netPay || 0,
+        status: newEmp.status || 'pending',
+        localId: newEmp.id,
+      }).catch((err) => console.error('[employees] Convex create failed:', err));
     }
     const auditEntry: AuditLogEntry = {
       id: `audit-${Date.now()}`,

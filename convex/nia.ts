@@ -3,8 +3,8 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { buildNiaSystemPrompt, looksLikePromptInjection, NIA_SUPPORT_PHONE_DISPLAY } from "./lib/niaPrompt";
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_MODEL = "gpt-4o-mini";
 
 // Per-session rate limits — anonymous callers are stricter than authenticated.
 const RATE_LIMIT_AUTHED_PER_MIN = 12;
@@ -86,7 +86,7 @@ export const chat = action({
     }
 
     // Save the user message immediately so the transcript is complete even
-    // if Groq fails.
+    // if the OpenAI call fails.
     await ctx.runMutation(internal.niaInternal.appendMessage, {
       conversationId: bootstrap.conversationId,
       senderType: "user",
@@ -114,8 +114,8 @@ export const chat = action({
       });
     }
 
-    // Recent context — cap history to keep tokens bounded. Groq rejects
-    // messages with empty content, so filter those out defensively.
+    // Recent context — cap history to keep tokens bounded. Filter empty
+    // content defensively.
     const history: any[] = await ctx.runQuery(internal.niaInternal.recentMessages, {
       conversationId: bootstrap.conversationId,
       limit: 20,
@@ -129,8 +129,8 @@ export const chat = action({
       });
     }
 
-    // ── Call Groq ───────────────────────────────────────────────────────────
-    const apiKey = process.env.GROQ_API_KEY;
+    // ── Call OpenAI ─────────────────────────────────────────────────────────
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       const fallback =
         "I'm not fully configured yet — the Sheetpay team hasn't connected me to my brain. You can call support at " +
@@ -144,10 +144,10 @@ export const chat = action({
       return { reply: fallback, conversationId: bootstrap.conversationId, mode: "nia" };
     }
 
-    const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
+    const model = DEFAULT_MODEL;
     let reply = "";
     try {
-      const resp = await fetch(GROQ_URL, {
+      const resp = await fetch(OPENAI_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -162,7 +162,7 @@ export const chat = action({
       });
       if (!resp.ok) {
         const errBody = await resp.text();
-        console.error("[nia.chat] Groq error", resp.status, errBody);
+        console.error("[nia.chat] OpenAI error", resp.status, errBody);
         reply =
           "I'm having trouble responding right now. Want me to send this to Sheetpay Support instead? You can also call " +
           NIA_SUPPORT_PHONE_DISPLAY +

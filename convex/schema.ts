@@ -3,11 +3,11 @@ import { v } from "convex/values";
 
 export default defineSchema({
   users: defineTable({
-    firebaseUid: v.string(),
+    firebaseUid: v.optional(v.string()),
     email: v.string(),
     displayName: v.optional(v.string()),
-    accountType: v.union(v.literal("business"), v.literal("accountant")),
-    createdAt: v.number(),
+    accountType: v.optional(v.union(v.literal("business"), v.literal("accountant"))),
+    createdAt: v.optional(v.number()),
     // ─── Billing / entitlement (Paddle) ──────────────────────────────────────
     plan: v.optional(
       v.union(v.literal("free"), v.literal("pro"), v.literal("accountant"))
