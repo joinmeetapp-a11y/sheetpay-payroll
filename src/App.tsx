@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import confetti from 'canvas-confetti';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signOut, getRedirectResult } from 'firebase/auth';
 import { useAction, useMutation, useQuery } from 'convex/react';
 import { auth } from './lib/firebase';
 import { api } from '../convex/_generated/api';
@@ -196,6 +196,14 @@ export default function App() {
   // Agent Engine Reference
   const agentEngineRef = useRef<CaylaAgentEngine>(new CaylaAgentEngine());
 
+  // Ref mirrors for values read inside the onAuthStateChanged closure.
+  // onAuthStateChanged runs with an empty-deps effect so its closure is stale;
+  // refs give it access to the current values without recreating the listener.
+  const viewModeRef = useRef(viewMode);
+  const pendingOnboardingDataRef = useRef(pendingOnboardingData);
+  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
+  useEffect(() => { pendingOnboardingDataRef.current = pendingOnboardingData; }, [pendingOnboardingData]);
+
   // Convex Mutations (graceful no-op when Convex URL not configured)
   const convexCreateOrUpdateUser = useMutation(api.users.createOrUpdate);
   const convexCreateBusiness = useMutation(api.businesses.create);
@@ -239,6 +247,13 @@ export default function App() {
   // True until Firebase auth reports its first state (prevents white-flash on cold load)
   const [isAuthInitialized, setIsAuthInitialized] = useState(false);
 
+  // signInWithRedirect causes a full page reload. Firebase fires onAuthStateChanged
+  // with null FIRST (before the redirect result is processed), which would make
+  // isAuthInitialized=true with currentUser=null and flash the landing page.
+  // We hold this flag true until getRedirectResult() at the App level resolves,
+  // guaranteeing the loading screen stays up through the entire redirect window.
+  const [isGoogleRedirectPending, setIsGoogleRedirectPending] = useState(true);
+
   // Convex — reactive billing entitlement (unlocks features the moment plan changes)
   const activateFromCheckout = useMutation((api as any).subscriptions.activateFromCheckout);
   const entitlement = useQuery(
@@ -251,6 +266,34 @@ export default function App() {
   const isPro = isAdmin || (entitlement?.isPro ?? false);
   const isAccountant = isAdmin || (entitlement?.isAccountant ?? false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // App-level Google redirect handler — resolves isGoogleRedirectPending.
+  // signInWithRedirect causes a full page reload; AuthScreen may not be mounted
+  // on return (viewMode resets to 'landing'), so we handle getRedirectResult()
+  // here. onAuthStateChanged handles routing once the redirect resolves.
+  // Resolving this promise (success, error, or no-pending-redirect) is what
+  // finally allows the loading screen to drop and show the real content.
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(auth)
+      .then((cred) => {
+        // cred is non-null only when a redirect just completed. onAuthStateChanged
+        // will fire with this user and handle the routing — nothing extra needed.
+        if (cred?.user) {
+          console.log('[google-redirect] redirect sign-in completed for', cred.user.email);
+        }
+      })
+      .catch((err: any) => {
+        if (err?.code && err.code !== 'auth/no-auth-event') {
+          console.error('[google-redirect] error:', err.code);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsGoogleRedirectPending(false);
+      });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Firebase auth state sync. Runs on cold load / session restore too, not
   // just after a fresh sign-in — so this is where we make sure a Convex user
@@ -288,13 +331,14 @@ export default function App() {
           });
         }
 
-        // Returning authenticated user — go straight to app if on landing
-        // (but never hijack /admin, /payroll/*, or any existing /app/* path
-        // such as /app/billing?_ptxn=... which Paddle uses as its default
-        // payment link; navigating away strips the transaction parameter).
+        // Returning authenticated user — go straight to app if on landing.
+        // Use refs (not stale closure values) so this works correctly even
+        // after viewMode/pendingOnboardingData have changed since mount.
+        // Never hijack /admin, /payroll/*, or existing /app/* paths such as
+        // /app/billing?_ptxn=... (Paddle's default payment link).
         if (
-          viewMode === 'landing' &&
-          !pendingOnboardingData &&
+          viewModeRef.current === 'landing' &&
+          !pendingOnboardingDataRef.current &&
           !window.location.pathname.startsWith('/admin') &&
           !window.location.pathname.startsWith('/payroll/')
         ) {
@@ -1420,8 +1464,13 @@ export default function App() {
     [pendingOnboardingData, accountType, customization, pendingPlanAfterAuth]
   );
 
-  // ── Loading screen: show until Firebase resolves auth on cold load ───────────
-  if (!isAuthInitialized) {
+  // ── Loading screen ─────────────────────────────────────────────────────────
+  // Show until:
+  //   (a) Firebase onAuthStateChanged has fired at least once (isAuthInitialized)
+  //   (b) getRedirectResult() has resolved (isGoogleRedirectPending)
+  // Both guards are required: (a) alone lets the landing page flash during the
+  // null→user transition that Firebase emits while processing redirect sign-ins.
+  if (!isAuthInitialized || isGoogleRedirectPending) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -1835,9 +1884,13 @@ export default function App() {
   }
 
   // -------------------------------------------------------------
-  // Router Branch 5: Landing Page (Default if not in /app or when viewMode is landing)
+  // Router Branch 5: Landing Page
+  // The `currentPath === '/'` arm only applies to unauthenticated visitors.
+  // Authenticated users whose URL is still '/' (e.g. mid-redirect, before
+  // navigate('/app') has pushed the new history entry) fall through to the
+  // main app render below — onAuthStateChanged already set viewMode='app'.
   // -------------------------------------------------------------
-  if (viewMode === 'landing' || currentPath === '/') {
+  if (viewMode === 'landing' || (currentPath === '/' && !currentUser)) {
     return (
       <div className="min-h-screen bg-white">
         <LandingPage
