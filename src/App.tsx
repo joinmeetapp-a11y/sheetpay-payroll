@@ -89,6 +89,13 @@ import { getLegalDocumentByPath } from './lib/legalContent';
 import { CountryCode } from './lib/tax-rules';
 import { Sparkles, ArrowUp, X } from 'lucide-react';
 
+// Paddle price IDs — module-level so every handler (including handleAuthComplete)
+// can access them without a stale-closure risk.
+const PADDLE_PRICE_IDS: Record<'pro' | 'accountant', string> = {
+  pro: 'pri_01m00gw728zjvw770d1k94fh6y',
+  accountant: 'pri_01m0r19pgkx604y5q3gp1trhqh',
+} as const;
+
 export default function App() {
   // Path Routing State
   const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname);
@@ -97,6 +104,11 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'landing' | 'auth' | 'app'>('landing');
   const [authMode, setAuthMode] = useState<'signup' | 'signin'>('signup');
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  // Plan the user selected on the landing/paywall before being prompted to sign in.
+  // Cleared after checkout is opened (or user goes back without authing).
+  const [pendingPlanAfterAuth, setPendingPlanAfterAuth] = useState<'pro' | 'accountant' | null>(null);
+  // Prevents duplicate checkout sessions from rapid button clicks.
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<{
@@ -294,6 +306,16 @@ export default function App() {
     return () => unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Route protection: unauthenticated users on /app → redirect to landing.
+  useEffect(() => {
+    if (!isAuthInitialized) return;
+    if (currentUser) return;
+    if (window.location.pathname.startsWith('/app')) {
+      navigate('/');
+      setViewMode('landing');
+    }
+  }, [isAuthInitialized, currentUser]);
 
   // Handle Paddle checkout success redirect (?upgraded=pro|accountant).
   // Optimistically activates the plan via Convex; the Paddle webhook reconciles.
@@ -1320,11 +1342,39 @@ export default function App() {
 
       }
 
+      // If the user clicked a paid pricing CTA before authenticating, open the
+      // Paddle checkout now that we have their verified uid + email.
+      if (pendingPlanAfterAuth) {
+        const plan = pendingPlanAfterAuth;
+        setPendingPlanAfterAuth(null);
+        // Route to app first so the dashboard is visible after checkout redirect.
+        setViewMode('app');
+        navigate('/app');
+        // Then open checkout — use uid/email from auth params directly (not from
+        // currentUser state which may not have updated yet in this render cycle).
+        const origin = window.location.origin;
+        const successUrl = `${origin}/app?upgraded=${plan}`;
+        createCheckoutSession({
+          priceId: PADDLE_PRICE_IDS[plan],
+          plan,
+          firebaseUid: uid,
+          customerEmail: email,
+          successUrl,
+        }).then((result: any) => {
+          if (result?.url) {
+            window.location.href = result.url;
+          }
+        }).catch((err: any) => {
+          console.error('[checkout-after-auth] Error:', err);
+        });
+        return;
+      }
+
       setViewMode('app');
       navigate('/app');
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pendingOnboardingData, accountType, customization]
+    [pendingOnboardingData, accountType, customization, pendingPlanAfterAuth]
   );
 
   // ── Loading screen: show until Firebase resolves auth on cold load ───────────
@@ -1588,6 +1638,7 @@ export default function App() {
     hasRoutedAfterLoginRef.current = false;
     payrollRunRestoredRef.current = false;
     clientsRestoredRef.current = false;
+    setPendingPlanAfterAuth(null);
     setViewMode('landing');
     if (window.location.pathname !== '/') {
       navigate('/');
@@ -1595,52 +1646,55 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const PADDLE_PRICE_IDS: Record<'pro' | 'accountant', string> = {
-    pro: 'pri_01m00gw728zjvw770d1k94fh6y',
-    accountant: 'pri_01m0r19pgkx604y5q3gp1trhqh',
-  };
-
   const handleOpenCheckout = async (checkoutPlan: 'pro' | 'accountant') => {
-    const email = currentUser?.email ?? undefined;
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://mysheetpay.web.app';
-    const successUrl = `${origin}/app?upgraded=${checkoutPlan}`;
-    const customData: Record<string, string> = { plan: checkoutPlan };
-    if (currentUser?.uid) customData.firebaseUid = currentUser.uid;
-    // If the guest funnel initiated this checkout, propagate the anonymous
-    // session id so the Paddle webhook can migrate the guest client / employees
-    // / payroll / branding into the paying user's account after payment lands.
-    try {
-      const guestSessionId =
-        (window as any).__sheetpayGuestSessionId ||
-        window.sessionStorage.getItem('sheetpay_guest_session_id') ||
-        window.sessionStorage.getItem('sheetpay_guest_session_id_hint');
-      if (guestSessionId && typeof guestSessionId === 'string') {
-        customData.guestSessionId = guestSessionId;
-      }
-    } catch {
-      /* ignore — Paddle just proceeds without the guest link */
+    // If the user is not signed in, save the plan and route to auth first.
+    // After sign-in/sign-up, handleAuthComplete will open checkout automatically.
+    if (!currentUser) {
+      setPendingPlanAfterAuth(checkoutPlan);
+      setAuthMode('signup');
+      setViewMode('auth');
+      return;
     }
 
-    // Use Convex server-side Paddle API to create a hosted checkout session.
-    // This is the primary path — no client token required.
+    // Prevent duplicate sessions from rapid clicks.
+    if (isCheckoutLoading) return;
+    setIsCheckoutLoading(true);
+
     try {
+      const origin = window.location.origin;
+      const successUrl = `${origin}/app?upgraded=${checkoutPlan}`;
+
+      // Carry over the guest session id when relevant (guest→paid migration).
+      let guestSessionId: string | null = null;
+      try {
+        guestSessionId =
+          (window as any).__sheetpayGuestSessionId ||
+          window.sessionStorage.getItem('sheetpay_guest_session_id') ||
+          window.sessionStorage.getItem('sheetpay_guest_session_id_hint');
+      } catch { /* sessionStorage unavailable */ }
+
       const result = await createCheckoutSession({
         priceId: PADDLE_PRICE_IDS[checkoutPlan],
         plan: checkoutPlan,
-        firebaseUid: currentUser?.uid,
-        customerEmail: email,
+        firebaseUid: currentUser.uid,
+        customerEmail: currentUser.email,
         successUrl,
       });
+
       if (result?.url) {
-        window.open(result.url, '_blank', 'noopener,noreferrer');
+        // Navigate in the same tab — avoids popup-blocker issues and works on mobile.
+        // The Paddle success_url redirects back to /app?upgraded=... automatically.
+        window.location.href = result.url;
       } else {
-        console.error('Paddle checkout: no URL returned', result);
-        alert('Could not open checkout. Please refresh and try again.');
+        console.error('[checkout] No URL returned from Paddle', result);
+        alert('Could not open checkout. Please try again.');
       }
     } catch (err) {
-      console.error('Paddle checkout error:', err);
+      console.error('[checkout] Error:', err);
       const msg = err instanceof Error ? err.message : String(err);
-      alert(`Checkout unavailable: ${msg}`);
+      alert(`Checkout error: ${msg}`);
+    } finally {
+      setIsCheckoutLoading(false);
     }
   };
 
@@ -1715,6 +1769,7 @@ export default function App() {
       <AuthScreen
         onAuthComplete={handleAuthComplete}
         onBack={() => {
+          setPendingPlanAfterAuth(null);
           setPendingOnboardingData(null);
           setViewMode('landing');
           navigate('/');
