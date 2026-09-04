@@ -47,11 +47,24 @@ jobs:
             -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
             -dname 'CN=Sheetpay, O=Sheetpay, C=TT'
 
+          FINGERPRINTS=$(keytool -list -v -keystore release.keystore -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" | grep -E 'SHA1|SHA-?256')
+
+          # Print to job log AND to summary so the values can be recovered
+          # from either place.
+          echo '::group::Fingerprints (register in Firebase Console)'
+          echo "$FINGERPRINTS"
+          echo '::endgroup::'
+          echo '::group::Secrets to add (Settings → Secrets and variables → Actions)'
+          echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+          echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+          echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          echo '::endgroup::'
+
           {
             echo '## Fingerprints (register these in Firebase Console)'
             echo ''
             echo '```'
-            keytool -list -v -keystore release.keystore -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" | grep -E 'SHA1|SHA-?256'
+            echo "$FINGERPRINTS"
             echo '```'
             echo ''
             echo '## Add these 4 repo secrets (Settings → Secrets and variables → Actions)'
