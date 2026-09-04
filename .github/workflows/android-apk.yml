@@ -195,7 +195,11 @@ jobs:
                       storeFile file('release.keystore')
                       storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
                       keyAlias System.getenv('ANDROID_KEY_ALIAS')
-                      keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                      // PKCS12 keystores force the key password to equal the
+                      // store password; the generator's -keypass is ignored.
+                      // Use the store password here so Gradle can unlock the
+                      // key without hitting BadPaddingException.
+                      keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
                   }
               }
           """
