@@ -46,6 +46,14 @@ function getAuthError(code: string): string {
       return 'Too many failed attempts. Please try again later.';
     case 'auth/network-request-failed':
       return 'Network error. Check your connection and try again.';
+    case 'auth/unauthorized-domain':
+      return 'Google sign-in is not authorized for this domain. Please contact support or try email sign-in.';
+    case 'auth/operation-not-allowed':
+      return 'Google sign-in is not enabled. Please use email and password instead.';
+    case 'auth/account-exists-with-different-credential':
+      return 'An account already exists with this email using a different sign-in method. Try signing in with email and password.';
+    case 'auth/popup-blocked':
+      return 'Your browser blocked the sign-in popup. Please allow popups for this site and try again.';
     default:
       return 'Something went wrong. Please try again.';
   }
@@ -139,55 +147,61 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setError('');
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
+    provider.addScope('email');
+    provider.addScope('profile');
     provider.setCustomParameters({ prompt: 'select_account' });
-
-    // Mobile browsers and in-app WebViews (Instagram, Facebook, iOS Safari with
-    // strict cross-origin popup blocking) reliably fail signInWithPopup. Prefer
-    // redirect there; fall back to redirect from popup on the specific error
-    // codes Firebase raises when a popup cannot open.
-    const isMobile =
-      typeof navigator !== 'undefined' &&
-      /Android|iPhone|iPad|iPod|Mobile|IEMobile/i.test(navigator.userAgent);
-
-    if (isMobile) {
-      try {
-        await signInWithRedirect(auth, provider);
-      } catch (err: any) {
-        setError(getAuthError(err.code));
-        setIsLoading(false);
-      }
-      return;
-    }
 
     try {
       const cred = await signInWithPopup(auth, provider);
+
+      // Verify Firebase actually returned a real user before proceeding.
+      if (!cred?.user?.uid) {
+        throw new Error('Google sign-in completed but no Firebase user was returned.');
+      }
+
+      console.log('[google-auth] Firebase user confirmed:', {
+        uid: cred.user.uid,
+        email: cred.user.email,
+        provider: cred.user.providerData?.[0]?.providerId,
+      });
+
+      // Enter the SAME post-auth pipeline used by email/password.
       onAuthComplete(
         cred.user.uid,
-        cred.user.email!,
-        cred.user.displayName || cred.user.email!.split('@')[0]
+        cred.user.email ?? '',
+        cred.user.displayName ?? cred.user.email?.split('@')[0] ?? ''
       );
     } catch (err: any) {
-      // User dismissed popup — silent.
-      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+      const code: string = err?.code ?? '';
+      console.error('[google-auth] error:', code, err?.message);
+
+      // User dismissed the popup — not an error; stay on auth screen quietly.
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         setIsLoading(false);
         return;
       }
-      // Popup blocked or unsupported → fall back to redirect.
+
+      // Popup couldn't open (browser blocked it) — full-page redirect as fallback.
       if (
-        err?.code === 'auth/popup-blocked' ||
-        err?.code === 'auth/operation-not-supported-in-this-environment' ||
-        err?.code === 'auth/web-storage-unsupported'
+        code === 'auth/popup-blocked' ||
+        code === 'auth/operation-not-supported-in-this-environment' ||
+        code === 'auth/web-storage-unsupported'
       ) {
         try {
           await signInWithRedirect(auth, provider);
+          // Page navigates away; execution stops here.
           return;
         } catch (redirectErr: any) {
+          console.error('[google-auth] redirect fallback failed:', redirectErr.code);
           setError(getAuthError(redirectErr.code));
           setIsLoading(false);
           return;
         }
       }
-      setError(getAuthError(err.code));
+
+      // All other errors (auth/unauthorized-domain, auth/operation-not-allowed, etc.)
+      // — show the real message on the auth screen, never silently navigate away.
+      setError(getAuthError(code));
       setIsLoading(false);
     }
   };

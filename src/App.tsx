@@ -204,6 +204,13 @@ export default function App() {
   useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
   useEffect(() => { pendingOnboardingDataRef.current = pendingOnboardingData; }, [pendingOnboardingData]);
 
+  // Ref kept current so the App-level getRedirectResult effect ([] deps, runs once)
+  // can call the shared post-auth pipeline without a stale closure.
+  // handleAuthComplete is defined later in this file; the ref is set via useEffect
+  // after it is declared, and getRedirectResult resolves asynchronously, so the
+  // ref will always be populated before the async result arrives.
+  const handleAuthCompleteRef = useRef<((uid: string, email: string, displayName: string) => Promise<void>) | null>(null);
+
   // Convex Mutations (graceful no-op when Convex URL not configured)
   const convexCreateOrUpdateUser = useMutation(api.users.createOrUpdate);
   const convexCreateBusiness = useMutation(api.businesses.create);
@@ -268,24 +275,35 @@ export default function App() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // App-level Google redirect handler — resolves isGoogleRedirectPending.
-  // signInWithRedirect causes a full page reload; AuthScreen may not be mounted
-  // on return (viewMode resets to 'landing'), so we handle getRedirectResult()
-  // here. onAuthStateChanged handles routing once the redirect resolves.
+  // signInWithRedirect (used as popup-blocked fallback) causes a full page reload;
+  // AuthScreen is not mounted on return (viewMode resets to 'landing'), so we
+  // handle getRedirectResult() here and feed it into the shared post-auth pipeline
+  // via handleAuthCompleteRef. onAuthStateChanged also fires with the user and
+  // handles routing independently — both paths are safe to run concurrently.
   // Resolving this promise (success, error, or no-pending-redirect) is what
   // finally allows the loading screen to drop and show the real content.
   useEffect(() => {
     let cancelled = false;
     getRedirectResult(auth)
       .then((cred) => {
-        // cred is non-null only when a redirect just completed. onAuthStateChanged
-        // will fire with this user and handle the routing — nothing extra needed.
+        if (cancelled) return;
         if (cred?.user) {
-          console.log('[google-redirect] redirect sign-in completed for', cred.user.email);
+          const { uid, email, displayName } = cred.user;
+          console.log('[google-redirect] redirect sign-in completed for', email, 'uid:', uid);
+          // Enter the same post-auth pipeline used by email/password and popup Google.
+          // handleAuthCompleteRef is populated by a useEffect below; it is always set
+          // before this async resolution arrives.
+          handleAuthCompleteRef.current?.(
+            uid,
+            email ?? '',
+            displayName ?? email?.split('@')[0] ?? ''
+          );
         }
       })
       .catch((err: any) => {
+        if (cancelled) return;
         if (err?.code && err.code !== 'auth/no-auth-event') {
-          console.error('[google-redirect] error:', err.code);
+          console.error('[google-redirect] auth failed:', err.code, err.message);
         }
       })
       .finally(() => {
@@ -1463,6 +1481,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pendingOnboardingData, accountType, customization, pendingPlanAfterAuth]
   );
+
+  // Keep handleAuthCompleteRef current so the App-level getRedirectResult effect
+  // ([] deps, runs once on mount) can call the latest version without going stale.
+  useEffect(() => {
+    handleAuthCompleteRef.current = handleAuthComplete;
+  }, [handleAuthComplete]);
 
   // ── Loading screen ─────────────────────────────────────────────────────────
   // Show until:
