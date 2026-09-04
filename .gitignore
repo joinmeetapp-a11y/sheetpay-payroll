@@ -6,3 +6,15 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Capacitor Android platform is regenerated in CI on every build.
+android/
+
+# Firebase Android config — provided in CI via GOOGLE_SERVICES_JSON secret,
+# never committed. Keep local copies out too.
+google-services.json
+android/app/google-services.json
+
+# Release keystore — kept only as a base64 GitHub Actions secret.
+*.keystore
+*.jks

@@ -10,6 +10,7 @@ import {
   getRedirectResult,
 } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
+import { isNativeApp, signInWithGoogleNative } from '../../lib/platform';
 import { CaylaPenMascot } from '../CaylaPenMascot';
 import {
   ArrowRight,
@@ -146,12 +147,30 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const handleGoogleSignIn = async () => {
     setError('');
     setIsLoading(true);
-    const provider = new GoogleAuthProvider();
-    provider.addScope('email');
-    provider.addScope('profile');
-    provider.setCustomParameters({ prompt: 'select_account' });
 
     try {
+      // Native (Android/iOS) uses the platform Google account picker so the
+      // user does not have to type their password inside a WebView. The plugin
+      // hands the ID token to signInWithCredential, so auth.currentUser ends
+      // up populated exactly as it does after signInWithPopup on the web.
+      if (isNativeApp()) {
+        const cred = await signInWithGoogleNative();
+        if (!cred?.user?.uid) {
+          throw new Error('Google sign-in completed but no Firebase user was returned.');
+        }
+        onAuthComplete(
+          cred.user.uid,
+          cred.user.email ?? '',
+          cred.user.displayName ?? cred.user.email?.split('@')[0] ?? ''
+        );
+        return;
+      }
+
+      const provider = new GoogleAuthProvider();
+      provider.addScope('email');
+      provider.addScope('profile');
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       const cred = await signInWithPopup(auth, provider);
 
       // Verify Firebase actually returned a real user before proceeding.
@@ -175,8 +194,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       const code: string = err?.code ?? '';
       console.error('[google-auth] error:', code, err?.message);
 
-      // User dismissed the popup — not an error; stay on auth screen quietly.
-      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      // User dismissed the picker/popup — not an error; stay on auth screen.
+      if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request' ||
+        code === 'firebase_authentication.CANCELLED'
+      ) {
+        setIsLoading(false);
+        return;
+      }
+
+      // Native flow has its own error handling — do not attempt the web
+      // redirect fallback here or it will try to leave the Capacitor shell.
+      if (isNativeApp()) {
+        setError(getAuthError(code) || err?.message || 'Google sign-in failed.');
         setIsLoading(false);
         return;
       }
@@ -187,6 +218,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         code === 'auth/operation-not-supported-in-this-environment' ||
         code === 'auth/web-storage-unsupported'
       ) {
+        const provider = new GoogleAuthProvider();
+        provider.addScope('email');
+        provider.addScope('profile');
+        provider.setCustomParameters({ prompt: 'select_account' });
         try {
           await signInWithRedirect(auth, provider);
           // Page navigates away; execution stops here.

@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import confetti from 'canvas-confetti';
 import { onAuthStateChanged, signOut, getRedirectResult } from 'firebase/auth';
+import { signOutNative } from './lib/platform';
 import { useAction, useMutation, useQuery } from 'convex/react';
 import { auth } from './lib/firebase';
 import { api } from '../convex/_generated/api';
@@ -1735,6 +1736,7 @@ export default function App() {
 
   const handleLogout = async () => {
     await signOut(auth).catch(() => {});
+    await signOutNative();
     setCurrentUser(null);
     // Clear all user-specific state so a subsequent login with a different
     // account never sees another user's data.
