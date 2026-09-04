@@ -1,0 +1,40 @@
+name: Deploy Convex
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'convex/**'
+      - '.github/workflows/convex-deploy.yml'
+  workflow_dispatch: {}
+
+# Requires the CONVEX_DEPLOY_KEY repo secret. Generate one in the
+# Convex dashboard: Settings -> Deploy Keys -> Generate production
+# deploy key. Paste it into Settings -> Secrets and variables ->
+# Actions as CONVEX_DEPLOY_KEY.
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Deploy Convex functions
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: |
+          if [ -z "$CONVEX_DEPLOY_KEY" ]; then
+            echo '::error::CONVEX_DEPLOY_KEY repo secret is not set. Generate a production deploy key in the Convex dashboard (Settings -> Deploy Keys) and add it as a repo secret.'
+            exit 1
+          fi
+          npx convex deploy -y
