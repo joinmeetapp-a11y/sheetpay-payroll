@@ -534,4 +534,32 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_accountant_user", ["accountantUserId"]),
+
+  // Closed-beta usage counters. One row per Firebase UID; both counters
+  // are enforced server-side before any paid AI/OCR call. Persists across
+  // logout/login, app reinstall and device switch because the row is keyed
+  // by firebaseUid (the identity from Firebase Auth), not the local device.
+  betaUsage: defineTable({
+    firebaseUid: v.string(),
+    betaTester: v.optional(v.boolean()),
+    caylaUsed: v.number(),
+    caylaLimit: v.number(),
+    ocrUsed: v.number(),
+    ocrLimit: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_firebase_uid", ["firebaseUid"]),
+
+  // De-duplicates paid AI/OCR calls. Every request from the mobile app
+  // carries a client-generated requestId; presence of a row here means
+  // the request already ran, so a retry from rapid tapping / a network
+  // retry / a reinstall never double-bills.
+  betaRequests: defineTable({
+    requestId: v.string(),
+    firebaseUid: v.string(),
+    kind: v.union(v.literal("cayla"), v.literal("ocr")),
+    createdAt: v.number(),
+  })
+    .index("by_request_id", ["requestId"])
+    .index("by_kind_time", ["kind", "createdAt"]),
 });

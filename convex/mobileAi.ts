@@ -1,6 +1,7 @@
 "use node";
 import { action } from "./_generated/server";
 import { v } from "convex/values";
+import { api, internal } from "./_generated/api";
 
 // OpenAI-backed OCR + AI-create actions shaped for the Sheetpay Mobile
 // (Sheetpay-Mobile) app. Returns match the shape OCRReviewModal.tsx and
@@ -164,13 +165,46 @@ export const extractPayslip = action({
   args: {
     base64Data: v.string(),
     mimeType: v.string(),
+    requestId: v.optional(v.string()),
   },
-  handler: async (_ctx, args): Promise<{ success: boolean; data?: unknown; error?: string }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<
+    | { success: true; data: unknown }
+    | { success: false; error: string; betaLimit?: "ocr" | "ocr_disabled" }
+  > => {
     if (!args.mimeType.startsWith("image/")) {
       return {
         success: false,
         error: "Only image uploads are supported. Convert PDFs to images first.",
       };
+    }
+
+    // Beta enforcement — reserve an OCR slot before spending an OpenAI
+    // vision call. Convex handles per-user cap, global cap, and kill
+    // switch; on any failure we return a structured beta-limit error the
+    // client renders as the "Beta OCR Limit Reached" prompt.
+    const identity = await ctx.auth.getUserIdentity();
+    const firebaseUid = identity?.subject;
+    const requestId = args.requestId || `ocr-${firebaseUid || "anon"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    if (firebaseUid) {
+      const reservation: any = await ctx.runMutation(api.betaUsage.reserve, {
+        firebaseUid,
+        kind: "ocr",
+        requestId,
+      });
+      if (!reservation.ok) {
+        if (reservation.reason === "ocr_disabled") {
+          return { success: false, error: "OCR is temporarily unavailable during beta testing.", betaLimit: "ocr_disabled" };
+        }
+        return {
+          success: false,
+          error: "Beta OCR limit reached. You've used your OCR scans for this beta.",
+          betaLimit: "ocr",
+        };
+      }
     }
 
     const dataUrl = `data:${args.mimeType};base64,${args.base64Data.replace(/^data:[^;]+;base64,/, "")}`;
@@ -200,6 +234,19 @@ export const extractPayslip = action({
       return { success: true, data: normalizeMobilePayslip(parsed) };
     } catch (err: unknown) {
       console.error("[mobileAi.extractPayslip] failed:", err);
+      // Refund the reservation so a failed provider call doesn't burn
+      // a beta slot.
+      if (firebaseUid) {
+        try {
+          await ctx.runMutation(internal.betaUsage.release, {
+            requestId,
+            firebaseUid,
+            kind: "ocr",
+          });
+        } catch (releaseErr) {
+          console.warn("[mobileAi.extractPayslip] release failed:", releaseErr);
+        }
+      }
       return {
         success: false,
         error: (err as { message?: string })?.message ?? "OCR failed",
@@ -213,10 +260,40 @@ export const extractPayslip = action({
 export const generatePayslip = action({
   args: {
     prompt: v.string(),
+    requestId: v.optional(v.string()),
   },
-  handler: async (_ctx, args): Promise<{ success: boolean; data?: unknown; error?: string }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<
+    | { success: true; data: unknown }
+    | { success: false; error: string; betaLimit?: "cayla" | "cayla_disabled" }
+  > => {
     if (!args.prompt.trim()) {
       return { success: false, error: "Prompt is required." };
+    }
+
+    // Beta enforcement for Cayla / AI-create.
+    const identity = await ctx.auth.getUserIdentity();
+    const firebaseUid = identity?.subject;
+    const requestId = args.requestId || `cayla-${firebaseUid || "anon"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    if (firebaseUid) {
+      const reservation: any = await ctx.runMutation(api.betaUsage.reserve, {
+        firebaseUid,
+        kind: "cayla",
+        requestId,
+      });
+      if (!reservation.ok) {
+        if (reservation.reason === "cayla_disabled") {
+          return { success: false, error: "Cayla is temporarily unavailable during beta testing.", betaLimit: "cayla_disabled" };
+        }
+        return {
+          success: false,
+          error: "Beta Cayla limit reached. You've used your Cayla AI requests for this beta.",
+          betaLimit: "cayla",
+        };
+      }
     }
 
     try {
@@ -241,6 +318,17 @@ export const generatePayslip = action({
       return { success: true, data: normalizeMobilePayslip(parsed) };
     } catch (err: unknown) {
       console.error("[mobileAi.generatePayslip] failed:", err);
+      if (firebaseUid) {
+        try {
+          await ctx.runMutation(internal.betaUsage.release, {
+            requestId,
+            firebaseUid,
+            kind: "cayla",
+          });
+        } catch (releaseErr) {
+          console.warn("[mobileAi.generatePayslip] release failed:", releaseErr);
+        }
+      }
       return {
         success: false,
         error: (err as { message?: string })?.message ?? "AI generation failed",
