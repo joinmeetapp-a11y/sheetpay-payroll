@@ -39,8 +39,8 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
 
 let cachedToken: { token: string; expiresAt: number; scope: string } | null = null;
 
-export async function getGoogleAccessToken(scope: string): Promise<string | null> {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+export async function getGoogleAccessToken(scope: string, serviceAccountJson?: string): Promise<string | null> {
+  const raw = serviceAccountJson || process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) return null;
 
   const now = Math.floor(Date.now() / 1000);
