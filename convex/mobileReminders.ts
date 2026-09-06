@@ -189,3 +189,16 @@ export const deleteReminder = mutation({
     return { ok: true };
   },
 });
+
+
+export const authStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity?.subject) return { authenticated: false, userFound: false };
+    const user = await ctx.db.query("users")
+      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
+      .first();
+    return { authenticated: true, userFound: !!user };
+  },
+});
