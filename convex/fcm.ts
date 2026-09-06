@@ -46,6 +46,13 @@ async function sendFcmMessage(
           token,
           notification: { title, body },
           data: data ?? {},
+          android: {
+            priority: "high",
+            notification: {
+              channel_id: "sheetpay_payroll_reminders",
+              sound: "default",
+            },
+          },
           webpush: {
             fcm_options: data?.deepLink ? { link: data.deepLink } : undefined,
           },
@@ -80,14 +87,19 @@ export const deliverOccurrence = internalAction({
     deepLink: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const projectId = process.env.FIREBASE_PROJECT_ID;
-    const accessToken = await getGoogleAccessToken(FCM_SCOPE);
+    const firebaseAdminJson = process.env.FIREBASE_ADMIN_JSON;
+    let adminProjectId: string | undefined;
+    if (firebaseAdminJson) {
+      try { adminProjectId = JSON.parse(firebaseAdminJson).project_id; } catch {}
+    }
+    const projectId = process.env.FIREBASE_PROJECT_ID || adminProjectId;
+    const accessToken = await getGoogleAccessToken(FCM_SCOPE, firebaseAdminJson);
 
     if (!projectId || !accessToken) {
       await ctx.runMutation(internal.reminders.markOccurrenceStatus, {
         occurrenceId: args.occurrenceId,
         status: "skipped",
-        skippedReason: "FCM not configured (FIREBASE_PROJECT_ID + GOOGLE_SERVICE_ACCOUNT_JSON required)",
+        skippedReason: "FCM not configured (set FIREBASE_ADMIN_JSON, or FIREBASE_PROJECT_ID + GOOGLE_SERVICE_ACCOUNT_JSON)",
       });
       return;
     }
