@@ -246,3 +246,50 @@ export const savePayrollRun = internalMutation({
     return runId;
   },
 });
+
+
+// Mobile Cayla helpers use verified IDs passed only from the authenticated
+// mobileCayla action. These are internal and cannot be called by the client.
+export const getUserByFirebaseUidMobile = internalQuery({
+  args: { firebaseUid: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db.query("users")
+      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid))
+      .first();
+  },
+});
+
+export const getEmployeeYtdForMobile = internalQuery({
+  args: { employeeId: v.id("employees"), userId: v.id("users"), year: v.number() },
+  handler: async (ctx, args) => {
+    const employee = await ctx.db.get(args.employeeId);
+    if (!employee || employee.userId !== args.userId) throw new Error("Forbidden");
+    const runs = await ctx.db.query("payrollRuns")
+      .withIndex("by_business_year", (q) => q.eq("businessId", employee.businessId).eq("year", args.year))
+      .collect();
+    let gross=0,deductions=0,net=0,paye=0,nis=0,healthSurcharge=0,payslips=0;
+    for(const run of runs){
+      if(!["completed","payslips_generated","delivered","approved","finalized","paid"].includes(run.status)) continue;
+      const snap=(run.employeesSnapshot||[]).find((x:any)=>
+        String(x?._id??x?.id??x?.employeeId??"")===String(employee._id) ||
+        String(x?.employeeId??"")===String(employee.employeeId)
+      );
+      if(!snap) continue;
+      gross+=Number(snap.grossPay||0);
+      deductions+=Number(snap.totalDeductions??snap.deductions??0);
+      net+=Number(snap.netPay||0);
+      paye+=Number(snap.paye||0); nis+=Number(snap.nis||0); healthSurcharge+=Number(snap.healthSurcharge||0);
+      payslips++;
+    }
+    return {gross,deductions,net,paye,nis,healthSurcharge,payslips};
+  },
+});
+
+export const logPrivacySafeEvent = internalMutation({
+  args: { userId: v.id("users"), eventName: v.string(), intent: v.optional(v.string()) },
+  handler: async (ctx,args) => {
+    const allowed=new Set(["cayla_opened","cayla_request_sent","cayla_intent_detected","cayla_action_previewed","cayla_action_confirmed","cayla_action_completed","cayla_action_failed"]);
+    if(!allowed.has(args.eventName)) throw new Error("Unsupported event");
+    await ctx.db.insert("retentionEvents",{userId:args.userId,eventName:args.eventName,createdAt:Date.now()});
+  }
+});

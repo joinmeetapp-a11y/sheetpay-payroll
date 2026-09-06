@@ -100,11 +100,106 @@ export default defineSchema({
     totalHealthSurcharge: v.number(),
     totalDeductions: v.number(),
     totalNet: v.number(),
+
+    // Mobile retention lifecycle fields. Optional so all existing web rows
+    // remain valid with zero migration downtime.
+    countryCode: v.optional(v.string()),
+    currencyCode: v.optional(v.string()),
+    payPeriodStart: v.optional(v.string()),
+    payPeriodEnd: v.optional(v.string()),
+    payDate: v.optional(v.string()),
+    employeeIds: v.optional(v.array(v.string())),
+    sourcePayrollRunId: v.optional(v.id("payrollRuns")),
+    approvedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    generationKey: v.optional(v.string()),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_business", ["businessId"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    .index("by_business_year", ["businessId", "year"])
+    .index("by_user_year", ["userId", "year"])
+    .index("by_source_run", ["sourcePayrollRunId"])
+    .index("by_generation_key", ["generationKey"]),
+
+  // Recurring payroll schedules are preparation/reminder metadata only.
+  // They never auto-finalize or auto-pay payroll.
+  recurringPayrollSchedules: defineTable({
+    userId: v.id("users"),
+    businessId: v.id("businesses"),
+    payFrequency: v.string(),
+    nextPayDate: v.string(),
+    timezone: v.string(),
+    reminderSchedule: v.string(),
+    enabled: v.boolean(),
+    reminderId: v.optional(v.id("reminders")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_business", ["businessId"])
+    .index("by_enabled_next_pay", ["enabled", "nextPayDate"]),
+
+  // One row per employee payslip delivery attempt. No recipient payload is
+  // exposed to other users; ownership always resolves through payrollRun.
+  payslipDeliveryRecords: defineTable({
+    userId: v.id("users"),
+    businessId: v.id("businesses"),
+    payrollRunId: v.id("payrollRuns"),
+    employeeId: v.id("employees"),
+    payslipExternalId: v.string(),
+    method: v.string(),
+    recipientMasked: v.optional(v.string()),
+    status: v.string(), // pending | sent | delivered | failed
+    providerMessageId: v.optional(v.string()),
+    idempotencyKey: v.string(),
+    attemptedAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+    failedReason: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_business", ["businessId"])
+    .index("by_payroll_run", ["payrollRunId"])
+    .index("by_employee", ["employeeId"])
+    .index("by_idempotency", ["idempotencyKey"]),
+
+  generatedDocuments: defineTable({
+    userId: v.id("users"),
+    businessId: v.id("businesses"),
+    employeeId: v.optional(v.id("employees")),
+    payrollRunId: v.optional(v.id("payrollRuns")),
+    taxYear: v.optional(v.number()),
+    type: v.string(), // report | year_end | export
+    subtype: v.string(),
+    countryCode: v.optional(v.string()),
+    currencyCode: v.optional(v.string()),
+    format: v.string(),
+    storageId: v.optional(v.string()),
+    status: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_business", ["businessId"])
+    .index("by_employee", ["employeeId"])
+    .index("by_payroll_run", ["payrollRunId"])
+    .index("by_business_tax_year", ["businessId", "taxYear"]),
+
+  retentionEvents: defineTable({
+    userId: v.id("users"),
+    businessId: v.optional(v.id("businesses")),
+    eventName: v.string(),
+    payrollRunId: v.optional(v.id("payrollRuns")),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_business", ["businessId"])
+    .index("by_event", ["eventName"])
+    .index("by_created_at", ["createdAt"]),
 
   messages: defineTable({
     userId: v.id("users"),
