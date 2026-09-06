@@ -46,6 +46,13 @@ async function sendFcmMessage(
           token,
           notification: { title, body },
           data: data ?? {},
+          android: {
+            priority: "high",
+            notification: {
+              channel_id: "sheetpay_payroll_reminders",
+              sound: "default",
+            },
+          },
           webpush: {
             fcm_options: data?.deepLink ? { link: data.deepLink } : undefined,
           },
