@@ -12,7 +12,7 @@ async function currentUser(ctx: any) {
 }
 
 export const registerDeviceToken = mutation({
-  args: { token: v.string(), platform: v.optional(v.string()), userAgent: v.optional(v.string()) },
+  args: { token: v.string(), platform: v.optional(v.string()), deviceId: v.optional(v.string()), userAgent: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await currentUser(ctx);
     const existing = await ctx.db.query("fcmDeviceTokens")
@@ -21,8 +21,12 @@ export const registerDeviceToken = mutation({
     if (existing) {
       await ctx.db.patch(existing._id, {
         userId: user._id,
+        firebaseUid: user.firebaseUid,
         platform: args.platform ?? existing.platform,
+        deviceId: args.deviceId ?? existing.deviceId,
         userAgent: args.userAgent ?? existing.userAgent,
+        isActive: true,
+        updatedAt: now,
         lastSeenAt: now,
         disabledAt: undefined,
         disabledReason: undefined,
@@ -31,9 +35,13 @@ export const registerDeviceToken = mutation({
     }
     const id = await ctx.db.insert("fcmDeviceTokens", {
       userId: user._id,
+      firebaseUid: user.firebaseUid,
       token: args.token,
       platform: args.platform,
+      deviceId: args.deviceId,
       userAgent: args.userAgent,
+      isActive: true,
+      updatedAt: now,
       lastSeenAt: now,
       createdAt: now,
     });
@@ -47,7 +55,14 @@ export const unregisterDeviceToken = mutation({
     const user = await currentUser(ctx);
     const existing = await ctx.db.query("fcmDeviceTokens")
       .withIndex("by_token", (q) => q.eq("token", args.token)).first();
-    if (existing && existing.userId === user._id) await ctx.db.delete(existing._id);
+    if (existing && existing.userId === user._id) {
+      await ctx.db.patch(existing._id, {
+        isActive: false,
+        disabledAt: Date.now(),
+        disabledReason: "signed_out",
+        updatedAt: Date.now(),
+      });
+    }
     return { ok: true };
   },
 });
@@ -140,6 +155,9 @@ export const createReminder = mutation({
       userId: user._id,
       businessId: business?._id,
       ...args,
+      message: args.messageTemplate,
+      status: "scheduled",
+      scheduledAt: nextRunAt,
       nextRunAt,
       enabled: true,
       createdByUserId: user._id,
