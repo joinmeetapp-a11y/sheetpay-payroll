@@ -1,12 +1,14 @@
 // Firebase JWT verification for Convex.
-// Set FIREBASE_PROJECT_ID via: npx convex env set FIREBASE_PROJECT_ID <your-project-id>
+// Sheetpay production Firebase project is "mysheetpay".
+// FIREBASE_PROJECT_ID may still override this for another deployment, but
+// production must never deploy with an empty provider list.
+const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || "mysheetpay";
+
 export default {
-  providers: process.env.FIREBASE_PROJECT_ID
-    ? [
-        {
-          domain: `https://securetoken.google.com/${process.env.FIREBASE_PROJECT_ID}`,
-          applicationID: process.env.FIREBASE_PROJECT_ID,
-        },
-      ]
-    : [],
+  providers: [
+    {
+      domain: `https://securetoken.google.com/${firebaseProjectId}`,
+      applicationID: firebaseProjectId,
+    },
+  ],
 };
