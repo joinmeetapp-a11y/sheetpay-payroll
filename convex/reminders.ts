@@ -390,6 +390,7 @@ export const claimDueReminders = internalMutation({
         scheduledFor,
         status: "pending",
         attempts: 0,
+        lastAttemptAt: undefined,
         createdAt: Date.now(),
       });
 
@@ -437,6 +438,7 @@ export const markOccurrenceStatus = internalMutation({
       skippedReason: args.skippedReason,
       errorMessage: args.errorMessage,
       attempts: row.attempts + 1,
+      lastAttemptAt: Date.now(),
     });
   },
 });
@@ -448,7 +450,9 @@ export const getUserDeviceTokens = internalQuery({
       .query("fcmDeviceTokens")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .collect();
-    return rows.filter((r) => !r.disabledAt).map((r) => ({ id: r._id, token: r.token }));
+    return rows
+      .filter((r) => !r.disabledAt && r.isActive !== false)
+      .map((r) => ({ id: r._id, token: r.token }));
   },
 });
 
@@ -458,6 +462,8 @@ export const disableDeviceToken = internalMutation({
     await ctx.db.patch(args.tokenId, {
       disabledAt: Date.now(),
       disabledReason: args.reason,
+      isActive: false,
+      updatedAt: Date.now(),
     });
   },
 });
