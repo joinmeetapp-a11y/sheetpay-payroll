@@ -92,7 +92,7 @@ export const deliverOccurrence = internalAction({
     if (firebaseAdminJson) {
       try { adminProjectId = JSON.parse(firebaseAdminJson).project_id; } catch {}
     }
-    const projectId = process.env.FIREBASE_PROJECT_ID || adminProjectId;
+    const projectId = process.env.FIREBASE_PROJECT_ID || adminProjectId || "mysheetpay";
     const accessToken = await getGoogleAccessToken(FCM_SCOPE, firebaseAdminJson);
 
     if (!projectId || !accessToken) {
@@ -176,10 +176,16 @@ export const dispatchDueReminders = internalAction({
     // Templates cover the common case with no LLM cost. Personalized bodies
     // via Cayla can layer on later — see the §8 cost-control brief.
     const defaultBodyByType: Record<string, string> = {
-      payroll: "It's time to run this pay period's payroll. Tap to review and process.",
+      payroll: "Time to run this pay period's payroll. Tap to review and process.",
+      payroll_due: "Payroll is due today. Tap to prepare and review it.",
+      payroll_review: "Your payroll is waiting for review and approval.",
+      payroll_reminder: "Your payroll reminder is due. Tap to continue.",
+      custom_payroll_reminder: "Time to run this week's payroll.",
       attendance: "Review this pay period's attendance before payroll runs.",
       timesheet: "Check pending timesheets so payroll can be processed on time.",
-      payslip: "Payslips are ready. Tap to review and send.",
+      payslip: "Payslips are ready. Tap to review and approve them.",
+      payslip_due: "Don't forget to generate this pay period's payslips.",
+      payslip_ready: "Payslips are ready for review and approval.",
       tax_deadline: "A statutory payment or filing deadline is approaching.",
       custom: "Reminder from Sheetpay.",
     };
