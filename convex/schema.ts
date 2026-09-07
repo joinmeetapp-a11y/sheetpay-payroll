@@ -292,6 +292,12 @@ export default defineSchema({
     // logging/audit — the message the user receives comes from `messageTemplate`.
     instructions: v.optional(v.string()),
     messageTemplate: v.optional(v.string()),
+    message: v.optional(v.string()),
+    status: v.optional(v.string()), // scheduled | processing | sent | failed | cancelled
+    relatedPayrollId: v.optional(v.string()),
+    relatedEmployeeId: v.optional(v.string()),
+    relatedPayslipId: v.optional(v.string()),
+    scheduledAt: v.optional(v.number()),
     // 'once' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'before_payroll'
     frequency: v.string(),
     // 0=Sun … 6=Sat, for weekly/biweekly
@@ -336,6 +342,7 @@ export default defineSchema({
     skippedReason: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     attempts: v.number(),
+    lastAttemptAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_reminder", ["reminderId"])
@@ -345,9 +352,13 @@ export default defineSchema({
   // Per-device FCM registration tokens.
   fcmDeviceTokens: defineTable({
     userId: v.id("users"),
+    firebaseUid: v.optional(v.string()),
     token: v.string(),
     platform: v.optional(v.string()), // 'web' | 'ios' | 'android'
+    deviceId: v.optional(v.string()),
     userAgent: v.optional(v.string()),
+    isActive: v.optional(v.boolean()),
+    updatedAt: v.optional(v.number()),
     // Set when the token is confirmed invalid by Firebase (unregistered, etc.)
     // Disabled tokens are not deleted immediately — kept for audit.
     disabledAt: v.optional(v.number()),
