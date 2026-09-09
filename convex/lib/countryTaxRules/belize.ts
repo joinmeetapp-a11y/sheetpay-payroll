@@ -1,5 +1,5 @@
 import { BaseTaxCalculationInput, NISCalculationResult, PAYECalculationResult, FullPayrollCalculationResult, PayFrequency } from './types';
-import { toMonthly, fromMonthly } from '../trinidad-and-tobago';
+import { toMonthly, fromMonthly } from './trinidad-and-tobago';
 
 /**
  * Belize Social Security Board (SSB) & Belize Tax Service PAYE Tax Rules
