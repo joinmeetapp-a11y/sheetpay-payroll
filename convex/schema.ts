@@ -36,6 +36,11 @@ export default defineSchema({
     signatoryTitle: v.optional(v.string()),
     currency: v.string(),
     currencySymbol: v.string(),
+    countryCode: v.optional(v.string()),
+    countryName: v.optional(v.string()),
+    taxRuleVersion: v.optional(v.string()),
+    taxRuleEffectiveFrom: v.optional(v.string()),
+    taxRuleLastUpdated: v.optional(v.string()),
     // Persisted branding / media (base64 or public URL strings)
     logo: v.optional(v.string()),
     signatureUrl: v.optional(v.string()),
@@ -82,6 +87,7 @@ export default defineSchema({
     // Marks a preview/demo row. Hidden from the dashboard as soon as at least
     // one non-demo employee exists. Real employees never carry this flag.
     isDemo: v.optional(v.boolean()),
+    statutoryData: v.optional(v.any()),
   })
     .index("by_business", ["businessId"])
     .index("by_user", ["userId"]),
@@ -100,6 +106,11 @@ export default defineSchema({
     totalHealthSurcharge: v.number(),
     totalDeductions: v.number(),
     totalNet: v.number(),
+    countryCode: v.optional(v.string()),
+    currencyCode: v.optional(v.string()),
+    taxRuleVersion: v.optional(v.string()),
+    taxRuleEffectiveFrom: v.optional(v.string()),
+    statutoryBreakdown: v.optional(v.any()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
