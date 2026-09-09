@@ -1,5 +1,9 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { calculateTrinidadPayroll } from "./lib/countryTaxRules/trinidad-and-tobago";
+import { calculateBarbadosPayroll } from "./lib/countryTaxRules/barbados";
+import { calculateSaintLuciaPayroll } from "./lib/countryTaxRules/saint-lucia";
+import { calculateBelizePayroll } from "./lib/countryTaxRules/belize";
 
 type Rule = {
   countryCode: string;
@@ -134,6 +138,51 @@ export const setBusinessCountry = mutation({
       currency,
       automatic: !!rule,
       rules: rule || null,
+    };
+  },
+});
+
+
+export const calculateStatutoryPayroll = query({
+  args: {
+    countryCode: v.string(),
+    grossIncome: v.number(),
+    frequency: v.string(),
+    payDate: v.optional(v.string()),
+    allowances: v.optional(v.number()),
+    otherDeductions: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await currentUser(ctx);
+    const business = await ctx.db.query("businesses").withIndex("by_user", (q: any) => q.eq("userId", user._id)).first();
+    if (!business) throw new Error("Business profile required");
+    const code = args.countryCode.toUpperCase();
+    if ((business.countryCode || "").toUpperCase() !== code) throw new Error("Country does not match authenticated business");
+    const rule = RULES[code];
+    if (!rule) return { supported: false, countryCode: code, currency: business.currency, reason: "Automatic statutory calculations are not yet available for this country." };
+    const rawFrequency = args.frequency.toLowerCase();
+    const frequency = rawFrequency === "biweekly" ? "fortnightly" : rawFrequency === "semimonthly" ? "semi-monthly" : rawFrequency;
+    if (!["weekly","fortnightly","semi-monthly","monthly","annual"].includes(frequency)) throw new Error("Unsupported payroll frequency for statutory calculation");
+    const input: any = {
+      grossIncome: Math.max(0, args.grossIncome),
+      frequency,
+      taxYear: args.payDate ? new Date(args.payDate + "T00:00:00Z").getUTCFullYear() : rule.taxYear,
+      allowances: Math.max(0, args.allowances || 0),
+      otherDeductions: Math.max(0, args.otherDeductions || 0),
+    };
+    let result: any;
+    if (code === "TT") result = calculateTrinidadPayroll(input);
+    else if (code === "BB") result = calculateBarbadosPayroll(input);
+    else if (code === "LC") result = calculateSaintLuciaPayroll(input);
+    else if (code === "BZ") result = calculateBelizePayroll(input);
+    else return { supported: false, countryCode: code, currency: business.currency };
+    return {
+      supported: true,
+      ruleVersion: rule.version,
+      effectiveFrom: rule.effectiveFrom,
+      lastUpdated: rule.lastUpdated,
+      source: rule.source,
+      ...result,
     };
   },
 });
