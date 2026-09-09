@@ -41,6 +41,7 @@ export default defineSchema({
     taxRuleVersion: v.optional(v.string()),
     taxRuleEffectiveFrom: v.optional(v.string()),
     taxRuleLastUpdated: v.optional(v.string()),
+    defaultPayrollFrequency: v.optional(v.string()),
     // Persisted branding / media (base64 or public URL strings)
     logo: v.optional(v.string()),
     signatureUrl: v.optional(v.string()),
