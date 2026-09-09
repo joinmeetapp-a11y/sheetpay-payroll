@@ -1,5 +1,5 @@
 import { BaseTaxCalculationInput, NISCalculationResult, PAYECalculationResult, FullPayrollCalculationResult, PayFrequency } from './types';
-import { toMonthly, fromMonthly } from './trinidad-and-tobago';
+import { toMonthly, fromMonthly } from './trinidad_and_tobago';
 
 /**
  * Barbados National Insurance Scheme (NIS) & BRA PAYE Tax Rules
