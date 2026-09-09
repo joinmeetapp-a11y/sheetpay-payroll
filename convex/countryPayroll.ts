@@ -186,3 +186,56 @@ export const calculateStatutoryPayroll = query({
     };
   },
 });
+
+
+export const setBusinessPayrollDefaults = mutation({
+  args: {
+    countryCode: v.string(),
+    defaultPayrollFrequency: v.union(v.literal("weekly"), v.literal("fortnightly"), v.literal("monthly")),
+    businessName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await currentUser(ctx);
+    const code = args.countryCode.toUpperCase();
+    const rule = RULES[code];
+    const manual = MANUAL[code];
+    const currency = rule?.currency || manual?.currency || "USD";
+    const countryName = rule?.countryName || manual?.name || code;
+    let business = await ctx.db.query("businesses")
+      .withIndex("by_user", (q: any) => q.eq("userId", user._id)).first();
+
+    const patch = {
+      countryCode: code,
+      countryName,
+      currency,
+      currencySymbol: rule?.currencySymbol || "",
+      taxRuleVersion: rule?.version || "manual",
+      taxRuleEffectiveFrom: rule?.effectiveFrom || "",
+      taxRuleLastUpdated: rule?.lastUpdated || "",
+      defaultPayrollFrequency: args.defaultPayrollFrequency,
+      updatedAt: Date.now(),
+    };
+
+    if (!business) {
+      const id = await ctx.db.insert("businesses", {
+        userId: user._id,
+        name: args.businessName?.trim() || "My Business",
+        ...patch,
+      });
+      business = await ctx.db.get(id);
+    } else {
+      await ctx.db.patch(business._id, patch);
+      business = await ctx.db.get(business._id);
+    }
+
+    return {
+      businessId: business?._id,
+      countryCode: code,
+      countryName,
+      currency,
+      defaultPayrollFrequency: args.defaultPayrollFrequency,
+      automatic: !!rule,
+      rules: rule || null,
+    };
+  },
+});
