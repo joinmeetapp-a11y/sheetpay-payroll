@@ -1,8 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { calculateTrinidadPayroll } from "./lib/countryTaxRules/trinidad-and-tobago";
+import { calculateTrinidadPayroll } from "./lib/countryTaxRules/trinidad_and_tobago";
 import { calculateBarbadosPayroll } from "./lib/countryTaxRules/barbados";
-import { calculateSaintLuciaPayroll } from "./lib/countryTaxRules/saint-lucia";
+import { calculateSaintLuciaPayroll } from "./lib/countryTaxRules/saint_lucia";
 import { calculateBelizePayroll } from "./lib/countryTaxRules/belize";
 
 type Rule = {
