@@ -23,6 +23,40 @@ export default defineSchema({
     .index("by_firebase_uid", ["firebaseUid"])
     .index("by_paddle_customer", ["paddleCustomerId"]),
 
+  statutoryRuleSets: defineTable({
+    countryCode: v.string(),
+    countryName: v.string(),
+    taxYear: v.number(),
+    version: v.string(),
+    effectiveFrom: v.string(),
+    effectiveTo: v.optional(v.string()),
+    currency: v.string(),
+    labels: v.array(v.string()),
+    rules: v.any(),
+    source: v.string(),
+    verified: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_country_year", ["countryCode", "taxYear"])
+    .index("by_country_version", ["countryCode", "version"]),
+
+  businessStatutoryOverrides: defineTable({
+    businessId: v.id("businesses"),
+    countryCode: v.string(),
+    taxYear: v.number(),
+    baseRuleVersion: v.string(),
+    customVersion: v.string(),
+    effectiveFrom: v.string(),
+    effectiveTo: v.optional(v.string()),
+    rules: v.any(),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    enabled: v.boolean(),
+  })
+    .index("by_business", ["businessId"])
+    .index("by_business_year", ["businessId", "taxYear"]),
+
   businesses: defineTable({
     userId: v.id("users"),
     name: v.string(),
