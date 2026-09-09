@@ -177,6 +177,96 @@ async function resolveRule(ctx: any, business: any, code: string, taxYear: numbe
   return null;
 }
 
+export const calculateOnboardingStatutoryPreview = query({
+  args: {
+    countryCode: v.string(),
+    grossIncome: v.number(),
+    frequency: v.string(),
+    payDate: v.string(),
+    otherDeductions: v.optional(v.number()),
+  },
+  handler: async (_ctx, args) => {
+    const code = args.countryCode.toUpperCase();
+    const rule = RULES[code];
+    if (!rule) {
+      return { supported: false, countryCode: code, reason: "Automatic statutory calculations are not available for this country." };
+    }
+
+    const frequency = normalizeFrequency(args.frequency);
+    if (!["weekly","fortnightly","monthly"].includes(frequency)) {
+      return { supported: false, countryCode: code, reason: "Unsupported payroll frequency." };
+    }
+
+    const taxYear = new Date(args.payDate + "T00:00:00Z").getUTCFullYear();
+    if (taxYear !== rule.taxYear || !isEffective(rule.effectiveFrom, rule.effectiveTo, args.payDate)) {
+      return {
+        supported: false,
+        countryCode: code,
+        taxYear,
+        reason: "Automatic statutory calculations are not currently available for this country/tax year.",
+      };
+    }
+
+    const input: any = {
+      grossIncome: Math.max(0, args.grossIncome),
+      frequency,
+      taxYear,
+      allowances: 0,
+      otherDeductions: 0,
+    };
+
+    let result: any;
+    if (code === "TT") result = calculateTrinidadPayroll(input);
+    else if (code === "BB") result = calculateBarbadosPayroll(input);
+    else if (code === "LC") result = calculateSaintLuciaPayroll(input);
+    else if (code === "BZ") result = calculateBelizePayroll(input);
+    else return { supported: false, countryCode: code };
+
+    const statutoryDeductions = [
+      ...(Number(result.payeTax) > 0 ? [{ key: code === "BZ" ? "income_tax" : "paye", label: code === "BZ" ? "Income Tax" : "PAYE", amount: Number(result.payeTax) }] : []),
+      ...(Number(result.employeeNIS) > 0 ? [{ key: code === "LC" ? "nic" : code === "BZ" ? "social_security" : "nis", label: code === "LC" ? "NIC" : code === "BZ" ? "Social Security" : code === "BB" ? "National Insurance" : "NIS", amount: Number(result.employeeNIS) }] : []),
+      ...(Number(result.healthSurcharge) > 0 ? [{ key: "health_surcharge", label: "Health Surcharge", amount: Number(result.healthSurcharge) }] : []),
+    ];
+
+    const employerContributions = Number(result.employerNIS) > 0 ? [{
+      key: code === "LC" ? "employer_nic" : code === "BZ" ? "employer_social_security" : "employer_nis",
+      label: code === "LC" ? "Employer NIC" : code === "BZ" ? "Employer Social Security" : code === "BB" ? "Employer National Insurance" : "Employer NIS",
+      amount: Number(result.employerNIS),
+    }] : [];
+
+    const otherDeductions = Math.max(0, args.otherDeductions || 0);
+    const totalStatutoryDeductions = Number(result.totalEmployeeDeductions || 0);
+    const totalDeductions = totalStatutoryDeductions + otherDeductions;
+    const grossPay = Number(result.grossIncome || args.grossIncome);
+    const netPay = grossPay - totalDeductions;
+
+    return {
+      supported: true,
+      countryCode: code,
+      countryName: rule.countryName,
+      currency: rule.currency,
+      taxYear,
+      payrollFrequency: frequency,
+      grossPay,
+      taxableIncome: Number(result.taxableIncome || 0),
+      statutoryDeductions,
+      employeeContributions: statutoryDeductions.filter((d) => !["paye","income_tax","health_surcharge"].includes(d.key)),
+      employerContributions,
+      otherDeductions,
+      totalStatutoryDeductions,
+      totalEmployerContributions: Number(result.totalEmployerContributions || 0),
+      totalDeductions,
+      netPay,
+      calculationBreakdown: result,
+      taxRuleVersion: rule.version,
+      effectiveFrom: rule.effectiveFrom,
+      lastUpdated: rule.lastUpdated,
+      source: rule.source,
+      ruleStatus: "verified",
+    };
+  },
+});
+
 export const calculateStatutoryPayroll = query({
   args: {
     countryCode: v.optional(v.string()),
