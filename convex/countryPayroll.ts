@@ -163,10 +163,21 @@ export const calculateStatutoryPayroll = query({
     const rawFrequency = args.frequency.toLowerCase();
     const frequency = rawFrequency === "biweekly" ? "fortnightly" : rawFrequency === "semimonthly" ? "semi-monthly" : rawFrequency;
     if (!["weekly","fortnightly","semi-monthly","monthly","annual"].includes(frequency)) throw new Error("Unsupported payroll frequency for statutory calculation");
+    const taxYear = args.payDate ? new Date(args.payDate + "T00:00:00Z").getUTCFullYear() : rule.taxYear;
+    if (!Number.isFinite(taxYear) || taxYear !== rule.taxYear) {
+      return {
+        supported: false,
+        countryCode: code,
+        currency: business.currency,
+        taxYear,
+        reason: `Automatic statutory calculations are not currently available for ${code} tax year ${taxYear}.`,
+      };
+    }
+
     const input: any = {
       grossIncome: Math.max(0, args.grossIncome),
       frequency,
-      taxYear: args.payDate ? new Date(args.payDate + "T00:00:00Z").getUTCFullYear() : rule.taxYear,
+      taxYear,
       allowances: Math.max(0, args.allowances || 0),
       otherDeductions: Math.max(0, args.otherDeductions || 0),
     };
@@ -176,9 +187,49 @@ export const calculateStatutoryPayroll = query({
     else if (code === "LC") result = calculateSaintLuciaPayroll(input);
     else if (code === "BZ") result = calculateBelizePayroll(input);
     else return { supported: false, countryCode: code, currency: business.currency };
+    const statutoryDeductions = [
+      ...(Number(result.payeTax) > 0 ? [{
+        key: code === "BZ" ? "income_tax" : "paye",
+        label: code === "BZ" ? "Income Tax" : "PAYE",
+        amount: Number(result.payeTax),
+      }] : []),
+      ...(Number(result.employeeNIS) > 0 ? [{
+        key: code === "LC" ? "nic" : code === "BZ" ? "social_security" : "nis",
+        label: code === "LC" ? "NIC" : code === "BZ" ? "Social Security" : code === "BB" ? "National Insurance" : "NIS",
+        amount: Number(result.employeeNIS),
+      }] : []),
+      ...(Number(result.healthSurcharge) > 0 ? [{
+        key: "health_surcharge",
+        label: "Health Surcharge",
+        amount: Number(result.healthSurcharge),
+      }] : []),
+    ];
+
+    const employerContributions = [
+      ...(Number(result.employerNIS) > 0 ? [{
+        key: code === "LC" ? "employer_nic" : code === "BZ" ? "employer_social_security" : "employer_nis",
+        label: code === "LC" ? "Employer NIC" : code === "BZ" ? "Employer Social Security" : code === "BB" ? "Employer National Insurance" : "Employer NIS",
+        amount: Number(result.employerNIS),
+      }] : []),
+    ];
+
     return {
       supported: true,
-      ruleVersion: rule.version,
+      countryCode: code,
+      countryName: rule.countryName,
+      currency: rule.currency,
+      taxYear,
+      payrollFrequency: frequency,
+      grossPay: Number(result.grossIncome),
+      taxableIncome: Number(result.taxableIncome || 0),
+      statutoryDeductions,
+      employeeContributions: statutoryDeductions.filter((d) => d.key !== "paye" && d.key !== "income_tax" && d.key !== "health_surcharge"),
+      employerContributions,
+      totalStatutoryDeductions: Number(result.totalEmployeeDeductions || 0),
+      totalEmployerContributions: Number(result.totalEmployerContributions || 0),
+      netPayBeforeOtherDeductions: Number(result.netTakeHomePay || 0),
+      calculationBreakdown: result,
+      taxRuleVersion: rule.version,
       effectiveFrom: rule.effectiveFrom,
       lastUpdated: rule.lastUpdated,
       source: rule.source,
