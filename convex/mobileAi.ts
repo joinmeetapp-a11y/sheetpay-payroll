@@ -26,6 +26,11 @@ const MOBILE_PAYSLIP_SCHEMA = `Return ONLY valid JSON matching this schema:
   "employeeEmail": string,
   "employeePhone": string,
   "employeeAddress": string,
+  "birNumber": string,
+  "nisNumber": string,
+  "countryPayrollIdentifiers": [
+    { "key": string, "label": string, "value": string }
+  ],
   "payPeriodStart": string,
   "payPeriodEnd": string,
   "payDate": string,
@@ -109,6 +114,16 @@ function normalizeMobilePayslip(input: unknown): Record<string, unknown> {
     employeeEmail: asString("employeeEmail"),
     employeePhone: asString("employeePhone"),
     employeeAddress: asString("employeeAddress"),
+    birNumber: asString("birNumber"),
+    nisNumber: asString("nisNumber"),
+    countryPayrollIdentifiers: asArray("countryPayrollIdentifiers").map((item) => {
+      const row = (item as Record<string, unknown>) || {};
+      return {
+        key: typeof row.key === "string" ? row.key : "",
+        label: typeof row.label === "string" ? row.label : "",
+        value: typeof row.value === "string" ? row.value : "",
+      };
+    }).filter((row) => row.key && row.value),
     payPeriodStart: asString("payPeriodStart"),
     payPeriodEnd: asString("payPeriodEnd"),
     payDate: asString("payDate"),
