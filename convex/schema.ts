@@ -123,6 +123,9 @@ export default defineSchema({
     // one non-demo employee exists. Real employees never carry this flag.
     isDemo: v.optional(v.boolean()),
     statutoryData: v.optional(v.any()),
+    // Country-aware employee payroll identifiers, e.g. TT birNumber/nisNumber.
+    // Kept as a structured object so future countries do not require schema churn.
+    payrollIdentifiers: v.optional(v.any()),
   })
     .index("by_business", ["businessId"])
     .index("by_user", ["userId"]),
