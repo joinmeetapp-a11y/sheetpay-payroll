@@ -126,6 +126,15 @@ export default defineSchema({
     // Country-aware employee payroll identifiers, e.g. TT birNumber/nisNumber.
     // Kept as a structured object so future countries do not require schema churn.
     payrollIdentifiers: v.optional(v.any()),
+    payType: v.optional(v.string()),
+    hourlyRate: v.optional(v.number()),
+    dailyRate: v.optional(v.number()),
+    weeklyWage: v.optional(v.number()),
+    fortnightlyWage: v.optional(v.number()),
+    monthlySalary: v.optional(v.number()),
+    annualSalary: v.optional(v.number()),
+    defaultPayrollFrequency: v.optional(v.string()),
+    countryCode: v.optional(v.string()),
   })
     .index("by_business", ["businessId"])
     .index("by_user", ["userId"]),
