@@ -164,6 +164,89 @@ export default defineSchema({
     .index("by_business", ["businessId"])
     .index("by_user", ["userId"]),
 
+  payrollBatches: defineTable({
+    businessId: v.id("businesses"),
+    userId: v.id("users"),
+    idempotencyKey: v.string(),
+    source: v.string(),
+    sourcePayrollRunId: v.optional(v.id("payrollRuns")),
+    payPeriodStart: v.string(),
+    payPeriodEnd: v.string(),
+    payDate: v.string(),
+    status: v.string(),
+    employeeCount: v.number(),
+    readyCount: v.number(),
+    issueCount: v.number(),
+    generatedCount: v.number(),
+    failedCount: v.number(),
+    selectedTemplateId: v.optional(v.string()),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_business", ["businessId"])
+    .index("by_business_period", ["businessId", "payPeriodStart", "payPeriodEnd"])
+    .index("by_idempotency", ["idempotencyKey"]),
+
+  payrollBatchEmployees: defineTable({
+    batchId: v.id("payrollBatches"),
+    businessId: v.id("businesses"),
+    employeeId: v.optional(v.id("employees")),
+    employeeKey: v.string(),
+    employeeSnapshot: v.any(),
+    payrollData: v.any(),
+    confidence: v.optional(v.any()),
+    issues: v.array(v.string()),
+    status: v.string(),
+    payslipId: v.optional(v.string()),
+    generationError: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_batch", ["batchId"])
+    .index("by_batch_employee", ["batchId", "employeeKey"]),
+
+  payrollDrafts: defineTable({
+    batchId: v.id("payrollBatches"),
+    businessId: v.id("businesses"),
+    userId: v.id("users"),
+    payload: v.any(),
+    updatedAt: v.number(),
+  })
+    .index("by_batch", ["batchId"])
+    .index("by_business", ["businessId"]),
+
+  payslipDeliveries: defineTable({
+    batchId: v.id("payrollBatches"),
+    businessId: v.id("businesses"),
+    employeeId: v.optional(v.id("employees")),
+    employeeKey: v.string(),
+    payslipId: v.string(),
+    attempt: v.number(),
+    idempotencyKey: v.string(),
+    recipient: v.string(),
+    status: v.string(),
+    resendMessageId: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    sentAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_batch", ["batchId"])
+    .index("by_payslip", ["payslipId"])
+    .index("by_idempotency", ["idempotencyKey"]),
+
+  payrollAuditEvents: defineTable({
+    batchId: v.id("payrollBatches"),
+    businessId: v.id("businesses"),
+    userId: v.id("users"),
+    action: v.string(),
+    count: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_batch", ["batchId"])
+    .index("by_business", ["businessId"]),
+
   messages: defineTable({
     userId: v.id("users"),
     businessId: v.optional(v.id("businesses")),
