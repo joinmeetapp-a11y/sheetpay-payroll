@@ -199,6 +199,7 @@ export default defineSchema({
     issues: v.array(v.string()),
     status: v.string(),
     payslipId: v.optional(v.string()),
+    payslipStorageId: v.optional(v.id("_storage")),
     generationError: v.optional(v.string()),
     updatedAt: v.number(),
   })
@@ -221,6 +222,7 @@ export default defineSchema({
     employeeId: v.optional(v.id("employees")),
     employeeKey: v.string(),
     payslipId: v.string(),
+    payslipStorageId: v.id("_storage"),
     attempt: v.number(),
     idempotencyKey: v.string(),
     recipient: v.string(),
