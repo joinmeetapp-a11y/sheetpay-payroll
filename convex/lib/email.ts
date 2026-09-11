@@ -36,6 +36,8 @@ export interface SendEmailOptions {
   replyTo?: string;
   /** Skip preference checks — used for critical security emails. */
   bypassPreferences?: boolean;
+  /** Private attachments sent directly to this one recipient. */
+  attachments?: Array<{ filename: string; content?: string; path?: string; contentType?: string }>;
 }
 
 export interface SendEmailResult {
@@ -256,6 +258,12 @@ export async function sendEmail(
     subject: rendered.subject,
     html: rendered.html,
     headers: { "X-Sheetpay-Template": String(options.emailType) },
+    attachments: options.attachments?.map((attachment) => ({
+      filename: attachment.filename,
+      content: attachment.content,
+      path: attachment.path,
+      content_type: attachment.contentType || "application/pdf",
+    })),
   };
 
   const { ok, body, attempts } = await postResend(env.apiKey, payload);
