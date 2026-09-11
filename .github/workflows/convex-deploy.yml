@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - codex/retention-system-v1
     paths:
       - 'convex/**'
       - '.github/workflows/convex-deploy.yml'
