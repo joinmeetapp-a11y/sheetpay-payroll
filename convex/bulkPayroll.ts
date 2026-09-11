@@ -148,6 +148,33 @@ export const saveDraft = mutation({
   },
 });
 
+export const generatePayslipUploadUrl = mutation({
+  args: { batchId: v.id("payrollBatches") },
+  handler: async (ctx, args) => {
+    await ownedBatch(ctx, args.batchId);
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
+export const attachGeneratedPayslip = mutation({
+  args: {
+    batchId: v.id("payrollBatches"), employeeKey: v.string(),
+    payslipId: v.string(), storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const { batch } = await ownedBatch(ctx, args.batchId);
+    const row = await ctx.db.query("payrollBatchEmployees")
+      .withIndex("by_batch_employee", (q: any) => q.eq("batchId", args.batchId).eq("employeeKey", args.employeeKey)).first();
+    if (!row) throw new Error("Employee not found in payroll");
+    await ctx.db.patch(row._id, {
+      payslipId: args.payslipId, payslipStorageId: args.storageId,
+      status: "generated", generationError: undefined, updatedAt: Date.now(),
+    });
+    await ctx.db.patch(batch._id, { updatedAt: Date.now() });
+    return row._id;
+  },
+});
+
 export const updateEmployees = mutation({
   args: {
     batchId: v.id("payrollBatches"),
