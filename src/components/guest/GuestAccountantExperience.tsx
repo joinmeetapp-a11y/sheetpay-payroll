@@ -48,6 +48,8 @@ import {
 } from '../../types';
 import { defaultPayslipCustomization } from '../../lib/initialData';
 import { AccountantDashboard } from '../accountant/AccountantDashboard';
+import { AccountantReportsView } from '../accountant/AccountantReportsView';
+import { AccountantTeamView } from '../accountant/AccountantTeamView';
 import { ClientsView } from '../accountant/ClientsView';
 import { AddClientModal } from '../accountant/AddClientModal';
 import { EmployeesView } from '../tabs/EmployeesView';
@@ -77,7 +79,10 @@ type GuestTab =
   | 'accountant_clients'
   | 'employees'
   | 'payroll_runs'
-  | 'payslips';
+  | 'payslips'
+  | 'accountant_reports'
+  | 'accountant_team'
+  | 'settings';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -124,6 +129,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
 
   // ── Guest domain state (mirrors what a real accountant would hold) ────
   const [clients, setClients] = useState<AccountantClient[]>([]);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [customization, setCustomization] = useState<PayslipCustomization>(
     defaultPayslipCustomization,
   );
@@ -490,13 +496,15 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         'employees',
         'payroll_runs',
         'payslips',
+        'accountant_reports',
+        'accountant_team',
+        'settings',
       ];
-      if (guestSupported.includes(nextTab as GuestTab)) {
-        setTab(nextTab as GuestTab);
+      if (nextTab === 'accountant_batch') {
+        setTab('payroll_runs');
         return;
       }
-      // Remaining workspace areas stay available during the trial.
-      setTab(nextTab as GuestTab);
+      setTab(guestSupported.includes(nextTab as GuestTab) ? nextTab as GuestTab : 'accountant_dashboard');
     },
     [],
   );
@@ -537,11 +545,27 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         />
 
         <main className="flex-1 pb-20 md:pb-6">
+          <div className="px-4 sm:px-6 lg:px-8 pt-4 flex flex-wrap gap-2" aria-label="Accountant workspace shortcuts">
+            {([
+              ['accountant_dashboard', 'Overview'],
+              ['accountant_clients', 'Clients'],
+              ['employees', 'Employees'],
+              ['payroll_runs', 'Payroll'],
+              ['payslips', 'Payslips'],
+              ['accountant_reports', 'Reports'],
+              ['accountant_team', 'Team'],
+              ['settings', 'Settings'],
+            ] as Array<[GuestTab, string]>).map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${tab === id ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
           {tab === 'accountant_dashboard' && (
             <AccountantDashboard
               userName="Guest Accountant"
               clients={clients}
-              teamMembers={[]}
+              teamMembers={teamMembers}
               attentionItems={[]}
               batchJobs={[]}
               activeClient={activeClient}
@@ -598,6 +622,19 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onOpenEmailModal={() => {}}
               onOpenBusinessEditModal={() => setBusinessEditOpen(true)}
             />
+          )}
+
+          {tab === 'accountant_reports' && <AccountantReportsView clients={clients} onSelectClient={() => setTab('payroll_runs')} />}
+
+          {tab === 'accountant_team' && <AccountantTeamView teamMembers={teamMembers} clients={clients} onAddTeamMember={(member) => setTeamMembers((prev) => [...prev, member])} />}
+
+          {tab === 'settings' && activeClient && (
+            <div className="mx-4 sm:mx-6 lg:mx-8 mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-black text-slate-900">Business and payslip settings</h2>
+              <p className="mt-1 text-sm text-slate-500">Set company information, brand assets, signatory details and payslip templates.</p>
+              <button type="button" onClick={() => setBusinessEditOpen(true)} className="mt-4 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">Edit business details</button>
+              <button type="button" onClick={() => setTab('payslips')} className="mt-4 ml-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">Choose payslip template</button>
+            </div>
           )}
 
           {tab === 'payslips' && activeClient && (
