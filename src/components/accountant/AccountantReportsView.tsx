@@ -14,39 +14,54 @@ interface AccountantReportsViewProps {
   onSelectClient?: (clientOrId: any) => void;
 }
 
+function getLatestPayrollTotals(client: AccountantClient) {
+  const run = client.payrollRun || client.payrollRuns?.[client.payrollRuns.length - 1];
+  const employees = run?.employees || [];
+  const sum = (field: 'grossPay' | 'paye' | 'nis' | 'healthSurcharge' | 'otherDeductions' | 'netPay') =>
+    employees.reduce((total, employee) => total + (Number(employee[field]) || 0), 0);
+  return {
+    gross: employees.length ? sum('grossPay') : Number(run?.grossPay) || 0,
+    paye: employees.length ? sum('paye') : 0,
+    nis: employees.length ? sum('nis') : Number(run?.totalNis) || 0,
+    health: employees.length ? sum('healthSurcharge') : Number(run?.totalHealthSurcharge) || 0,
+    net: employees.length ? sum('netPay') : Number(run?.netPay) || 0,
+    employees: employees.length || Number(run?.employeesCount) || 0,
+  };
+}
+
 export const AccountantReportsView: React.FC<AccountantReportsViewProps> = ({ clients = [] }) => {
   const [selectedPeriod, setSelectedPeriod] = useState('August 2026');
   const [exporting, setExporting] = useState(false);
 
-  const totalGross = clients.reduce((acc, c) => acc + (c.monthlyPayrollValue || 0), 0);
-  const totalEmployees = clients.reduce((acc, c) => acc + (c.employeeCount || 0), 0);
+  const totalGross = clients.reduce((acc, c) => acc + getLatestPayrollTotals(c).gross, 0);
+  const totalEmployees = clients.reduce((acc, c) => acc + getLatestPayrollTotals(c).employees, 0);
 
-  // Group by Country
+  // Reports use the saved results from the current/most recent payroll run.
+  // They never infer statutory amounts from a flat percentage of gross pay.
   const trinidadClients = clients.filter((c) => (c.country || '').includes('Trinidad') || (c.countryCode || '') === 'TT');
   const barbadosClients = clients.filter((c) => (c.country || '').includes('Barbados') || (c.countryCode || '') === 'BB');
   const guyanaClients = clients.filter((c) => (c.country || '').includes('Guyana') || (c.countryCode || '') === 'GY');
   const jamaicaClients = clients.filter((c) => (c.country || '').includes('Jamaica') || (c.countryCode || '') === 'JM');
 
-  const trinidadGross = trinidadClients.reduce((acc, c) => acc + (c.monthlyPayrollValue || 0), 0);
-  const trinidadPAYE = Math.round(trinidadGross * 0.14);
-  const trinidadNIS = Math.round(trinidadGross * 0.052);
-  const trinidadHealth = trinidadClients.reduce((acc, c) => acc + (c.employeeCount || 0) * 33, 0);
+  const sumTotals = (group: AccountantClient[], field: 'gross' | 'paye' | 'nis' | 'health' | 'net') =>
+    group.reduce((acc, client) => acc + getLatestPayrollTotals(client)[field], 0);
+  const trinidadGross = sumTotals(trinidadClients, 'gross');
+  const trinidadPAYE = sumTotals(trinidadClients, 'paye');
+  const trinidadNIS = sumTotals(trinidadClients, 'nis');
+  const trinidadHealth = sumTotals(trinidadClients, 'health');
+  const barbadosGross = sumTotals(barbadosClients, 'gross');
+  const barbadosTax = sumTotals(barbadosClients, 'paye');
+  const barbadosNIS = sumTotals(barbadosClients, 'nis');
+  const guyanaGross = sumTotals(guyanaClients, 'gross');
+  const guyanaTax = sumTotals(guyanaClients, 'paye');
+  const guyanaNIS = sumTotals(guyanaClients, 'nis');
+  const jamaicaGross = sumTotals(jamaicaClients, 'gross');
+  const jamaicaTax = sumTotals(jamaicaClients, 'paye');
+  const jamaicaNIS = sumTotals(jamaicaClients, 'nis');
 
-  const barbadosGross = barbadosClients.reduce((acc, c) => acc + (c.monthlyPayrollValue || 0), 0);
-  const barbadosTax = Math.round(barbadosGross * 0.125);
-  const barbadosNIS = Math.round(barbadosGross * 0.111);
-
-  const guyanaGross = guyanaClients.reduce((acc, c) => acc + (c.monthlyPayrollValue || 0), 0);
-  const guyanaTax = Math.round(guyanaGross * 0.28);
-  const guyanaNIS = Math.round(guyanaGross * 0.056);
-
-  const jamaicaGross = jamaicaClients.reduce((acc, c) => acc + (c.monthlyPayrollValue || 0), 0);
-  const jamaicaTax = Math.round(jamaicaGross * 0.25);
-  const jamaicaNIS = Math.round(jamaicaGross * 0.03);
-
-  const totalPAYE = trinidadPAYE + barbadosTax + guyanaTax + jamaicaTax;
-  const totalNIS = trinidadNIS + barbadosNIS + guyanaNIS + jamaicaNIS;
-  const estimatedNet = Math.max(0, totalGross - totalPAYE - totalNIS - trinidadHealth);
+  const totalPAYE = clients.reduce((acc, c) => acc + getLatestPayrollTotals(c).paye, 0);
+  const totalNIS = clients.reduce((acc, c) => acc + getLatestPayrollTotals(c).nis, 0);
+  const estimatedNet = clients.reduce((acc, c) => acc + getLatestPayrollTotals(c).net, 0);
 
   const handleExportAll = () => {
     if (clients.length === 0) return;
@@ -56,15 +71,15 @@ export const AccountantReportsView: React.FC<AccountantReportsViewProps> = ({ cl
       const csvContent =
         'data:text/csv;charset=utf-8,' +
         [
-          ['Client Name', 'Country', 'Employees', 'Pay Frequency', 'Gross Payroll', 'Estimated Net', 'Assigned Accountant'].join(','),
+          ['Client Name', 'Country', 'Employees', 'Pay Frequency', 'Latest Run Gross', 'Latest Run Net', 'Assigned Accountant'].join(','),
           ...clients.map((c) =>
             [
               `"${c.name || c.companyName || ''}"`,
               `"${c.country || ''}"`,
-              c.employeeCount || 0,
+              getLatestPayrollTotals(c).employees,
               c.payFrequency || 'monthly',
-              c.monthlyPayrollValue || 0,
-              Math.round((c.monthlyPayrollValue || 0) * 0.81),
+              getLatestPayrollTotals(c).gross,
+              getLatestPayrollTotals(c).net,
               `"${c.assignedTo || 'Unassigned'}"`,
             ].join(',')
           ),
@@ -260,9 +275,9 @@ export const AccountantReportsView: React.FC<AccountantReportsViewProps> = ({ cl
                 <th className="py-3 px-4">Country</th>
                 <th className="py-3 px-4">Headcount</th>
                 <th className="py-3 px-4">Gross Payroll</th>
-                <th className="py-3 px-4">Est. PAYE Tax</th>
-                <th className="py-3 px-4">Est. NIS</th>
-                <th className="py-3 px-4">Est. Net</th>
+                <th className="py-3 px-4">PAYE (latest run)</th>
+                <th className="py-3 px-4">NIS (latest run)</th>
+                <th className="py-3 px-4">Net pay (latest run)</th>
                 <th className="py-3 px-4">Assigned Accountant</th>
               </tr>
             </thead>
@@ -281,10 +296,10 @@ export const AccountantReportsView: React.FC<AccountantReportsViewProps> = ({ cl
                     <td className="py-3 px-4 font-bold text-slate-900">{c.name || c.companyName}</td>
                     <td className="py-3 px-4">{c.country}</td>
                     <td className="py-3 px-4 font-mono">{c.employeeCount}</td>
-                    <td className="py-3 px-4 font-mono font-bold text-slate-900">{formatCurrency(c.monthlyPayrollValue, c.currencySymbol)}</td>
-                    <td className="py-3 px-4 font-mono text-indigo-700">{formatCurrency(Math.round(c.monthlyPayrollValue * 0.14), c.currencySymbol)}</td>
-                    <td className="py-3 px-4 font-mono text-blue-700">{formatCurrency(Math.round(c.monthlyPayrollValue * 0.052), c.currencySymbol)}</td>
-                    <td className="py-3 px-4 font-mono text-emerald-700">{formatCurrency(Math.round(c.monthlyPayrollValue * 0.81), c.currencySymbol)}</td>
+                    <td className="py-3 px-4 font-mono font-bold text-slate-900">{formatCurrency(getLatestPayrollTotals(c).gross, c.currencySymbol)}</td>
+                    <td className="py-3 px-4 font-mono text-indigo-700">{formatCurrency(getLatestPayrollTotals(c).paye, c.currencySymbol)}</td>
+                    <td className="py-3 px-4 font-mono text-blue-700">{formatCurrency(getLatestPayrollTotals(c).nis, c.currencySymbol)}</td>
+                    <td className="py-3 px-4 font-mono text-emerald-700">{formatCurrency(getLatestPayrollTotals(c).net, c.currencySymbol)}</td>
                     <td className="py-3 px-4 text-slate-600">{c.assignedTo || 'Unassigned'}</td>
                   </tr>
                 ))
