@@ -1834,7 +1834,7 @@ export default function App() {
   // guest limits (1 client, 50 employees, 1 payroll run) via the guest shell
   // and convex/guestDashboard.ts. Never break /app or /accountants.
   // -------------------------------------------------------------
-  if (currentPath === '/try-accountant-dashboard' || currentPath === '/accountant-dashboard') {
+  if (currentPath === '/accountant' || currentPath === '/try-accountant-dashboard' || currentPath === '/accountant-dashboard') {
     return (
       <GuestAccountantExperience
         onNavigate={navigate}
