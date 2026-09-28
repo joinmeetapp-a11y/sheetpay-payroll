@@ -53,6 +53,7 @@ import { AddClientModal } from '../accountant/AddClientModal';
 import { EmployeesView } from '../tabs/EmployeesView';
 import { PayrollWorkspace } from '../PayrollWorkspace';
 import { PayslipsPortalView } from '../tabs/PayslipsPortalView';
+import { BusinessEditModal } from '../Modals';
 import { recalculatePayrollRun } from '../../lib/taxEngine';
 import { Sidebar } from '../Sidebar';
 import { MobileBottomNav } from '../MobileViews';
@@ -96,6 +97,9 @@ export const GuestAccountantExperience: React.FC<Props> = ({
   );
   const upsertClient = useMutation(api.guestDashboard.upsertClient);
   const setPendingActionMut = useMutation(api.guestDashboard.setPendingAction);
+  const assertAndIncrementOcr = useMutation(api.guestDashboard.assertAndIncrementOcr);
+  const assertAndIncrementCayla = useMutation(api.guestDashboard.assertAndIncrementCayla);
+  const appendCaylaMessages = useMutation(api.guestDashboard.appendCaylaMessages);
   const serverSession = useQuery(api.guestDashboard.get, {
     anonSessionId: guestSessionId,
   });
@@ -114,6 +118,9 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     null,
   );
   const [addClientOpen, setAddClientOpen] = useState(false);
+  const [businessEditOpen, setBusinessEditOpen] = useState(false);
+  const [caylaMessages, setCaylaMessages] = useState<any[]>([]);
+  const [caylaProcessing, setCaylaProcessing] = useState(false);
 
   // ── Guest domain state (mirrors what a real accountant would hold) ────
   const [clients, setClients] = useState<AccountantClient[]>([]);
@@ -128,6 +135,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
       setClients([serverSession.client as AccountantClient]);
       setHasEntered(true);
     }
+    if (serverSession.caylaMessages) setCaylaMessages(serverSession.caylaMessages as any[]);
     if (serverSession.payslipCustomization) {
       setCustomization(serverSession.payslipCustomization as PayslipCustomization);
     }
@@ -375,6 +383,58 @@ export const GuestAccountantExperience: React.FC<Props> = ({
   );
 
   // ── Unlock / paywall ────────────────────────────────────────────────────
+  const handleBeforeOcr = useCallback(async () => {
+    try {
+      await assertAndIncrementOcr({ anonSessionId: guestSessionId });
+      return true;
+    } catch (error: any) {
+      triggerPaywall('ocr_limit');
+      return false;
+    }
+  }, [assertAndIncrementOcr, guestSessionId, triggerPaywall]);
+
+  const handleCaylaMessage = useCallback(async (prompt: string) => {
+    const text = prompt.trim();
+    if (!text || caylaProcessing) return;
+    const userMessage = { id: `guest-user-${Date.now()}`, sender: 'user', text, timestamp: new Date().toISOString() };
+    setCaylaMessages((prev) => [...prev, userMessage]);
+    setCaylaProcessing(true);
+    try {
+      await assertAndIncrementCayla({ anonSessionId: guestSessionId });
+      const answer = activeClient
+        ? `I have your request for ${activeClient.name}. I can help you prepare and review this payroll. Open the client workspace to review employee data and statutory deductions before finalizing.`
+        : 'I can help prepare your accountant workspace. Add or import your first client to begin payroll processing.';
+      const reply = { id: `guest-cayla-${Date.now()}`, sender: 'cayla', text: answer, timestamp: new Date().toISOString() };
+      setCaylaMessages((prev) => [...prev, reply]);
+      appendCaylaMessages({ anonSessionId: guestSessionId, messages: [userMessage, reply] }).catch(() => {});
+    } catch (error: any) {
+      setCaylaMessages((prev) => prev.filter((message) => message.id !== userMessage.id));
+      if (String(error?.message || error).includes('GUEST_LIMIT_CAYLA')) triggerPaywall('cayla_4');
+      else triggerPaywall('cayla_4');
+    } finally {
+      setCaylaProcessing(false);
+    }
+  }, [activeClient, appendCaylaMessages, assertAndIncrementCayla, caylaProcessing, guestSessionId, triggerPaywall]);
+
+  const handleSaveBusiness = useCallback((business: BusinessDetails) => {
+    if (!activeClient) return;
+    handleUpdateClient({
+      ...activeClient,
+      name: business.name,
+      companyName: business.name,
+      businessAddress: business.address,
+      contactPhone: business.phone,
+      contactEmail: business.email,
+      taxRegistrationId: business.taxRegistrationId,
+      nisNumber: business.nisNumber || '',
+      signatoryName: business.signatoryName || '',
+      signatoryTitle: business.signatoryTitle || '',
+      logo: business.logo || '',
+      website: business.website || '',
+      signatureUrl: business.signatureUrl || '',
+    });
+  }, [activeClient, handleUpdateClient]);
+
   const handleUnlock = useCallback(
     (plan: 'accountant' | 'accountant_yearly') => {
       onUnlock(plan, guestSessionId);
@@ -494,17 +554,11 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onGuestImport={handleGuestImport}
               onOpenBatchPayroll={() => setTab('payroll_runs')}
               onOpenInviteClient={() => setTab('accountant_clients')}
-              onQuickExecuteCayla={(prompt) => {
-                if (caylaActionsUsed >= GUEST_LIMITS.maxCaylaActions) {
-                  triggerPaywall('cayla_4');
-                  return;
-                }
-                setPendingActionMut({ anonSessionId: guestSessionId, pendingAction: prompt }).catch(() => {});
-                setPendingActionMut({ anonSessionId: guestSessionId, pendingAction: 'cayla_trial_action' }).catch(() => {});
-                if (!activeClient) requestAddClient();
-                else if (employeeCount === 0) setTab('employees');
-                else if (!activePayroll) handleStartPayroll();
-              }}
+              onQuickExecuteCayla={handleCaylaMessage}
+              onSendMessage={handleCaylaMessage}
+              isProcessing={caylaProcessing}
+              messages={caylaMessages}
+              onBeforeOcr={handleBeforeOcr}
               onUpdateClients={(updated) => setClients(updated.slice(0, 1))}
               messages={[]}
               isProcessing={false}
@@ -544,7 +598,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               customization={customization}
               onUpdateCustomization={handleUpdateCustomization}
               onOpenEmailModal={() => {}}
-              onOpenBusinessEditModal={() => {}}
+              onOpenBusinessEditModal={() => setBusinessEditOpen(true)}
             />
           )}
 
@@ -556,7 +610,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               customization={customization}
               onUpdateCustomization={handleUpdateCustomization}
               onOpenEmailModal={() => {}}
-              onOpenBusinessEditModal={() => {}}
+              onOpenBusinessEditModal={() => setBusinessEditOpen(true)}
             />
           )}
 
@@ -581,6 +635,13 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         onOpenBatchPayroll={() => setTab('payroll_runs')}
         clientsCount={clientsUsed}
         onOpenLanding={() => onNavigate('/')}
+      />
+
+      <BusinessEditModal
+        isOpen={businessEditOpen}
+        onClose={() => setBusinessEditOpen(false)}
+        business={businessFromClient}
+        onSave={handleSaveBusiness}
       />
 
       {/* Real client-creation modal, reused from production */}
