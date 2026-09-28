@@ -302,6 +302,17 @@ export const PayslipPreview: React.FC<PayslipPreviewProps> = ({
         id="payslip-document-render"
         className="flex-1 bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 sm:p-6 text-slate-800 transition-all font-sans relative"
       >
+        {customization.showCompanyLogo && (business.logo || business.name) && (
+          <div className="mb-4 flex items-center gap-3 border-b border-slate-100 pb-3" style={{ borderColor: customization.primaryColor + '33' }}>
+            {business.logo && <img src={business.logo} alt={`${business.name} logo`} className="max-h-12 max-w-24 object-contain" />}
+            <div className="min-w-0">
+              <div className="text-sm font-black text-slate-900">{business.name}</div>
+              <div className="text-[10px] text-slate-500">{business.address}{business.phone ? ` · ${business.phone}` : ''}{business.email ? ` · ${business.email}` : ''}</div>
+              {business.website && <div className="text-[10px] text-slate-500">{business.website}</div>}
+              <div className="text-[10px] text-slate-500">BIR / Tax ID: {business.taxRegistrationId || 'Not provided'}{business.nisNumber ? ` · NIS: ${business.nisNumber}` : ''}</div>
+            </div>
+          </div>
+        )}
         {renderTemplateContent(
           customization.templateId,
           employee,
@@ -309,6 +320,13 @@ export const PayslipPreview: React.FC<PayslipPreviewProps> = ({
           business,
           customization,
           totalDeductions
+        )}
+        {customization.showSignature && (
+          <div className="mt-6 ml-auto max-w-56 border-t border-slate-200 pt-3 text-center" style={{ borderColor: customization.primaryColor + '66' }}>
+            {business.signatureUrl ? <img src={business.signatureUrl} alt="Authorized signature" className="mx-auto h-12 max-w-40 object-contain" /> : <div className="font-serif italic text-xl text-slate-700">{business.signatoryName || 'Authorized Signatory'}</div>}
+            <div className="mt-1 text-xs font-bold text-slate-800">{business.signatoryName || 'Authorized Signatory'}</div>
+            <div className="text-[10px] text-slate-500">{business.signatoryTitle || 'Company Representative'}</div>
+          </div>
         )}
       </div>
 
