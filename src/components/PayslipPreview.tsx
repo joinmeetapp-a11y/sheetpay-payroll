@@ -321,13 +321,11 @@ export const PayslipPreview: React.FC<PayslipPreviewProps> = ({
           customization,
           totalDeductions
         )}
-        {customization.showSignature && (
-          <div className="mt-6 ml-auto max-w-56 border-t border-slate-200 pt-3 text-center" style={{ borderColor: customization.primaryColor + '66' }}>
-            {business.signatureUrl ? <img src={business.signatureUrl} alt="Authorized signature" className="mx-auto h-12 max-w-40 object-contain" /> : <div className="font-serif italic text-xl text-slate-700">{business.signatoryName || 'Authorized Signatory'}</div>}
-            <div className="mt-1 text-xs font-bold text-slate-800">{business.signatoryName || 'Authorized Signatory'}</div>
-            <div className="text-[10px] text-slate-500">{business.signatoryTitle || 'Company Representative'}</div>
-          </div>
-        )}
+        <div className="mt-6 ml-auto max-w-56 border-t border-slate-200 pt-3 text-center" style={{ borderColor: customization.primaryColor + '66' }}>
+          {business.signatureUrl ? <img src={business.signatureUrl} alt="Authorized signature" className="mx-auto h-12 max-w-40 object-contain" /> : <div className="font-serif italic text-xl text-slate-700">{business.signatoryName || 'Authorized Signatory'}</div>}
+          <div className="mt-1 text-xs font-bold text-slate-800">{business.signatoryName || 'Authorized Signatory'}</div>
+          <div className="text-[10px] text-slate-500">{business.signatoryTitle || 'Company Representative'}</div>
+        </div>
       </div>
 
       {/* Modals */}
