@@ -73,12 +73,18 @@ export const PayslipsPortalView: React.FC<PayslipsPortalViewProps> = ({
   };
 
   const templates: Array<{ id: TemplateId; name: string; desc: string }> = [
-    { id: 'template_01', name: 'Executive Modern', desc: 'Sleek emerald header with itemized statutory lines' },
-    { id: 'template_02', name: 'Corporate Minimalist', desc: 'High-contrast monochrome for high-speed printing' },
-    { id: 'template_03', name: 'Tax Audit Official', desc: 'Bilingual TD4 / NIS audit trail compliant format' },
-    { id: 'template_04', name: 'Island Logistics Slate', desc: 'Two-column breakdown with YTD accumulations' },
-    { id: 'template_05', name: 'Emerald Horizon', desc: 'Distinctive brand-forward pay statement with QR' },
-    { id: 'template_06', name: 'Classic Enterprise', desc: 'Traditional box grid layout with signatory seal' },
+    { id: 'template_01', name: 'Cayla Emerald', desc: 'Fintech dual-card layout' },
+    { id: 'template_02', name: 'Classic Corporate', desc: 'Three-column ledger layout' },
+    { id: 'template_03', name: 'Minimalist Mono', desc: 'Clean monochrome layout' },
+    { id: 'template_04', name: 'Executive Navy', desc: 'Split hero payout layout' },
+    { id: 'template_05', name: 'Modern Tabular', desc: 'Brand-forward grid layout' },
+    { id: 'template_06', name: 'High-Density Audit', desc: 'Itemized audit grid' },
+    { id: 'template_07', name: 'Editorial Serif', desc: 'Crest and parchment layout' },
+    { id: 'template_08', name: 'Left-Sidebar Panel', desc: 'Vertical split layout' },
+    { id: 'template_09', name: 'Perforated Studio', desc: 'Official receipt layout' },
+    { id: 'template_10', name: 'Vibrant Ruby', desc: 'Bold contrast layout' },
+    { id: 'template_11', name: 'Dark Obsidian', desc: 'Midnight dark layout' },
+    { id: 'template_12', name: 'Government TD4 Standard', desc: 'Official BIR format' },
   ];
 
   const colorPalettes = [
