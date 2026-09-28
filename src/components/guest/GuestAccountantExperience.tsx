@@ -50,6 +50,7 @@ import { defaultPayslipCustomization } from '../../lib/initialData';
 import { AccountantDashboard } from '../accountant/AccountantDashboard';
 import { AccountantReportsView } from '../accountant/AccountantReportsView';
 import { AccountantTeamView } from '../accountant/AccountantTeamView';
+import { BatchPayrollModal } from '../accountant/BatchPayrollModal';
 import { ClientsView } from '../accountant/ClientsView';
 import { AddClientModal } from '../accountant/AddClientModal';
 import { EmployeesView } from '../tabs/EmployeesView';
@@ -124,6 +125,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
   );
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [businessEditOpen, setBusinessEditOpen] = useState(false);
+  const [batchPayrollOpen, setBatchPayrollOpen] = useState(false);
   const [caylaMessages, setCaylaMessages] = useState<any[]>([]);
   const [caylaProcessing, setCaylaProcessing] = useState(false);
 
@@ -501,7 +503,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         'settings',
       ];
       if (nextTab === 'accountant_batch') {
-        setTab('payroll_runs');
+        setBatchPayrollOpen(true);
         return;
       }
       setTab(guestSupported.includes(nextTab as GuestTab) ? nextTab as GuestTab : 'accountant_dashboard');
@@ -519,8 +521,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col md:flex-row antialiased">
       <meta name="robots" content="noindex, nofollow" />
 
-      {/* Real Sidebar in accountant mode — collapsible on desktop. Paid-only
-          tabs route through handleTabChange which opens the paywall. */}
+      {/* Real Sidebar in accountant mode — collapsible on desktop. */}
       <Sidebar
         activeTab={tab}
         onTabChange={handleTabChange}
@@ -572,11 +573,11 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onSelectClient={(c) => {
                 if (typeof c === 'object' && c) setTab('employees');
               }}
-              onRunBatchPayroll={() => setTab('payroll_runs')}
+              onRunBatchPayroll={() => setBatchPayrollOpen(true)}
               onAddNewClient={handleAddClient}
               onOpenAddClient={requestAddClient}
               onGuestImport={handleGuestImport}
-              onOpenBatchPayroll={() => setTab('payroll_runs')}
+              onOpenBatchPayroll={() => setBatchPayrollOpen(true)}
               onOpenInviteClient={() => setTab('accountant_clients')}
               onQuickExecuteCayla={handleCaylaMessage}
               onSendMessage={handleCaylaMessage}
@@ -677,6 +678,16 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         onClose={() => setBusinessEditOpen(false)}
         business={businessFromClient}
         onSave={handleSaveBusiness}
+      />
+
+      <BatchPayrollModal
+        isOpen={batchPayrollOpen}
+        onClose={() => setBatchPayrollOpen(false)}
+        clients={clients}
+        onCompleteBatch={(updatedClients) => {
+          const updatedClient = updatedClients[0];
+          if (updatedClient) handleUpdateClient(updatedClient);
+        }}
       />
 
       {/* Real client-creation modal, reused from production */}
