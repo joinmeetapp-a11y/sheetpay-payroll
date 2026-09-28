@@ -247,7 +247,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
       upsertClient({ anonSessionId: guestSessionId, client }).catch(() => {});
       setEmployees({ anonSessionId: guestSessionId, employees: capped }).catch(() => {});
 
-      if (rejected > 0) triggerPaywall('add_employee_51');
+
     },
     [
       clientsUsed,
@@ -268,7 +268,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
       const updated = { ...activeClient, employees: merged, employeeCount: merged.length };
       handleUpdateClient(updated);
       setEmployees({ anonSessionId: guestSessionId, employees: merged }).catch(() => {});
-      if (rejected > 0) triggerPaywall('add_employee_51');
+
       return { added: accepted.length, rejected };
     },
     [activeClient, guestSessionId, handleUpdateClient, setEmployees, triggerPaywall],
@@ -462,7 +462,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         clientsCount={clientsUsed}
         employeesCount={employeeCount}
         activeClientName={activeClient?.companyName || activeClient?.name || 'Your Client'}
-        onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
+        onOpenBatchPayroll={() => setTab('payroll_runs')}
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
       />
@@ -488,12 +488,12 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onSelectClient={(c) => {
                 if (typeof c === 'object' && c) setTab('employees');
               }}
-              onRunBatchPayroll={() => triggerPaywall('run_payroll_2')}
+              onRunBatchPayroll={() => setTab('payroll_runs')}
               onAddNewClient={handleAddClient}
               onOpenAddClient={requestAddClient}
               onGuestImport={handleGuestImport}
-              onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
-              onOpenInviteClient={() => triggerPaywall('download_all_payslips')}
+              onOpenBatchPayroll={() => setTab('payroll_runs')}
+              onOpenInviteClient={() => setTab('accountant_clients')}
               onQuickExecuteCayla={(prompt) => {
                 if (caylaActionsUsed >= GUEST_LIMITS.maxCaylaActions) {
                   triggerPaywall('cayla_4');
@@ -578,7 +578,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         onTabChange={handleTabChange}
         onCaylaClick={() => setTab('accountant_dashboard')}
         accountType="accountant"
-        onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
+        onOpenBatchPayroll={() => setTab('payroll_runs')}
         clientsCount={clientsUsed}
         onOpenLanding={() => onNavigate('/')}
       />
