@@ -45,8 +45,8 @@ async function planFor(user: { plan?: string; planStatus?: string; email: string
   if (isAdminEmail(user.email)) return "accountant";
   const plan = (user.plan ?? "free") as string;
   if (plan === "free") return "free";
-  const status = user.planStatus ?? "active";
-  const active = status === "active" || status === "pending" || status === "trialing";
+  const status = user.planStatus ?? "none";
+  const active = status === "active";
   if (!active) return "free";
   return (plan as "pro" | "accountant") ?? "free";
 }
