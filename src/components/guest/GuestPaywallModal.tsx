@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Check, Sparkles, ShieldCheck, LogIn } from 'lucide-react';
+import { X, Check, ShieldCheck, LogIn } from 'lucide-react';
 import { CaylaPenMascot } from '../CaylaPenMascot';
 import { GuestLockedAction } from '../../lib/guestSession';
 
@@ -128,7 +128,7 @@ export const GuestPaywallModal: React.FC<Props> = ({
             onClick={() => onUnlock(billing === 'yearly' ? 'accountant_yearly' : 'accountant')}
             className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-lg shadow-emerald-600/20 hover:shadow-emerald-600/30 hover:-translate-y-0.5 transition-all cursor-pointer"
           >
-            <Sparkles className="w-4 h-4" />
+            <CaylaPenMascot size="xs" />
             Unlock Sheetpay
           </button>
 
