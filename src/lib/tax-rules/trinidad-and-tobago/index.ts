@@ -2,12 +2,12 @@ import { BaseTaxCalculationInput, NISCalculationResult, PAYECalculationResult, H
 
 /**
  * Trinidad & Tobago National Insurance Scheme (NIBTT) 16 Classes Table
- * Rates: 13.2% total (Employee 4.4%, Employer 8.8%)
+ * Rates: 16.2% total (Employee 5.4%, Employer 10.8%)
  * Effective Tax Year: 2026 (NIBTT statutory schedule)
  */
 export const TT_TAX_YEAR = 2026;
-export const TT_LAST_UPDATED = 'August 2026';
-export const TT_OFFICIAL_SOURCE = 'National Insurance Board of Trinidad & Tobago (NIBTT) & Board of Inland Revenue (BIR)';
+export const TT_LAST_UPDATED = 'September 2026';
+export const TT_OFFICIAL_SOURCE = 'NIBTT 2026 Earnings Classes (effective January 5, 2026) and IRD Trinidad and Tobago';
 
 interface NISClassTier {
   classNum: number;
@@ -230,8 +230,8 @@ export function calculateTrinidadPAYE(input: BaseTaxCalculationInput): PAYECalcu
   const { grossIncome, frequency, taxYear = TT_TAX_YEAR, allowances = 0 } = input;
   const monthlyGross = toMonthly(grossIncome, frequency);
 
-  // Annual Standard Personal Allowance: $84,000 / year ($7,000 / month)
-  const annualPersonalAllowance = 84000 + allowances;
+  // Annual Standard Personal Allowance: $90,000 / year ($7,500 / month)
+  const annualPersonalAllowance = 90000 + allowances;
   const monthlyPersonalAllowance = annualPersonalAllowance / 12;
 
   // 70% of employee NIS is statutory tax-deductible
@@ -301,7 +301,7 @@ export function calculateTrinidadPAYE(input: BaseTaxCalculationInput): PAYECalcu
     ],
     lastUpdated: TT_LAST_UPDATED,
     notes: [
-      'Standard individual personal allowance of $84,000 per year ($7,000/month) applied.',
+      'Standard individual personal allowance of $90,000 per year ($7,500/month) applied.',
       '70% of employee NIS contribution is deducted from gross income before calculating PAYE.',
       'First tier tax rate is 25% up to $1M/year; 30% applies thereafter.',
     ],
