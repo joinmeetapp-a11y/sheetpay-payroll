@@ -1,18 +1,20 @@
 import React from 'react';
-import { Sparkles, Users, Building2, PlayCircle, Lock } from 'lucide-react';
+import { Sparkles, Building2, PlayCircle, Lock, ScanLine, MessageCircle } from 'lucide-react';
 import { GUEST_LIMITS } from '../../lib/guestSession';
 
 interface Props {
   clientsUsed: number;
-  employeesUsed: number;
   payrollRunsUsed: number;
+  caylaActionsUsed: number;
+  ocrScansUsed: number;
   onUpgrade: () => void;
 }
 
 export const GuestLimitsBar: React.FC<Props> = ({
   clientsUsed,
-  employeesUsed,
   payrollRunsUsed,
+  caylaActionsUsed,
+  ocrScansUsed,
   onUpgrade,
 }) => {
   return (
@@ -20,7 +22,7 @@ export const GuestLimitsBar: React.FC<Props> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center gap-3 sm:gap-5 text-xs">
         <div className="inline-flex items-center gap-1.5 text-emerald-700 font-black uppercase tracking-wider">
           <Sparkles className="w-3.5 h-3.5" />
-          Free Payroll Preview
+          Accountant Trial
         </div>
 
         <Chip
@@ -30,20 +32,16 @@ export const GuestLimitsBar: React.FC<Props> = ({
           max={GUEST_LIMITS.maxClients}
         />
         <Chip
-          icon={<Users className="w-3.5 h-3.5" />}
-          label="Employees"
-          used={employeesUsed}
-          max={GUEST_LIMITS.maxEmployees}
-        />
-        <Chip
           icon={<PlayCircle className="w-3.5 h-3.5" />}
           label="Payroll runs"
           used={payrollRunsUsed}
           max={GUEST_LIMITS.maxPayrollRuns}
         />
+        <Chip icon={<MessageCircle className="w-3.5 h-3.5" />} label="Cayla" used={caylaActionsUsed} max={GUEST_LIMITS.maxCaylaActions} />
+        <Chip icon={<ScanLine className="w-3.5 h-3.5" />} label="OCR imports" used={ocrScansUsed} max={GUEST_LIMITS.maxOcrScans} />
 
         <div className="hidden md:block text-slate-400 font-semibold">
-          Unlimited with Sheetpay Accountant
+          Templates, reports and payslip tools are included
         </div>
 
         <button
