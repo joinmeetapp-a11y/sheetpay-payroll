@@ -154,6 +154,17 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  // Preserve accountant auth intent through Firebase's full-page Google redirect.
+  useEffect(() => {
+    if (currentPath === '/accountant/auth') {
+      try {
+        window.sessionStorage.setItem('sheetpay_accountant_auth_flow', '1');
+      } catch {
+        /* session storage may be unavailable */
+      }
+    }
+  }, [currentPath]);
+
   const navigate = (path: string) => {
     if (path === currentPath) return;
     window.history.pushState({}, '', path);
@@ -354,12 +365,22 @@ export default function App() {
           });
         }
 
-        // Returning authenticated user — go straight to app if on landing.
-        // Use refs (not stale closure values) so this works correctly even
-        // after viewMode/pendingOnboardingData have changed since mount.
-        // Never hijack /admin, /payroll/*, or existing /app/* paths such as
-        // /app/billing?_ptxn=... (Paddle's default payment link).
-        if (
+        // Keep accountant sign-ins on their dedicated route, including the
+        // initial Firebase session restore after Google's full-page redirect.
+        // Main-app logins retain the existing /app routing behavior.
+        let accountantAuthFlow = window.location.pathname === '/accountant' ||
+          window.location.pathname === '/accountant/auth';
+        try {
+          accountantAuthFlow = accountantAuthFlow ||
+            window.sessionStorage.getItem('sheetpay_accountant_auth_flow') === '1';
+        } catch {
+          /* session storage may be unavailable */
+        }
+
+        if (accountantAuthFlow) {
+          setViewMode('app');
+          if (window.location.pathname !== '/accountant') navigate('/accountant');
+        } else if (
           viewModeRef.current === 'landing' &&
           !pendingOnboardingDataRef.current &&
           !window.location.pathname.startsWith('/admin') &&
@@ -1315,6 +1336,14 @@ export default function App() {
       accountType: AccountType;
       payrollRuns?: PayrollRun[];
     }) => {
+      let accountantAuthFlow = window.location.pathname === '/accountant/auth';
+      try {
+        accountantAuthFlow = accountantAuthFlow ||
+          window.sessionStorage.getItem('sheetpay_accountant_auth_flow') === '1';
+      } catch {
+        /* session storage may be unavailable */
+      }
+
       setCurrentUser({ uid, email, displayName });
       setUserName(displayName || email.split('@')[0]);
 
@@ -1446,8 +1475,12 @@ export default function App() {
         const checkoutPlan = pendingPlanAfterAuth;
         const planToOpen = checkoutPlan === 'accountant_yearly' ? 'accountant' : checkoutPlan;
         setPendingPlanAfterAuth(null);
+        const checkoutReturnPath = checkoutPlan === 'pro' ? '/app' : '/accountant';
         setViewMode('app');
-        navigate('/app');
+        navigate(checkoutReturnPath);
+        if (accountantAuthFlow) {
+          try { window.sessionStorage.removeItem('sheetpay_accountant_auth_flow'); } catch { /* ignore */ }
+        }
 
         if (isPaddleConfigured()) {
           // Overlay checkout — stays on /app, no page navigation.
@@ -1459,7 +1492,7 @@ export default function App() {
               plan: planToOpen,
               ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
             },
-            successUrl: `${window.location.origin}/app`,
+            successUrl: `${window.location.origin}${checkoutReturnPath}`,
             onComplete: () => {
               confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'] });
             },
@@ -1474,7 +1507,7 @@ export default function App() {
             ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
             firebaseUid: uid,
             customerEmail: email,
-            successUrl: `${window.location.origin}/app?upgraded=${planToOpen}`,
+            successUrl: `${window.location.origin}${checkoutReturnPath}?upgraded=${planToOpen}`,
           }).then((result: any) => {
             if (result?.url) window.location.href = result.url;
           }).catch((err: any) => {
@@ -1485,7 +1518,10 @@ export default function App() {
       }
 
       setViewMode('app');
-      navigate('/app');
+      navigate(accountantAuthFlow ? '/accountant' : '/app');
+      if (accountantAuthFlow) {
+        try { window.sessionStorage.removeItem('sheetpay_accountant_auth_flow'); } catch { /* ignore */ }
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pendingOnboardingData, accountType, customization, pendingPlanAfterAuth]
@@ -1804,11 +1840,11 @@ export default function App() {
             plan,
             ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
           },
-          successUrl: `${window.location.origin}/app`,
+          successUrl: `${window.location.origin}${plan === 'accountant' ? '/accountant' : '/app'}`,
           onComplete: () => {
             confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'] });
             setViewMode('app');
-            navigate('/app');
+            navigate(plan === 'accountant' ? '/accountant' : '/app');
           },
         });
         // isCheckoutLoading is cleared below — the overlay is now open.
@@ -1822,7 +1858,7 @@ export default function App() {
           ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
           firebaseUid: uid,
           customerEmail: email,
-          successUrl: `${window.location.origin}/app?upgraded=${plan}`,
+          successUrl: `${window.location.origin}${plan === 'accountant' ? '/accountant' : '/app'}?upgraded=${plan}`,
         });
         if (result?.url) {
           window.location.href = result.url; // same-tab, avoids popup blocker
@@ -1848,6 +1884,7 @@ export default function App() {
         onAuthComplete={handleAuthComplete}
         onBack={() => {
           setPendingPlanAfterAuth(null);
+          try { window.sessionStorage.removeItem('sheetpay_accountant_auth_flow'); } catch { /* ignore */ }
           setViewMode('landing');
           navigate('/accountant');
         }}
@@ -1863,7 +1900,10 @@ export default function App() {
   // guest limits (1 client, 50 employees, 1 payroll run) via the guest shell
   // and convex/guestDashboard.ts. Never break /app or /accountants.
   // -------------------------------------------------------------
-  if (currentPath === '/accountant' || currentPath === '/try-accountant-dashboard' || currentPath === '/accountant-dashboard') {
+  if (
+    (currentPath === '/accountant' || currentPath === '/try-accountant-dashboard' || currentPath === '/accountant-dashboard') &&
+    !(currentPath === '/accountant' && currentUser && isAccountant)
+  ) {
     return (
       <GuestAccountantExperience
         onNavigate={navigate}
