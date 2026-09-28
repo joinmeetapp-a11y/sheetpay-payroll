@@ -1,9 +1,29 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+async function requireEmployeeOwner(ctx: any, businessId: any, expectedUserId?: any) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Unauthenticated");
+  const business = await ctx.db.get(businessId);
+  if (!business || (expectedUserId && business.userId !== expectedUserId)) throw new Error("Forbidden");
+  const user = await ctx.db.get(business.userId);
+  if (!user || user.firebaseUid !== identity.subject) throw new Error("Forbidden");
+  return user;
+}
+
+async function requireEmployeeRecordOwner(ctx: any, employee: any) {
+  if (!employee) throw new Error("Employee not found");
+  return requireEmployeeOwner(ctx, employee.businessId, employee.userId);
+}
+
 export const getByBusiness = query({
   args: { businessId: v.id("businesses") },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    const business = await ctx.db.get(args.businessId);
+    const user = business ? await ctx.db.get(business.userId) : null;
+    if (!user || user.firebaseUid !== identity.subject) return [];
     return ctx.db
       .query("employees")
       .withIndex("by_business", (q) => q.eq("businessId", args.businessId))
@@ -50,6 +70,7 @@ export const create = mutation({
     countryCode: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireEmployeeOwner(ctx, args.businessId, args.userId);
     return ctx.db.insert("employees", { ...args, createdAt: Date.now() });
   },
 });
@@ -84,6 +105,8 @@ export const update = mutation({
     countryCode: v.optional(v.string()),
   },
   handler: async (ctx, { employeeId, ...fields }) => {
+    const employee = await ctx.db.get(employeeId);
+    await requireEmployeeRecordOwner(ctx, employee);
     await ctx.db.patch(employeeId, fields);
   },
 });
@@ -91,6 +114,8 @@ export const update = mutation({
 export const deleteEmployee = mutation({
   args: { employeeId: v.id("employees") },
   handler: async (ctx, args) => {
+    const employee = await ctx.db.get(args.employeeId);
+    await requireEmployeeRecordOwner(ctx, employee);
     await ctx.db.delete(args.employeeId);
   },
 });
@@ -102,6 +127,7 @@ export const bulkCreate = mutation({
     employees: v.array(v.any()),
   },
   handler: async (ctx, args) => {
+    await requireEmployeeOwner(ctx, args.businessId, args.userId);
     const ids = [];
     for (const emp of args.employees) {
       const id = await ctx.db.insert("employees", {
