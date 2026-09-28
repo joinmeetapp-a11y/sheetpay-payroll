@@ -27,6 +27,7 @@ interface AuthScreenProps {
   onAuthComplete: (uid: string, email: string, displayName: string) => void;
   onBack?: () => void;
   defaultMode?: 'signup' | 'signin';
+  accountantMode?: boolean;
 }
 
 function getAuthError(code: string): string {
@@ -63,6 +64,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   onAuthComplete,
   onBack,
   defaultMode = 'signup',
+  accountantMode = false,
 }) => {
   const [mode, setMode] = useState<'signup' | 'signin' | 'reset'>(defaultMode);
   const [displayName, setDisplayName] = useState('');
@@ -207,8 +209,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto font-sans select-none">
-      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans select-none">
+      <div className="bg-white w-full max-w-md max-h-[calc(100dvh-1.5rem)] rounded-3xl shadow-2xl border border-slate-200 overflow-y-auto flex flex-col my-auto animate-in zoom-in-95 duration-300">
 
         {/* Header — identical style to OnboardingFlow header */}
         <div className="bg-slate-50 text-slate-900 px-6 py-4 flex items-center justify-between border-b border-slate-200">
@@ -217,13 +219,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <CaylaPenMascot size="xs" />
             </div>
             <div>
-              <div className="font-extrabold text-sm text-slate-900">Sheetpay</div>
+              <div className="font-extrabold text-sm text-slate-900">{accountantMode ? 'Sheetpay Accountant' : 'Sheetpay'}</div>
               <p className="text-[11px] text-slate-500">
                 {mode === 'signup'
-                  ? 'Create your account to secure your workspace'
+                  ? 'Create your accountant workspace'
                   : mode === 'reset'
                   ? 'Reset your password'
-                  : 'Welcome back to your workspace'}
+                  : 'Welcome back to your accountant workspace'}
               </p>
             </div>
           </div>
@@ -264,10 +266,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             ) : mode === 'signup' ? (
               <>
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                  Save your workspace
+                  Set up your accountant workspace
                 </h2>
                 <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                  Create an account to securely store your payroll data and access it anywhere.
+                  Manage client payroll from one secure workspace.
                 </p>
               </>
             ) : (
@@ -276,7 +278,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   Welcome back
                 </h2>
                 <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                  Sign in to access your payroll workspace, employees, and reports.
+                  Sign in to manage your clients, payroll runs, payslips, and reports.
                 </p>
               </>
             )}
@@ -463,20 +465,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </form>
           )}
 
-          {/* Legal / hint footer */}
-          {mode === 'signup' && !resetSent && (
-            <p className="text-center text-[11px] text-slate-400 leading-relaxed">
-              By creating an account, you agree to our{' '}
-              <a href="/terms-of-service" className="text-emerald-700 font-bold hover:underline">
-                Terms of Service
-              </a>{' '}
-              and{' '}
-              <a href="/privacy-policy" className="text-emerald-700 font-bold hover:underline">
-                Privacy Policy
-              </a>
-              .
-            </p>
-          )}
+          {/* Legal links */}
+          <div className="text-center text-[11px] text-slate-400 leading-relaxed space-y-2">
+            {mode === 'signup' && !resetSent && (
+              <p>
+                By creating an account, you agree to our{' '}
+                <a href="/terms-of-service" className="text-emerald-700 font-bold hover:underline">Terms of Service</a>{' '}
+                and <a href="/privacy-policy" className="text-emerald-700 font-bold hover:underline">Privacy Policy</a>.
+              </p>
+            )}
+            {accountantMode && (
+              <nav aria-label="Legal information" className="flex flex-wrap justify-center gap-x-3 gap-y-1">
+                <a href="/privacy-policy" className="text-emerald-700 font-bold hover:underline">Privacy</a>
+                <a href="/terms-of-service" className="text-emerald-700 font-bold hover:underline">Terms</a>
+                <a href="/refund-policy" className="text-emerald-700 font-bold hover:underline">Refunds</a>
+                <a href="/security" className="text-emerald-700 font-bold hover:underline">Security</a>
+                <a href="/compliance" className="text-emerald-700 font-bold hover:underline">Compliance</a>
+                <a href="/contact" className="text-emerald-700 font-bold hover:underline">Contact</a>
+              </nav>
+            )}
+          </div>
         </div>
       </div>
     </div>
