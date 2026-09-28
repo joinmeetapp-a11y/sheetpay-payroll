@@ -105,7 +105,7 @@ const PADDLE_ACCOUNTANT_PRODUCT_IDS: Record<'accountant' | 'accountant_yearly', 
 export default function App() {
   // Path Routing State
   const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname);
-  const accountantAuthFlowRef = useRef(window.location.pathname === '/accountant/auth');
+  const accountantAuthFlowRef = useRef(window.location.pathname.startsWith('/accountant'));
 
   // Navigation / View State
   const [viewMode, setViewMode] = useState<'landing' | 'auth' | 'app'>('landing');
@@ -157,7 +157,7 @@ export default function App() {
 
   // Preserve accountant auth intent through Firebase's full-page Google redirect.
   useEffect(() => {
-    if (currentPath === '/accountant/auth') {
+    if (currentPath.startsWith('/accountant')) {
       accountantAuthFlowRef.current = true;
       try {
         window.sessionStorage.setItem('sheetpay_accountant_auth_flow', '1');
@@ -371,8 +371,7 @@ export default function App() {
         // initial Firebase session restore after Google's full-page redirect.
         // Main-app logins retain the existing /app routing behavior.
         let accountantAuthFlow = accountantAuthFlowRef.current ||
-          window.location.pathname === '/accountant' ||
-          window.location.pathname === '/accountant/auth';
+          window.location.pathname.startsWith('/accountant');
         try {
           accountantAuthFlow = accountantAuthFlow ||
             window.sessionStorage.getItem('sheetpay_accountant_auth_flow') === '1';
@@ -1339,7 +1338,7 @@ export default function App() {
       accountType: AccountType;
       payrollRuns?: PayrollRun[];
     }) => {
-      let accountantAuthFlow = accountantAuthFlowRef.current || window.location.pathname === '/accountant/auth';
+      let accountantAuthFlow = accountantAuthFlowRef.current || window.location.pathname.startsWith('/accountant');
       try {
         accountantAuthFlow = accountantAuthFlow ||
           window.sessionStorage.getItem('sheetpay_accountant_auth_flow') === '1';
