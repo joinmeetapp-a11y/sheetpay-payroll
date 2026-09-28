@@ -3,12 +3,12 @@ import { toMonthly, fromMonthly } from '../trinidad-and-tobago';
 
 /**
  * Saint Lucia National Insurance Corporation (NIC) & IRD PAYE Tax Rules
- * Effective Tax Year: 2026
+ * Effective Tax Year: 2026 (2023 tax regime; NIC contribution ceiling confirmed by official NIC guidance)
  * Official Source: Saint Lucia Inland Revenue Department (IRD) & National Insurance Corporation (NIC)
  */
 export const LC_TAX_YEAR = 2026;
-export const LC_LAST_UPDATED = 'August 2026';
-export const LC_OFFICIAL_SOURCE = 'Saint Lucia Inland Revenue Department (IRD) & National Insurance Corporation (NIC)';
+export const LC_LAST_UPDATED = 'September 2026';
+export const LC_OFFICIAL_SOURCE = 'Saint Lucia IRD Tax Code Form (https://ird.gov.lc/images/Documents/Forms/IndividualForms/Tax_Code_Form_25000_Allowance_Editable02.pdf), Tax Facts (https://ird.gov.lc/images/Documents/Publications/Tax_Facts__Calculations_New_Regime_Version_2024view_.pdf), and NIC contribution guidance (https://www.stlucianic.org/home/faq/)';
 
 // Maximum monthly insurable earnings for NIC: EC$5,000 / month ($60,000/yr)
 const LC_MAX_INSURABLE_MONTHLY = 5000;
