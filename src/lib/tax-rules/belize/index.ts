@@ -7,8 +7,8 @@ import { toMonthly, fromMonthly } from '../trinidad-and-tobago';
  * Official Source: Belize Social Security Board (SSB) & Belize Tax Service Department
  */
 export const BZ_TAX_YEAR = 2026;
-export const BZ_LAST_UPDATED = 'August 2026';
-export const BZ_OFFICIAL_SOURCE = 'Belize Social Security Board (SSB) & Belize Tax Service Department';
+export const BZ_LAST_UPDATED = 'September 2026';
+export const BZ_OFFICIAL_SOURCE = 'SSB contributions (https://socialsecurity.org.bz/contributions/) and Belize Tax Service Income and Business Tax Amendment Act 2024 (https://bts.gov.bz/wp-content/uploads/2025/02/Act-No.-40-of-2024-Income-and-Business-Tax-Amendment-Act-2024.pdf)';
 
 interface SSBWeeklyBracket {
   minWeekly: number;
@@ -112,19 +112,25 @@ export function calculateBelizeIncomeTax(input: BaseTaxCalculationInput): PAYECa
   const monthlyGross = toMonthly(grossIncome, frequency);
   const annualGross = monthlyGross * 12;
 
-  // Basic Standard Exemption: BZ$20,000 / year (BZ$1,666.67 / month)
+  // Resident employed person deduction under the 2024 amendment: BZ$20,000/year.
   const annualStandardExemption = 20000 + allowances;
   const monthlyPersonalAllowance = annualStandardExemption / 12;
 
   let annualTax = 0;
   let taxableAnnual = 0;
+  let personalReliefCredit = 0;
 
-  // Belize Exemption Threshold Rule:
-  // If total annual gross income is BZ$26,000 or less, income tax is 0%.
-  // If annual gross income exceeds BZ$26,000, 25% flat tax is applied on taxable income over BZ$20,000.
-  if (annualGross > 26000) {
+  // Act No. 40 of 2024: resident employees earning BZ$29,000 or less are
+  // exempt. For annual income above BZ$29,000, apply 25% to income above the
+  // BZ$20,000 deduction, then the temporary credit tapers from BZ$2,250 to $0
+  // between BZ$29,000 and BZ$32,000.
+  if (annualGross > 29000) {
     taxableAnnual = Math.max(0, annualGross - annualStandardExemption);
-    annualTax = Number((taxableAnnual * 0.25).toFixed(2));
+    const taxBeforeCredit = taxableAnnual * 0.25;
+    personalReliefCredit = annualGross <= 32000
+      ? Math.max(0, 2250 - 0.75 * (annualGross - 29000))
+      : 0;
+    annualTax = Number(Math.max(0, taxBeforeCredit - personalReliefCredit).toFixed(2));
   }
 
   const monthlyTax = Number((annualTax / 12).toFixed(2));
@@ -144,21 +150,21 @@ export function calculateBelizeIncomeTax(input: BaseTaxCalculationInput): PAYECa
     taxableIncome: taxableForFreq,
     payeTax: payeForFrequency,
     effectiveTaxRate: grossIncome > 0 ? Number(((payeForFrequency / grossIncome) * 100).toFixed(2)) : 0,
-    marginalTaxRate: annualGross > 26000 ? 25 : 0,
+    marginalTaxRate: annualGross > 29000 ? 25 : 0,
     annualTax,
     bracketsBreakdown: [
       {
-        tier: annualGross <= 26000 ? 'Gross income <= BZ$26,000/yr (100% Tax Exempt)' : '25% flat rate on income exceeding BZ$20,000/yr standard deduction',
-        rate: annualGross <= 26000 ? 0 : 0.25,
+        tier: annualGross <= 29000 ? 'Resident employee income up to BZ$29,000/year is exempt' : '25% over BZ$20,000/year deduction, less tapered BZ$2,250 credit from $29,000 to $32,000',
+        rate: annualGross <= 29000 ? 0 : 0.25,
         taxableInTier: taxableForFreq,
         taxForTier: payeForFrequency,
       },
     ],
     lastUpdated: BZ_LAST_UPDATED,
     notes: [
-      'Belize basic personal relief exemption is BZ$20,000 per year (BZ$1,666.67/month).',
-      'Individuals earning BZ$26,000 or less annually (BZ$2,166.67/month) are entirely exempt from income tax.',
-      'For earnings over BZ$26,000, a flat 25% rate applies on taxable income over the BZ$20,000 allowance.',
+      'Assumes the employee is resident in Belize. Resident employees earning BZ$29,000 or less annually are exempt under Act No. 40 of 2024.',
+      'For income over BZ$29,000, the BZ$20,000 deduction applies and a BZ$2,250 tax credit tapers by 75% of income over BZ$29,000 through BZ$32,000.',
+      'The SSB contribution component uses the published weekly wage-band schedule for employed persons.'
     ],
   };
 }
