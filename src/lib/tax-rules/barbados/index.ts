@@ -93,7 +93,7 @@ export function calculateBarbadosPAYE(input: BaseTaxCalculationInput): PAYECalcu
       monthlyTax = tier1Tax;
     } else {
       tier1Taxable = monthlyTier1Cap;
-      tier1Tax = Number((tier1Taxable * 0.125).toFixed(2));
+      tier1Tax = Number((tier1Taxable * 0.115).toFixed(2));
       tier2Taxable = monthlyTaxable - monthlyTier1Cap;
       tier2Tax = Number((tier2Taxable * 0.275).toFixed(2));
       monthlyTax = Number((tier1Tax + tier2Tax).toFixed(2));
