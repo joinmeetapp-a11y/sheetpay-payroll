@@ -144,7 +144,7 @@ export const AccountantReportsView: React.FC<AccountantReportsViewProps> = ({ cl
       {/* Top Executive KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total Processed Gross</span>
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Latest Run Gross</span>
           <div className="text-2xl font-black text-slate-900 font-mono">{formatCurrency(totalGross)}</div>
           <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
             <TrendingUp className="w-3.5 h-3.5" />
@@ -153,7 +153,7 @@ export const AccountantReportsView: React.FC<AccountantReportsViewProps> = ({ cl
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-1">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Estimated Total Net Pay</span>
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Latest Run Net Pay</span>
           <div className="text-2xl font-black text-slate-900 font-mono">{formatCurrency(estimatedNet)}</div>
           <span className="text-xs text-slate-500">Disbursed to {totalEmployees} workers</span>
         </div>
