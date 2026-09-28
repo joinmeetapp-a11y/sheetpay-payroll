@@ -4,15 +4,15 @@ import { toMonthly, fromMonthly } from '../trinidad-and-tobago';
 /**
  * Barbados National Insurance Scheme (NIS) & BRA PAYE Tax Rules
  * Effective Tax Year: 2026
- * Official Source: Barbados National Insurance Scheme (NIS) & Barbados Revenue Authority (BRA)
+ * Official Source: Barbados NISSS 2026 earnings ceiling and BRA 2026 income tax policy
  */
 export const BB_TAX_YEAR = 2026;
-export const BB_LAST_UPDATED = 'August 2026';
+export const BB_LAST_UPDATED = 'September 2026';
 export const BB_OFFICIAL_SOURCE = 'Barbados National Insurance Scheme (NIS) & Barbados Revenue Authority (BRA)';
 
 // Maximum insurable earnings: $5,200/month ($1,200/week, $2,400/fortnight, $62,400/year)
-const BB_MAX_INSURABLE_MONTHLY = 5200;
-const BB_MAX_INSURABLE_WEEKLY = 1200;
+const BB_MAX_INSURABLE_MONTHLY = 5360;
+const BB_MAX_INSURABLE_WEEKLY = 1238;
 
 // Statutory contribution rates
 export const BB_NIS_RATES = {
@@ -77,8 +77,8 @@ export function calculateBarbadosPAYE(input: BaseTaxCalculationInput): PAYECalcu
   const monthlyTaxable = Math.max(0, monthlyGross - monthlyPersonalAllowance);
 
   // Tax brackets on taxable income:
-  // 12.5% on first $50,000 / year ($4,166.67 / month)
-  // 28.5% on excess over $50,000 / year
+  // 11.5% on first $50,000 / year ($4,166.67 / month)
+  // 27.5% on excess over $50,000 / year
   const monthlyTier1Cap = 50000 / 12; // 4166.67
   let monthlyTax = 0;
   let tier1Taxable = 0;
@@ -89,13 +89,13 @@ export function calculateBarbadosPAYE(input: BaseTaxCalculationInput): PAYECalcu
   if (monthlyTaxable > 0) {
     if (monthlyTaxable <= monthlyTier1Cap) {
       tier1Taxable = monthlyTaxable;
-      tier1Tax = Number((tier1Taxable * 0.125).toFixed(2));
+      tier1Tax = Number((tier1Taxable * 0.115).toFixed(2));
       monthlyTax = tier1Tax;
     } else {
       tier1Taxable = monthlyTier1Cap;
       tier1Tax = Number((tier1Taxable * 0.125).toFixed(2));
       tier2Taxable = monthlyTaxable - monthlyTier1Cap;
-      tier2Tax = Number((tier2Taxable * 0.285).toFixed(2));
+      tier2Tax = Number((tier2Taxable * 0.275).toFixed(2));
       monthlyTax = Number((tier1Tax + tier2Tax).toFixed(2));
     }
   }
@@ -115,17 +115,17 @@ export function calculateBarbadosPAYE(input: BaseTaxCalculationInput): PAYECalcu
     taxableIncome: taxableForFreq,
     payeTax: payeForFrequency,
     effectiveTaxRate: grossIncome > 0 ? Number(((payeForFrequency / grossIncome) * 100).toFixed(2)) : 0,
-    marginalTaxRate: monthlyTaxable > monthlyTier1Cap ? 28.5 : monthlyTaxable > 0 ? 12.5 : 0,
+    marginalTaxRate: monthlyTaxable > monthlyTier1Cap ? 27.5 : monthlyTaxable > 0 ? 11.5 : 0,
     annualTax,
     bracketsBreakdown: [
       {
-        tier: '12.5% on first BDS$50,000/year (BDS$4,166.67/mo)',
+        tier: '11.5% on first BDS$50,000/year (BDS$4,166.67/mo)',
         rate: 0.125,
         taxableInTier: Number(fromMonthly(tier1Taxable, frequency).toFixed(2)),
         taxForTier: Number(fromMonthly(tier1Tax, frequency).toFixed(2)),
       },
       {
-        tier: '28.5% on taxable income over BDS$50,000/year',
+        tier: '27.5% on taxable income over BDS$50,000/year',
         rate: 0.285,
         taxableInTier: Number(fromMonthly(tier2Taxable, frequency).toFixed(2)),
         taxForTier: Number(fromMonthly(tier2Tax, frequency).toFixed(2)),
@@ -134,7 +134,7 @@ export function calculateBarbadosPAYE(input: BaseTaxCalculationInput): PAYECalcu
     lastUpdated: BB_LAST_UPDATED,
     notes: [
       'Barbados statutory basic personal allowance of BDS$25,000/year (BDS$2,083.33/month) applied.',
-      '12.5% standard rate on the first BDS$50,000 of taxable income; 28.5% higher rate applies above BDS$50,000.',
+      '11.5% standard rate on the first BDS$50,000 of taxable income; 27.5% higher rate applies above BDS$50,000.',
     ],
   };
 }
