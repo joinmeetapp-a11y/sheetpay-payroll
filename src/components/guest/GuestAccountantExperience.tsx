@@ -230,8 +230,8 @@ export const GuestAccountantExperience: React.FC<Props> = ({
       const client: AccountantClient = {
         id: `guest-client-${Date.now()}`,
         name: business.name?.trim() || 'Untitled Client',
-        country: 'Trinidad & Tobago',
-        countryCode: 'TT',
+        country: ({ TTD: 'Trinidad & Tobago', BBD: 'Barbados', BZD: 'Belize', XCD: 'Saint Lucia' } as Record<string, string>)[business.currency || 'TTD'] || 'Trinidad & Tobago',
+        countryCode: ({ TTD: 'TT', BBD: 'BB', BZD: 'BZ', XCD: 'LC' } as Record<string, string>)[business.currency || 'TTD'] || 'TT',
         currency: business.currency || 'TTD',
         currencySymbol: business.currencySymbol || '$',
         payFrequency: inferredFreq,
@@ -253,8 +253,8 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         signatoryName: business.signatoryName || '',
         signatoryTitle: business.signatoryTitle || 'Managing Director',
         employees: capped,
-        payrollRun: payrollRuns[0] || null,
-        payrollRuns,
+        payrollRun: payrollRuns[0] ? { ...payrollRuns[0], countryCode: ({ TTD: 'TT', BBD: 'BB', BZD: 'BZ', XCD: 'LC' } as Record<string, string>)[business.currency || 'TTD'] || 'TT' } : null,
+        payrollRuns: payrollRuns.map((run) => ({ ...run, countryCode: ({ TTD: 'TT', BBD: 'BB', BZD: 'BZ', XCD: 'LC' } as Record<string, string>)[business.currency || 'TTD'] || 'TT' })),
       };
 
       setClients([client]);
