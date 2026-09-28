@@ -357,6 +357,14 @@ export const BusinessEditModal: React.FC<BusinessEditModalProps> = ({
             />
           </div>
 
+          <div>
+            <label className="text-slate-600 font-medium block mb-1">Company logo URL</label>
+            <input type="url" value={form.logo || ''} onChange={(e) => setForm({ ...form, logo: e.target.value })} placeholder="https://…" className="w-full px-3 py-2 border border-slate-200 rounded-lg" />
+          </div>
+          <div>
+            <label className="text-slate-600 font-medium block mb-1">Signature image URL</label>
+            <input type="url" value={form.signatureUrl || ''} onChange={(e) => setForm({ ...form, signatureUrl: e.target.value })} placeholder="https://…" className="w-full px-3 py-2 border border-slate-200 rounded-lg" />
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-slate-600 font-medium block mb-1">BIR Tax ID</label>
