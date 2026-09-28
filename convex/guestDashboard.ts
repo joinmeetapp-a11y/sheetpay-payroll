@@ -3,8 +3,8 @@ import { mutation, query } from "./_generated/server";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const MAX_CLIENTS = 1;
-const MAX_EMPLOYEES = 50;
-const MAX_PAYROLL_RUNS = 1;
+const MAX_PAYROLL_RUNS = 3;
+const MAX_CAYLA_ACTIONS = 3;
 const MAX_OCR_SCANS = 6; // guard against runaway upload loops
 const MAX_PAYLOAD_BYTES = 512 * 1024; // ~0.5MB per patch
 
@@ -49,6 +49,7 @@ export const getOrCreate = mutation({
       guestClientsUsed: 0,
       guestEmployeesUsed: 0,
       guestPayrollRunsUsed: 0,
+      caylaActionsUsed: 0,
       ocrScansUsed: 0,
       utm,
     });
@@ -102,18 +103,14 @@ export const upsertClient = mutation({
 });
 
 /**
- * Replace the guest employees array. Enforces the 50-employee cap regardless
- * of how the client claims the list was built (manual, CSV, OCR — the cap is
- * on the final stored count, not per import method).
+ * Replace the guest employees array. The trial does not cap employee records;
+ * OCR usage is limited separately before the OCR action runs.
  */
 export const setEmployees = mutation({
   args: { anonSessionId: v.string(), employees: v.array(v.any()) },
   handler: async (ctx, { anonSessionId, employees }) => {
     assertPayloadSize(employees);
     const row = await loadSession(ctx, anonSessionId);
-    if (employees.length > MAX_EMPLOYEES) {
-      throw new Error(`GUEST_LIMIT_EMPLOYEES:${employees.length}`);
-    }
     await ctx.db.patch(row._id, {
       employees,
       guestEmployeesUsed: employees.length,
@@ -132,15 +129,18 @@ export const savePayrollRun = mutation({
   handler: async (ctx, { anonSessionId, payrollRun }) => {
     assertPayloadSize(payrollRun);
     const row = await loadSession(ctx, anonSessionId);
-    const wasEmpty = !row.payrollRun;
-    if (wasEmpty && row.guestPayrollRunsUsed >= MAX_PAYROLL_RUNS) {
+    const runs = row.payrollRuns ?? (row.payrollRun ? [row.payrollRun] : []);
+    const exists = runs.some((run: any) => run?.id === payrollRun?.id);
+    if (!exists && runs.length >= MAX_PAYROLL_RUNS) {
       throw new Error("GUEST_LIMIT_PAYROLL_RUNS");
     }
+    const nextRuns = exists
+      ? runs.map((run: any) => run?.id === payrollRun?.id ? payrollRun : run)
+      : [...runs, payrollRun];
     await ctx.db.patch(row._id, {
       payrollRun,
-      guestPayrollRunsUsed: wasEmpty
-        ? row.guestPayrollRunsUsed + 1
-        : row.guestPayrollRunsUsed,
+      payrollRuns: nextRuns,
+      guestPayrollRunsUsed: exists ? row.guestPayrollRunsUsed : Math.min(MAX_PAYROLL_RUNS, row.guestPayrollRunsUsed + 1),
       updatedAt: Date.now(),
     });
     return { ok: true };
@@ -203,8 +203,8 @@ export const guestLimitsPublic = query({
   args: {},
   handler: async () => ({
     maxClients: MAX_CLIENTS,
-    maxEmployees: MAX_EMPLOYEES,
     maxPayrollRuns: MAX_PAYROLL_RUNS,
+    maxCaylaActions: MAX_CAYLA_ACTIONS,
     maxOcrScans: MAX_OCR_SCANS,
   }),
 });
