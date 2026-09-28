@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const MAX_CLIENTS = 1;
@@ -184,17 +184,6 @@ export const setPendingAction = mutation({
  * OCR quota check — throws before an expensive vision call so guests cannot
  * grind through OpenAI on the marketing page. Increments after success.
  */
-export const consumeCaylaAction = internalMutation({
-  args: { anonSessionId: v.string() },
-  handler: async (ctx, { anonSessionId }) => {
-    const row = await loadSession(ctx, anonSessionId);
-    const used = row.caylaActionsUsed ?? 0;
-    if (used >= MAX_CAYLA_ACTIONS) throw new Error("GUEST_LIMIT_CAYLA");
-    await ctx.db.patch(row._id, { caylaActionsUsed: used + 1, updatedAt: Date.now() });
-    return { ok: true, used: used + 1, max: MAX_CAYLA_ACTIONS };
-  },
-});
-
 export const assertAndIncrementCayla = mutation({
   args: { anonSessionId: v.string() },
   handler: async (ctx, { anonSessionId }) => {
