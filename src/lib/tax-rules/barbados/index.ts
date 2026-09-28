@@ -8,9 +8,9 @@ import { toMonthly, fromMonthly } from '../trinidad-and-tobago';
  */
 export const BB_TAX_YEAR = 2026;
 export const BB_LAST_UPDATED = 'September 2026';
-export const BB_OFFICIAL_SOURCE = 'Barbados National Insurance Scheme (NIS) & Barbados Revenue Authority (BRA)';
+export const BB_OFFICIAL_SOURCE = 'NISSS 2026 earnings ceiling (https://www.nis.gov.bb/increase-in-earnings-ceiling-2026/) and BRA 2026 PIT rates (https://bra.gov.bb/News/Policy-Notes/Reduction-of-Personal-Income-Tax-R)';
 
-// Maximum insurable earnings: $5,200/month ($1,200/week, $2,400/fortnight, $62,400/year)
+// 2026 maximum insurable earnings: BDS$5,360/month and BDS$1,238/week
 const BB_MAX_INSURABLE_MONTHLY = 5360;
 const BB_MAX_INSURABLE_WEEKLY = 1238;
 
@@ -120,13 +120,13 @@ export function calculateBarbadosPAYE(input: BaseTaxCalculationInput): PAYECalcu
     bracketsBreakdown: [
       {
         tier: '11.5% on first BDS$50,000/year (BDS$4,166.67/mo)',
-        rate: 0.125,
+        rate: 0.115,
         taxableInTier: Number(fromMonthly(tier1Taxable, frequency).toFixed(2)),
         taxForTier: Number(fromMonthly(tier1Tax, frequency).toFixed(2)),
       },
       {
         tier: '27.5% on taxable income over BDS$50,000/year',
-        rate: 0.285,
+        rate: 0.275,
         taxableInTier: Number(fromMonthly(tier2Taxable, frequency).toFixed(2)),
         taxForTier: Number(fromMonthly(tier2Tax, frequency).toFixed(2)),
       },
