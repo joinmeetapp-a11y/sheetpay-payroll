@@ -256,7 +256,10 @@ http.route({
     const customData = data?.custom_data ?? {};
     const firebaseUid: string | undefined = customData?.firebaseUid;
 
-    const priceId: string | undefined = data?.items?.[0]?.price?.id;
+    const priceId: string | undefined =
+      data?.items?.[0]?.price?.id ??
+      data?.details?.line_items?.[0]?.price?.id ??
+      data?.items?.[0]?.price_id;
     const plan =
       (customData?.plan as "pro" | "accountant" | undefined) ??
       planForPriceId(priceId) ??
@@ -280,6 +283,7 @@ http.route({
         planStatus,
         paddleSubscriptionId,
         paddleTransactionId,
+        priceId,
       });
       await ctx.runMutation(internal.subscriptions.finishPaddleEvent, {
         docId: guard.docId,
