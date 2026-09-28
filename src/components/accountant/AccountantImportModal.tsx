@@ -16,6 +16,7 @@ interface AccountantImportModalProps {
    * touches production tables — only the guest session — while still showing
    * the full extraction → review UX.
    */
+  onBeforeOcr?: () => Promise<boolean>;
   onGuestImport?: (
     business: BusinessDetails,
     employees: Employee[],
@@ -39,6 +40,7 @@ export const AccountantImportModal: React.FC<AccountantImportModalProps> = ({
   firebaseUid,
   onClientImported,
   onGuestImport,
+  onBeforeOcr,
 }) => {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -209,6 +211,7 @@ export const AccountantImportModal: React.FC<AccountantImportModalProps> = ({
             onImportComplete={handleImportComplete}
             onManualSetup={onClose}
             isAccountantMode={true}
+            onBeforeOcr={onBeforeOcr}
           />
         </div>
 
