@@ -412,8 +412,8 @@ function renderTemplateContent(
             </div>
             <div className="text-right font-mono text-[10px]">
               <div><span className="text-slate-400">ID:</span> <span className="font-bold text-slate-800">{employee.employeeId}</span></div>
-              <div><span className="text-slate-400">BIR:</span> <span className="font-bold text-slate-800">{employee.birNumber || '104-892-334'}</span></div>
-              <div><span className="text-slate-400">NIS:</span> <span className="font-bold text-slate-800">{employee.ssnNumber || '849-20-4491'}</span></div>
+              <div><span className="text-slate-400">BIR:</span> <span className="font-bold text-slate-800">{employee.birNumber || 'Not provided'}</span></div>
+              <div><span className="text-slate-400">NIS:</span> <span className="font-bold text-slate-800">{employee.ssnNumber || 'Not provided'}</span></div>
             </div>
           </div>
 
@@ -513,7 +513,7 @@ function renderTemplateContent(
                 <td className="border border-slate-400 p-1.5 font-bold text-slate-700">DEPARTMENT</td>
                 <td className="border border-slate-400 p-1.5">{employee.department}</td>
                 <td className="border border-slate-400 p-1.5 font-bold text-slate-700">BIR / SSN</td>
-                <td className="border border-slate-400 p-1.5 font-mono">{employee.birNumber || '104-889'} / {employee.ssnNumber || '849-20'}</td>
+                <td className="border border-slate-400 p-1.5 font-mono">{employee.birNumber || 'Not provided'} / {employee.ssnNumber || 'Not provided'}</td>
               </tr>
             </tbody>
           </table>
@@ -596,8 +596,8 @@ function renderTemplateContent(
             </div>
             <div>
               <div>DEPT     : {employee.department.toUpperCase()}</div>
-              <div>BIR_NO   : {employee.birNumber || '104-892-334'}</div>
-              <div>SSN_NO   : {employee.ssnNumber || '849-20-4491'}</div>
+              <div>BIR_NO   : {employee.birNumber || 'Not provided'}</div>
+              <div>SSN_NO   : {employee.ssnNumber || 'Not provided'}</div>
             </div>
           </div>
 
@@ -670,7 +670,7 @@ function renderTemplateContent(
             </div>
             <div className="text-right text-[11px] font-mono text-blue-900">
               <div>{employee.employeeId}</div>
-              <div className="text-[10px] text-slate-500">BIR: {employee.birNumber || '104-992-011'}</div>
+              <div className="text-[10px] text-slate-500">BIR: {employee.birNumber || 'Not provided'}</div>
             </div>
           </div>
 
@@ -752,8 +752,8 @@ function renderTemplateContent(
               <div className="font-bold text-white text-xs">{employee.name}</div>
               <div className="text-teal-200">{employee.position}</div>
               <div className="font-mono text-teal-300">{employee.employeeId}</div>
-              <div className="text-teal-300">BIR: {employee.birNumber || '104-892'}</div>
-              <div className="text-teal-300">NIS: {employee.ssnNumber || '849-201'}</div>
+              <div className="text-teal-300">BIR: {employee.birNumber || 'Not provided'}</div>
+              <div className="text-teal-300">NIS: {employee.ssnNumber || 'Not provided'}</div>
             </div>
 
             <div className="border-t border-teal-800 pt-2 text-[10px]">
@@ -818,8 +818,8 @@ function renderTemplateContent(
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-[10px]">
             <div><div className="text-slate-500">NAME</div><div className="font-bold text-white text-xs">{employee.name}</div></div>
             <div><div className="text-slate-500">ID</div><div className="font-mono text-emerald-400 text-xs">{employee.employeeId}</div></div>
-            <div><div className="text-slate-500">BIR NO.</div><div className="font-mono text-slate-300">{employee.birNumber || '104-892'}</div></div>
-            <div><div className="text-slate-500">SSN NO.</div><div className="font-mono text-slate-300">{employee.ssnNumber || '849-201'}</div></div>
+            <div><div className="text-slate-500">BIR NO.</div><div className="font-mono text-slate-300">{employee.birNumber || 'Not provided'}</div></div>
+            <div><div className="text-slate-500">SSN NO.</div><div className="font-mono text-slate-300">{employee.ssnNumber || 'Not provided'}</div></div>
           </div>
 
           {/* 2-Column Obsidian Breakdown */}
@@ -874,8 +874,8 @@ function renderTemplateContent(
           <div className="grid grid-cols-2 gap-2 border border-slate-300 p-2.5 bg-slate-50 text-[10px] font-mono">
             <div>
               <div>EMPLOYEE NAME: <span className="font-bold text-slate-900">{employee.name}</span></div>
-              <div>BIR TAX NO: <span className="font-bold text-emerald-800">{employee.birNumber || '104-892-334'}</span></div>
-              <div>NIS NUMBER: <span className="font-bold text-emerald-800">{employee.ssnNumber || '849-20-4491'}</span></div>
+              <div>BIR TAX NO: <span className="font-bold text-emerald-800">{employee.birNumber || 'Not provided'}</span></div>
+              <div>NIS NUMBER: <span className="font-bold text-emerald-800">{employee.ssnNumber || 'Not provided'}</span></div>
             </div>
             <div>
               <div>EMPLOYEE ID: <span className="font-bold">{employee.employeeId}</span></div>
@@ -970,8 +970,8 @@ function renderTemplateContent(
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
             <div><div className="text-[10px] text-slate-400 uppercase">Employee</div><div className="font-bold text-slate-900">{employee.name}</div></div>
             <div><div className="text-[10px] text-slate-400 uppercase">ID / Dept</div><div className="font-mono text-slate-800">{employee.employeeId} • {employee.department}</div></div>
-            <div><div className="text-[10px] text-slate-400 uppercase">BIR No.</div><div className="font-mono text-slate-800">{employee.birNumber || '104-892'}</div></div>
-            <div><div className="text-[10px] text-slate-400 uppercase">SSN No.</div><div className="font-mono text-slate-800">{employee.ssnNumber || '849-201'}</div></div>
+            <div><div className="text-[10px] text-slate-400 uppercase">BIR No.</div><div className="font-mono text-slate-800">{employee.birNumber || 'Not provided'}</div></div>
+            <div><div className="text-[10px] text-slate-400 uppercase">SSN No.</div><div className="font-mono text-slate-800">{employee.ssnNumber || 'Not provided'}</div></div>
           </div>
 
           {/* 2-Column Earnings & Deductions */}
