@@ -72,6 +72,8 @@ export const extractPayrollDocument = action({
     requesterUid: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<any> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || !args.requesterUid || identity.subject !== args.requesterUid) throw new Error("Unauthenticated");
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
@@ -104,7 +106,7 @@ export const extractPayrollDocument = action({
           return {
             ok: false,
             error: "FREE_LIMIT_REACHED:ocr",
-            reason: "Your free-plan OCR scans are used up for this month. Upgrade to keep scanning.",
+            reason: "Your three accountant trial OCR scans are used. Upgrade to keep scanning.",
             employees: [],
           };
         }
