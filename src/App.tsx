@@ -268,7 +268,6 @@ export default function App() {
   const [isGoogleRedirectPending, setIsGoogleRedirectPending] = useState(true);
 
   // Convex — reactive billing entitlement (unlocks features the moment plan changes)
-  const activateFromCheckout = useMutation((api as any).subscriptions.activateFromCheckout);
   const entitlement = useQuery(
     (api as any).subscriptions.getEntitlement,
     { firebaseUid: currentUser?.uid }
@@ -401,7 +400,6 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const upgraded = params.get('upgraded');
     if (upgraded === 'pro' || upgraded === 'accountant') {
-      activateFromCheckout({ firebaseUid: currentUser.uid, plan: upgraded }).catch(() => {});
       confetti({
         particleCount: 120,
         spread: 80,
@@ -697,7 +695,7 @@ export default function App() {
     if (hasRoutedAfterLoginRef.current) return;
     hasRoutedAfterLoginRef.current = true;
     // Route to accountant dashboard if plan is accountant OR if user selected accountant type
-    const goToAccountant = isAccountant || convexUserData?.accountType === 'accountant';
+    const goToAccountant = isAccountant;
     if (goToAccountant) {
       setAccountType('accountant');
       setActiveTab('accountant_dashboard');
@@ -1463,7 +1461,6 @@ export default function App() {
             },
             successUrl: `${window.location.origin}/app`,
             onComplete: () => {
-              activateFromCheckout({ firebaseUid: uid, plan: planToOpen }).catch(() => {});
               confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'] });
             },
           }).catch((err: any) => {
@@ -1780,6 +1777,7 @@ export default function App() {
       setPendingPlanAfterAuth(checkoutPlan);
       setAuthMode('signup');
       setViewMode('auth');
+      if (checkoutPlan !== 'pro') navigate('/accountant/auth');
       return;
     }
 
@@ -1808,9 +1806,6 @@ export default function App() {
           },
           successUrl: `${window.location.origin}/app`,
           onComplete: () => {
-            // Optimistic activation — the Convex Paddle webhook is authoritative
-            // and will set the subscription once Paddle calls it.
-            activateFromCheckout({ firebaseUid: uid, plan }).catch(() => {});
             confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#059669', '#10b981', '#34d399', '#6ee7b7'] });
             setViewMode('app');
             navigate('/app');
@@ -1845,6 +1840,22 @@ export default function App() {
   };
 
   // -------------------------------------------------------------
+  // Accountant-only auth entry, reached from the accountant experience and upgrade lightbox.
+  if (currentPath === '/accountant/auth') {
+    return (
+      <AuthScreen
+        accountantMode
+        onAuthComplete={handleAuthComplete}
+        onBack={() => {
+          setPendingPlanAfterAuth(null);
+          setViewMode('landing');
+          navigate('/accountant');
+        }}
+        defaultMode={authMode === 'signin' ? 'signin' : 'signup'}
+      />
+    );
+  }
+
   // -------------------------------------------------------------
   // Router Branch 4.4: Guest Accountant Dashboard (/try-accountant-dashboard)
   //
@@ -1859,6 +1870,7 @@ export default function App() {
         onSignIn={() => {
           setAuthMode('signin');
           setViewMode('auth');
+          navigate('/accountant/auth');
         }}
         onUnlock={(plan, guestSessionId) => {
           // The Paddle webhook (convex/paddle_webhook.ts, follow-up task) will
