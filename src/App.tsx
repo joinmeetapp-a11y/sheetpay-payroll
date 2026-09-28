@@ -1792,7 +1792,6 @@ export default function App() {
     // Capture values for use inside async callbacks (avoids stale-closure risk).
     const uid = currentUser.uid;
     const email = currentUser.email;
-    const plan = checkoutPlan;
 
     try {
       if (isPaddleConfigured()) {
