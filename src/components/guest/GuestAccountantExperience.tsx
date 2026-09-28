@@ -7,9 +7,8 @@
  *
  *   • starts every visitor on a marketing hero (Router branch 0)
  *   • after "Start Free Payroll" mounts the full dashboard (Router branch 1)
- *   • enforces the guest limits (1 client, 50 employees, 1 payroll run) by
- *     intercepting every add / run / download / print / whatsapp callback and
- *     opening the GuestPaywallModal instead
+ *   • enforces only the trial limits (1 client, 3 payroll runs, 3 Cayla actions,
+ *     and the OCR quota) while leaving the rest of the workspace available
  *   • persists the whole session to convex/guestDashboard.ts::guestSessions so
  *     the visitor can refresh the tab without losing work, and so that a Paddle
  *     webhook can later migrate the row into a paying user's real tables
@@ -53,6 +52,7 @@ import { ClientsView } from '../accountant/ClientsView';
 import { AddClientModal } from '../accountant/AddClientModal';
 import { EmployeesView } from '../tabs/EmployeesView';
 import { PayrollWorkspace } from '../PayrollWorkspace';
+import { PayslipsPortalView } from '../tabs/PayslipsPortalView';
 import { recalculatePayrollRun } from '../../lib/taxEngine';
 import { Sidebar } from '../Sidebar';
 import { MobileBottomNav } from '../MobileViews';
@@ -75,7 +75,8 @@ type GuestTab =
   | 'accountant_dashboard'
   | 'accountant_clients'
   | 'employees'
-  | 'payroll_runs';
+  | 'payroll_runs'
+  | 'payslips';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -140,7 +141,9 @@ export const GuestAccountantExperience: React.FC<Props> = ({
 
   // ── Limits ─────────────────────────────────────────────────────────────
   const clientsUsed = clients.length;
-  const payrollRunsUsed = activeClient?.payrollRun ? 1 : 0;
+  const payrollRunsUsed = activeClient?.payrollRuns?.length ?? (activeClient?.payrollRun ? 1 : 0);
+  const caylaActionsUsed = Number(serverSession?.caylaActionsUsed ?? 0);
+  const ocrScansUsed = Number(serverSession?.ocrScansUsed ?? 0);
 
   const triggerPaywall = useCallback(
     (reason: GuestLockedAction) => {
@@ -204,8 +207,8 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         triggerPaywall('add_client_2');
         return;
       }
-      const capped = importedEmployees.slice(0, GUEST_LIMITS.maxEmployees);
-      const rejected = importedEmployees.length - capped.length;
+      const capped = importedEmployees;
+      const rejected = 0;
 
       const totalMonthly = capped.reduce((s, e) => s + (e.grossPay || 0), 0);
       const inferredFreq = (capped[0]?.payFrequency as any) || 'monthly';
@@ -230,6 +233,9 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         businessAddress: business.address || '',
         taxRegistrationId: business.taxRegistrationId || '',
         nisNumber: business.nisNumber || '',
+        logo: business.logo || '',
+        website: business.website || '',
+        signatureUrl: business.signatureUrl || '',
         signatoryName: business.signatoryName || '',
         signatoryTitle: business.signatoryTitle || 'Managing Director',
         employees: capped,
@@ -256,13 +262,8 @@ export const GuestAccountantExperience: React.FC<Props> = ({
   const handleAddEmployees = useCallback(
     (newEmployees: Employee[]) => {
       if (!activeClient) return { added: 0, rejected: newEmployees.length };
-      const remaining = GUEST_LIMITS.maxEmployees - activeClient.employees.length;
-      if (remaining <= 0) {
-        triggerPaywall('add_employee_51');
-        return { added: 0, rejected: newEmployees.length };
-      }
-      const accepted = newEmployees.slice(0, remaining);
-      const rejected = newEmployees.length - accepted.length;
+      const accepted = newEmployees;
+      const rejected = 0;
       const merged = [...activeClient.employees, ...accepted];
       const updated = { ...activeClient, employees: merged, employeeCount: merged.length };
       handleUpdateClient(updated);
@@ -301,8 +302,8 @@ export const GuestAccountantExperience: React.FC<Props> = ({
   // ── Payroll ────────────────────────────────────────────────────────────
   const handleStartPayroll = useCallback(() => {
     if (!activeClient) return;
-    if (activeClient.payrollRun) {
-      triggerPaywall('run_payroll_2');
+    if (payrollRunsUsed >= GUEST_LIMITS.maxPayrollRuns) {
+      triggerPaywall('run_payroll_4');
       return;
     }
     if (activeClient.employees.length === 0) return;
@@ -320,6 +321,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
       periodEnd: '',
       currency: activeClient.currency,
       currencySymbol: activeClient.currencySymbol,
+      countryCode: activeClient.countryCode,
       status: 'draft',
       employees: activeClient.employees,
       employeesCount: activeClient.employees.length,
@@ -335,13 +337,14 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     const updated: AccountantClient = {
       ...activeClient,
       payrollRun: draft,
+      payrollRuns: [...(activeClient.payrollRuns ?? (activeClient.payrollRun ? [activeClient.payrollRun] : [])), draft],
       payrollStatus: 'Ready for Approval' as PayrollQueueStatus,
     };
     handleUpdateClient(updated);
     setSelectedEmployeeId(draft.employees[0]?.id ?? '');
     setTab('payroll');
     savePayrollRunMut({ anonSessionId: guestSessionId, payrollRun: draft }).catch(() => {});
-  }, [activeClient, guestSessionId, handleUpdateClient, savePayrollRunMut, triggerPaywall]);
+  }, [activeClient, guestSessionId, handleUpdateClient, payrollRunsUsed, savePayrollRunMut, triggerPaywall]);
 
   const handleFinalizePayroll = useCallback(() => {
     if (!activeClient?.payrollRun) return;
@@ -349,6 +352,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     const updated: AccountantClient = {
       ...activeClient,
       payrollRun: finalized,
+      payrollRuns: (activeClient.payrollRuns ?? [activeClient.payrollRun]).filter(Boolean).map((run) => run?.id === finalized.id ? finalized : run) as PayrollRun[],
       payrollStatus: 'Finalized' as PayrollQueueStatus,
     };
     handleUpdateClient(updated);
@@ -395,7 +399,9 @@ export const GuestAccountantExperience: React.FC<Props> = ({
     }
     return {
       name: activeClient.companyName || activeClient.name,
-      logo: '',
+      logo: activeClient.logo || '',
+      website: activeClient.website || '',
+      signatureUrl: activeClient.signatureUrl || '',
       address: activeClient.businessAddress,
       phone: activeClient.contactPhone,
       email: activeClient.contactEmail,
@@ -423,15 +429,16 @@ export const GuestAccountantExperience: React.FC<Props> = ({
         'accountant_clients',
         'employees',
         'payroll_runs',
+        'payslips',
       ];
       if (guestSupported.includes(nextTab as GuestTab)) {
         setTab(nextTab as GuestTab);
         return;
       }
-      // Paid-only tab — surface the paywall instead of dropping the click.
-      triggerPaywall('download_all_payslips');
+      // Remaining workspace areas stay available during the trial.
+      setTab(nextTab as GuestTab);
     },
-    [triggerPaywall],
+    [],
   );
 
   // ── Render: hero ───────────────────────────────────────────────────────
@@ -463,8 +470,9 @@ export const GuestAccountantExperience: React.FC<Props> = ({
       <div className="flex-1 flex flex-col min-w-0">
         <GuestLimitsBar
           clientsUsed={clientsUsed}
-          employeesUsed={employeeCount}
           payrollRunsUsed={payrollRunsUsed}
+          caylaActionsUsed={caylaActionsUsed}
+          ocrScansUsed={ocrScansUsed}
           onUpgrade={() => triggerPaywall('download_all_payslips')}
         />
 
@@ -486,7 +494,13 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onGuestImport={handleGuestImport}
               onOpenBatchPayroll={() => triggerPaywall('run_payroll_2')}
               onOpenInviteClient={() => triggerPaywall('download_all_payslips')}
-              onQuickExecuteCayla={() => {
+              onQuickExecuteCayla={(prompt) => {
+                if (caylaActionsUsed >= GUEST_LIMITS.maxCaylaActions) {
+                  triggerPaywall('cayla_4');
+                  return;
+                }
+                setPendingActionMut({ anonSessionId: guestSessionId, pendingAction: prompt }).catch(() => {});
+                setPendingActionMut({ anonSessionId: guestSessionId, pendingAction: 'cayla_trial_action' }).catch(() => {});
                 if (!activeClient) requestAddClient();
                 else if (employeeCount === 0) setTab('employees');
                 else if (!activePayroll) handleStartPayroll();
@@ -514,7 +528,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               onAddEmployee={(emp) => {
                 handleAddEmployees([emp]);
               }}
-              onViewPayslip={() => triggerPaywall('download_payslip')}
+              onViewPayslip={(emp) => { setSelectedEmployeeId(emp.id); setTab('payslips'); }}
             />
           )}
 
@@ -529,7 +543,19 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               business={businessFromClient}
               customization={customization}
               onUpdateCustomization={handleUpdateCustomization}
-              onOpenEmailModal={() => triggerPaywall('whatsapp_share')}
+              onOpenEmailModal={() => {}}
+              onOpenBusinessEditModal={() => {}}
+            />
+          )}
+
+          {tab === 'payslips' && activeClient && (
+            <PayslipsPortalView
+              payroll={activePayroll}
+              employees={activePayroll?.employees ?? activeClient.employees}
+              business={businessFromClient}
+              customization={customization}
+              onUpdateCustomization={handleUpdateCustomization}
+              onOpenEmailModal={() => {}}
               onOpenBusinessEditModal={() => {}}
             />
           )}
