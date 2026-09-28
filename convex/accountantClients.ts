@@ -19,7 +19,19 @@ async function requireAccountant(ctx: any, expectedUserId?: any) {
 export const getByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
-    await requireAccountant(ctx, userId);
+    // This reactive query can run while Convex is still receiving Firebase
+    // auth state, and free accountant trials may subscribe before checkout.
+    // Return no client data until the caller is authenticated and entitled so
+    // a transient authorization error cannot crash the entire React app.
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_firebase_uid", (q: any) => q.eq("firebaseUid", identity.subject))
+      .first();
+    if (!user || user._id !== userId) return [];
+    if (!isAdminEmail(user.email) && (user.plan !== "accountant" || user.planStatus !== "active")) return [];
+
     return ctx.db
       .query("accountantClients")
       .withIndex("by_accountant_user", (q) => q.eq("accountantUserId", userId))
