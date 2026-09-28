@@ -50,6 +50,7 @@ interface PayrollImportStepProps {
   onManualSetup: () => void;
   onBack?: () => void;
   isAccountantMode?: boolean;
+  onBeforeOcr?: () => Promise<boolean>;
 }
 
 export const PayrollImportStep: React.FC<PayrollImportStepProps> = ({
@@ -58,6 +59,7 @@ export const PayrollImportStep: React.FC<PayrollImportStepProps> = ({
   onManualSetup,
   onBack,
   isAccountantMode = false,
+  onBeforeOcr,
 }) => {
   // Sub-stages within the import workflow:
   // 'upload' -> 'processing' -> 'review' -> 'confirmation' -> 'complete'
@@ -166,6 +168,7 @@ export const PayrollImportStep: React.FC<PayrollImportStepProps> = ({
     }
 
     if (file.type.startsWith('image/')) {
+      if (onBeforeOcr && !(await onBeforeOcr())) return;
       // Show processing UI immediately, then swap in OCR-derived data when ready.
       setStage('processing');
       setCompletedSteps([]);
