@@ -22,6 +22,9 @@ export interface AccountantClient {
   id: string;
   name: string;
   companyName?: string;
+  logo?: string;
+  website?: string;
+  signatureUrl?: string;
   country: string;
   countryCode: string;
   currency: string;
@@ -176,6 +179,7 @@ export interface BusinessDetails {
 
 export interface PayrollRun {
   id: string;
+  countryCode?: string;
   month: string;
   year: number;
   periodLabel: string;
