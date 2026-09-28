@@ -52,6 +52,7 @@ interface AccountantDashboardProps {
   onAddNewClient?: (client: AccountantClient) => void;
   onOpenAddClient?: () => void;
   onOpenImport?: () => void;
+  onBeforeOcr?: () => Promise<boolean>;
   onGuestImport?: (
     business: BusinessDetails,
     employees: Employee[],
@@ -217,6 +218,7 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
   onOpenAddClient,
   onOpenImport,
   onGuestImport,
+  onBeforeOcr,
   onOpenBatchPayroll,
   onOpenInviteClient,
   onQuickExecuteCayla,
@@ -901,6 +903,7 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
         firebaseUid={firebaseUid}
         onClientImported={(client) => onAddNewClient(client)}
         onGuestImport={onGuestImport}
+        onBeforeOcr={onBeforeOcr}
       />
     </div>
   );
