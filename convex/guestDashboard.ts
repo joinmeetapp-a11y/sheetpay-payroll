@@ -195,6 +195,17 @@ export const consumeCaylaAction = internalMutation({
   },
 });
 
+export const assertAndIncrementCayla = mutation({
+  args: { anonSessionId: v.string() },
+  handler: async (ctx, { anonSessionId }) => {
+    const row = await loadSession(ctx, anonSessionId);
+    const used = row.caylaActionsUsed ?? 0;
+    if (used >= MAX_CAYLA_ACTIONS) throw new Error("GUEST_LIMIT_CAYLA");
+    await ctx.db.patch(row._id, { caylaActionsUsed: used + 1, updatedAt: Date.now() });
+    return { ok: true, used: used + 1, max: MAX_CAYLA_ACTIONS };
+  },
+});
+
 export const assertAndIncrementOcr = mutation({
   args: { anonSessionId: v.string() },
   handler: async (ctx, { anonSessionId }) => {
