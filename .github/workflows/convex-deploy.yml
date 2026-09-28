@@ -32,6 +32,7 @@ jobs:
       - name: Deploy Convex functions
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          FIREBASE_PROJECT_ID: myglowtext
         run: |
           if [ -z "$CONVEX_DEPLOY_KEY" ]; then
             echo '::error::CONVEX_DEPLOY_KEY repo secret is not set. Generate a production deploy key in the Convex dashboard (Settings -> Deploy Keys) and add it as a repo secret.'
