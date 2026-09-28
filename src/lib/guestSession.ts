@@ -38,14 +38,16 @@ export function clearGuestSessionId() {
 
 export const GUEST_LIMITS = {
   maxClients: 1,
-  maxEmployees: 50,
-  maxPayrollRuns: 1,
+  maxPayrollRuns: 3,
+  maxCaylaActions: 3,
+  maxOcrScans: 6,
 } as const;
 
 export type GuestLockedAction =
   | 'add_client_2'
-  | 'add_employee_51'
-  | 'run_payroll_2'
+  | 'run_payroll_4'
+  | 'cayla_4'
+  | 'ocr_limit'
   | 'download_payslip'
   | 'download_all_payslips'
   | 'print_payslip'
