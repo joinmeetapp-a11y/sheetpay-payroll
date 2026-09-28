@@ -1,8 +1,9 @@
 import { Employee, PayrollRun } from '../types';
+import { calculateFullPayrollByCountry, CountryCode } from './tax-rules';
 
 /**
- * Deterministic Payroll & Statutory Tax Calculation Engine (Trinidad & Tobago / Regional Standard)
- * Ensures 100% mathematical precision and compliance.
+ * Deterministic statutory payroll calculation using the country tax schedules
+ * maintained in src/lib/tax-rules and linked to official sources.
  */
 
 // NIS (National Insurance Scheme) Standard Monthly Schedule lookup
@@ -63,7 +64,7 @@ export function calculatePAYE(grossMonthly: number, nisContribution: number): nu
 }
 
 // Full Deterministic Recalculation for a single employee
-export function recalculateEmployee(emp: Employee): Employee {
+export function recalculateEmployee(emp: Employee, country: CountryCode | string = 'TT'): Employee {
   const basic = Math.max(0, Number(emp.basicPay) || 0);
   const otHours = Math.max(0, Number(emp.overtimeHours) || 0);
   
@@ -79,9 +80,10 @@ export function recalculateEmployee(emp: Employee): Employee {
   const grossPay = Number((basic + otPay + bonus + commission + allowances).toFixed(2));
   
   // Statutory deductions
-  const nis = calculateNIS(grossPay);
-  const healthSurcharge = calculateHealthSurcharge(grossPay);
-  const paye = calculatePAYE(grossPay, nis);
+  const statutory = calculateFullPayrollByCountry(country, { grossIncome: grossPay, frequency: 'monthly' });
+  const nis = statutory.employeeNIS;
+  const healthSurcharge = statutory.healthSurcharge;
+  const paye = statutory.payeTax;
   const otherDeductions = Math.max(0, Number(emp.otherDeductions) || 0);
   
   // Total deductions
@@ -109,7 +111,8 @@ export function recalculateEmployee(emp: Employee): Employee {
 
 // Recalculate entire Payroll Run
 export function recalculatePayrollRun(run: PayrollRun): PayrollRun {
-  const updatedEmployees = run.employees.map(recalculateEmployee);
+  const country = (run.countryCode || (run.currency === 'BBD' ? 'BB' : run.currency === 'BZD' ? 'BZ' : run.currency === 'XCD' ? 'LC' : 'TT')) as CountryCode;
+  const updatedEmployees = run.employees.map((emp) => recalculateEmployee(emp, country));
   
   const grossPay = updatedEmployees.reduce((sum, e) => sum + e.grossPay, 0);
   const payeTotal = updatedEmployees.reduce((sum, e) => sum + e.paye, 0);
