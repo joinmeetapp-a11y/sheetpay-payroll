@@ -484,8 +484,8 @@ export const GuestAccountantExperience: React.FC<Props> = ({
 
   // ── Tab click interception ─────────────────────────────────────────────
   // The real Sidebar / MobileBottomNav emit every accountant tab id. We map
-  // guest-supported ids straight through and open the paywall for paid-only
-  // ones (batch payroll, firm staff, portfolio reports, practice settings).
+  // keep all accountant workspace tabs available during the trial; usage caps
+  // are enforced at client, payroll, Cayla and OCR actions.
   //
   // NOTE: This hook MUST stay above the early hero return below — moving it
   // after the return causes React error #310 (hook count varies across
