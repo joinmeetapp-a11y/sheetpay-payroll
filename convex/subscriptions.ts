@@ -48,8 +48,8 @@ export const getEntitlement = query({
     }
 
     const plan = (user?.plan ?? "free") as "free" | "pro" | "accountant";
-    const planStatus = user?.planStatus ?? (plan === "free" ? "none" : "active");
-    const isActive = planStatus === "active" || planStatus === "pending";
+    const planStatus = user?.planStatus ?? "none";
+    const isActive = planStatus === "active";
     return {
       plan,
       planStatus,
@@ -59,33 +59,6 @@ export const getEntitlement = query({
       paddleSubscriptionId: user?.paddleSubscriptionId,
       planUpdatedAt: user?.planUpdatedAt,
     };
-  },
-});
-
-/**
- * Optimistic activation called by the client when Paddle redirects back after a
- * successful payment (successUrl carries ?upgraded=<plan>). The Paddle webhook is
- * the authoritative source and will reconcile status/subscription id afterward.
- */
-export const activateFromCheckout = mutation({
-  args: {
-    firebaseUid: v.string(),
-    plan: v.union(v.literal("pro"), v.literal("accountant")),
-  },
-  handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid))
-      .first();
-    if (!user) return { ok: false, reason: "user_not_found" };
-
-    await ctx.db.patch(user._id, {
-      plan: args.plan,
-      // 'pending' until the webhook confirms 'active'; both count as entitled.
-      planStatus: user.planStatus === "active" ? "active" : "pending",
-      planUpdatedAt: Date.now(),
-    });
-    return { ok: true };
   },
 });
 
@@ -163,6 +136,7 @@ export const applyPaddleEvent = internalMutation({
     planStatus: v.string(),
     paddleSubscriptionId: v.optional(v.string()),
     paddleTransactionId: v.optional(v.string()),
+    priceId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     let user = args.firebaseUid
@@ -213,9 +187,11 @@ export const applyPaddleEvent = internalMutation({
         kind,
         data: {
           planName,
-          amount: args.plan === "accountant" ? "99.00" : "29.00",
+          amount: args.plan === "accountant"
+            ? (args.priceId === "pri_01m3mjv9jcjphn3545x04c5gyk" ? "1970.00" : "197.00")
+            : "29.00",
           currency: "USD",
-          billingPeriod: "monthly",
+          billingPeriod: args.priceId === "pri_01m3mjv9jcjphn3545x04c5gyk" ? "yearly" : "monthly",
           displayName: user.displayName,
         },
         userId: user._id,
