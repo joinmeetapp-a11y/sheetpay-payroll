@@ -105,6 +105,7 @@ const PADDLE_ACCOUNTANT_PRODUCT_IDS: Record<'accountant' | 'accountant_yearly', 
 export default function App() {
   // Path Routing State
   const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname);
+  const accountantAuthFlowRef = useRef(window.location.pathname === '/accountant/auth');
 
   // Navigation / View State
   const [viewMode, setViewMode] = useState<'landing' | 'auth' | 'app'>('landing');
@@ -157,6 +158,7 @@ export default function App() {
   // Preserve accountant auth intent through Firebase's full-page Google redirect.
   useEffect(() => {
     if (currentPath === '/accountant/auth') {
+      accountantAuthFlowRef.current = true;
       try {
         window.sessionStorage.setItem('sheetpay_accountant_auth_flow', '1');
       } catch {
@@ -368,7 +370,8 @@ export default function App() {
         // Keep accountant sign-ins on their dedicated route, including the
         // initial Firebase session restore after Google's full-page redirect.
         // Main-app logins retain the existing /app routing behavior.
-        let accountantAuthFlow = window.location.pathname === '/accountant' ||
+        let accountantAuthFlow = accountantAuthFlowRef.current ||
+          window.location.pathname === '/accountant' ||
           window.location.pathname === '/accountant/auth';
         try {
           accountantAuthFlow = accountantAuthFlow ||
@@ -1336,7 +1339,7 @@ export default function App() {
       accountType: AccountType;
       payrollRuns?: PayrollRun[];
     }) => {
-      let accountantAuthFlow = window.location.pathname === '/accountant/auth';
+      let accountantAuthFlow = accountantAuthFlowRef.current || window.location.pathname === '/accountant/auth';
       try {
         accountantAuthFlow = accountantAuthFlow ||
           window.sessionStorage.getItem('sheetpay_accountant_auth_flow') === '1';
@@ -1479,6 +1482,7 @@ export default function App() {
         setViewMode('app');
         navigate(checkoutReturnPath);
         if (accountantAuthFlow) {
+          accountantAuthFlowRef.current = false;
           try { window.sessionStorage.removeItem('sheetpay_accountant_auth_flow'); } catch { /* ignore */ }
         }
 
@@ -1520,6 +1524,7 @@ export default function App() {
       setViewMode('app');
       navigate(accountantAuthFlow ? '/accountant' : '/app');
       if (accountantAuthFlow) {
+        accountantAuthFlowRef.current = false;
         try { window.sessionStorage.removeItem('sheetpay_accountant_auth_flow'); } catch { /* ignore */ }
       }
     },
@@ -1780,6 +1785,8 @@ export default function App() {
 
   const handleLogout = async () => {
     await signOut(auth).catch(() => {});
+    accountantAuthFlowRef.current = false;
+    try { window.sessionStorage.removeItem('sheetpay_accountant_auth_flow'); } catch { /* ignore */ }
     setCurrentUser(null);
     // Clear all user-specific state so a subsequent login with a different
     // account never sees another user's data.
@@ -1884,6 +1891,7 @@ export default function App() {
         onAuthComplete={handleAuthComplete}
         onBack={() => {
           setPendingPlanAfterAuth(null);
+          accountantAuthFlowRef.current = false;
           try { window.sessionStorage.removeItem('sheetpay_accountant_auth_flow'); } catch { /* ignore */ }
           setViewMode('landing');
           navigate('/accountant');
