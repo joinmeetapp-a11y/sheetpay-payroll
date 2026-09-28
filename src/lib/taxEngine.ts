@@ -9,58 +9,19 @@ import { calculateFullPayrollByCountry, CountryCode, calculateTrinidadNIS, calcu
 // NIS (National Insurance Scheme) Standard Monthly Schedule lookup
 export function calculateNIS(grossMonthly: number): number {
   if (grossMonthly <= 0) return 0;
-  if (grossMonthly < 1000) return 33.80;
-  if (grossMonthly < 1500) return 55.40;
-  if (grossMonthly < 2000) return 77.00;
-  if (grossMonthly < 2500) return 98.60;
-  if (grossMonthly < 3200) return 125.60;
-  if (grossMonthly < 4000) return 158.00;
-  if (grossMonthly < 4900) return 195.80;
-  if (grossMonthly < 5900) return 239.00;
-  if (grossMonthly < 7000) return 287.60;
-  if (grossMonthly < 8300) return 347.00;
-  if (grossMonthly < 9700) return 406.40;
-  if (grossMonthly < 11300) return 476.60;
-  if (grossMonthly < 13600) return 573.80;
-  // Maximum Class 16 ceiling
-  return 603.20;
+  return calculateTrinidadNIS({ grossIncome: grossMonthly, frequency: 'monthly' }).employeeNIS;
 }
 
 // Health Surcharge Statutory calculation
 export function calculateHealthSurcharge(grossMonthly: number): number {
   if (grossMonthly <= 0) return 0;
-  // Monthly equivalent of $8.25/week vs $4.80/week
-  if (grossMonthly > 469.99) {
-    return 35.75;
-  } else {
-    return 20.80;
-  }
+  return calculateTrinidadHealthSurcharge({ grossIncome: grossMonthly, frequency: 'monthly' }).healthSurcharge;
 }
 
 // PAYE (Pay As You Earn) Statutory calculation
-export function calculatePAYE(grossMonthly: number, nisContribution: number): number {
+export function calculatePAYE(grossMonthly: number, _nisContribution: number): number {
   if (grossMonthly <= 0) return 0;
-  
-  // Standard statutory personal allowance: $84,000 / year = $7,000 / month
-  const monthlyPersonalAllowance = 7000;
-  
-  // 70% of employee NIS is deductible from taxable income
-  const nisDeduction = nisContribution * 0.70;
-  
-  // Chargeable Income
-  const chargeableIncome = Math.max(0, grossMonthly - monthlyPersonalAllowance - nisDeduction);
-  
-  if (chargeableIncome <= 0) return 0;
-  
-  // Standard tax tier: 25% on first $83,333.33/mo ($1M/yr), 30% on remainder
-  const tier1Limit = 83333.33;
-  if (chargeableIncome <= tier1Limit) {
-    return Number((chargeableIncome * 0.25).toFixed(2));
-  } else {
-    const tier1Tax = tier1Limit * 0.25;
-    const tier2Tax = (chargeableIncome - tier1Limit) * 0.30;
-    return Number((tier1Tax + tier2Tax).toFixed(2));
-  }
+  return calculateTrinidadPAYE({ grossIncome: grossMonthly, frequency: 'monthly' }).payeTax;
 }
 
 // Full Deterministic Recalculation for a single employee
