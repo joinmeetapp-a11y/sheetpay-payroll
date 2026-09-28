@@ -546,6 +546,7 @@ export default defineSchema({
     guestClientsUsed: v.number(),
     guestEmployeesUsed: v.number(),
     guestPayrollRunsUsed: v.number(),
+    caylaActionsUsed: v.optional(v.number()),
     ocrScansUsed: v.number(),
     // Serialized JSON blobs so we don't have to duplicate the shape of every
     // domain type. Shape matches src/types.ts (AccountantClient, Employee,
@@ -553,6 +554,7 @@ export default defineSchema({
     client: v.optional(v.any()),
     employees: v.optional(v.array(v.any())),
     payrollRun: v.optional(v.any()),
+    payrollRuns: v.optional(v.array(v.any())),
     payslipCustomization: v.optional(v.any()),
     caylaMessages: v.optional(v.array(v.any())),
     // The last locked action the user attempted (download / print / whatsapp /
