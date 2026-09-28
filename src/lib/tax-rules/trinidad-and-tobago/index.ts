@@ -7,7 +7,7 @@ import { BaseTaxCalculationInput, NISCalculationResult, PAYECalculationResult, H
  */
 export const TT_TAX_YEAR = 2026;
 export const TT_LAST_UPDATED = 'September 2026';
-export const TT_OFFICIAL_SOURCE = 'NIBTT 2026 Earnings Classes effective January 5, 2026 (https://www.nibtt.net/Contribution_Rates/rates.html); IRD Trinidad and Tobago (https://www.ird.gov.tt/individual/deductions-and-required-supporting-documents)';
+export const TT_OFFICIAL_SOURCE = 'NIBTT 2026 Earnings Classes effective January 5, 2026 (https://www.nibtt.net/Contribution_Rates/rates.html); IRD Trinidad and Tobago $90,000 personal allowance (https://www.ird.gov.tt/individual/deductions-and-required-supporting-documents)';
 
 interface NISClassTier {
   classNum: number;
