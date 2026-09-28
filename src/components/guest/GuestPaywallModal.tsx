@@ -16,13 +16,17 @@ const HEADLINES: Record<GuestLockedAction | 'generic', { title: string; subtitle
     title: 'Ready to manage more clients?',
     subtitle: 'Upgrade to Sheetpay Accountant for unlimited clients, employees and payroll runs.',
   },
-  add_employee_51: {
-    title: 'You’ve reached the 50-employee free payroll cap',
-    subtitle: 'Unlock unlimited employees so you can process this client’s full payroll.',
+  run_payroll_4: {
+    title: 'You’ve used your three trial payroll runs',
+    subtitle: 'Upgrade to keep running payroll for your clients.',
   },
-  run_payroll_2: {
-    title: 'You’ve completed your free payroll',
-    subtitle: 'Upgrade to run unlimited payrolls for all your clients.',
+  cayla_4: {
+    title: 'You’ve used your three Cayla trial requests',
+    subtitle: 'Unlock continued access to Cayla for payroll assistance.',
+  },
+  ocr_limit: {
+    title: 'You’ve used your trial OCR allowance',
+    subtitle: 'Upgrade to continue importing timesheets and payroll documents with OCR.',
   },
   download_payslip: {
     title: 'Unlock Unlimited Payroll',
