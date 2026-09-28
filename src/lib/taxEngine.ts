@@ -1,5 +1,5 @@
 import { Employee, PayrollRun } from '../types';
-import { calculateFullPayrollByCountry, CountryCode } from './tax-rules';
+import { calculateFullPayrollByCountry, CountryCode, calculateTrinidadNIS, calculateTrinidadPAYE, calculateTrinidadHealthSurcharge } from './tax-rules';
 
 /**
  * Deterministic statutory payroll calculation using the country tax schedules
