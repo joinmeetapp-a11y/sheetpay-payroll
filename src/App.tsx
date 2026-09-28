@@ -91,10 +91,16 @@ import { Sparkles, ArrowUp, X } from 'lucide-react';
 
 // Paddle price IDs — module-level so every handler (including handleAuthComplete)
 // can access them without a stale-closure risk.
-const PADDLE_PRICE_IDS: Record<'pro' | 'accountant', string> = {
+const PADDLE_PRICE_IDS: Record<'pro' | 'accountant' | 'accountant_yearly', string> = {
   pro: 'pri_01m00gw728zjvw770d1k94fh6y',
   accountant: 'pri_01m0r19pgkx604y5q3gp1trhqh',
+  accountant_yearly: 'pri_01m3mjv9jcjphn3545x04c5gyk',
 } as const;
+
+const PADDLE_ACCOUNTANT_PRODUCT_IDS: Record<'accountant' | 'accountant_yearly', string> = {
+  accountant: 'pro_01m0r14cpcqk5hnbjteyj9zma0',
+  accountant_yearly: 'pro_01m3mjmdtnj5yz2gdhf7vjmedn',
+};
 
 export default function App() {
   // Path Routing State
@@ -106,7 +112,7 @@ export default function App() {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   // Plan the user selected on the landing/paywall before being prompted to sign in.
   // Cleared after checkout is opened (or user goes back without authing).
-  const [pendingPlanAfterAuth, setPendingPlanAfterAuth] = useState<'pro' | 'accountant' | null>(null);
+  const [pendingPlanAfterAuth, setPendingPlanAfterAuth] = useState<'pro' | 'accountant' | 'accountant_yearly' | null>(null);
   // Prevents duplicate checkout sessions from rapid button clicks.
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
 
@@ -1439,7 +1445,8 @@ export default function App() {
       // If the user clicked a paid pricing CTA before authenticating, open
       // Paddle checkout now that we have their verified uid + email.
       if (pendingPlanAfterAuth) {
-        const planToOpen = pendingPlanAfterAuth;
+        const checkoutPlan = pendingPlanAfterAuth;
+        const planToOpen = checkoutPlan === 'accountant_yearly' ? 'accountant' : checkoutPlan;
         setPendingPlanAfterAuth(null);
         setViewMode('app');
         navigate('/app');
@@ -1447,9 +1454,13 @@ export default function App() {
         if (isPaddleConfigured()) {
           // Overlay checkout — stays on /app, no page navigation.
           openPaddleCheckout({
-            priceId: PADDLE_PRICE_IDS[planToOpen],
+            priceId: PADDLE_PRICE_IDS[checkoutPlan],
             email,
-            customData: { firebaseUid: uid, plan: planToOpen },
+            customData: {
+              firebaseUid: uid,
+              plan: planToOpen,
+              ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
+            },
             successUrl: `${window.location.origin}/app`,
             onComplete: () => {
               activateFromCheckout({ firebaseUid: uid, plan: planToOpen }).catch(() => {});
@@ -1461,8 +1472,9 @@ export default function App() {
         } else {
           // Fallback: server-side transaction URL.
           createCheckoutSession({
-            priceId: PADDLE_PRICE_IDS[planToOpen],
+            priceId: PADDLE_PRICE_IDS[checkoutPlan],
             plan: planToOpen,
+            ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
             firebaseUid: uid,
             customerEmail: email,
             successUrl: `${window.location.origin}/app?upgraded=${planToOpen}`,
@@ -1762,7 +1774,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleOpenCheckout = async (checkoutPlan: 'pro' | 'accountant') => {
+  const handleOpenCheckout = async (checkoutPlan: 'pro' | 'accountant' | 'accountant_yearly') => {
     // Gate on auth — save plan and show sign-up if not yet authenticated.
     if (!currentUser) {
       setPendingPlanAfterAuth(checkoutPlan);
@@ -1770,6 +1782,8 @@ export default function App() {
       setViewMode('auth');
       return;
     }
+
+    const plan = checkoutPlan === 'accountant_yearly' ? 'accountant' : checkoutPlan;
 
     // Prevent duplicate sessions from rapid clicks.
     if (isCheckoutLoading) return;
@@ -1786,9 +1800,13 @@ export default function App() {
         // Paddle.Checkout.open() shows a modal on the current page — no full-page
         // redirect, no popup. After checkout.completed the onComplete callback fires.
         await openPaddleCheckout({
-          priceId: PADDLE_PRICE_IDS[plan],
+          priceId: PADDLE_PRICE_IDS[checkoutPlan],
           email: email ?? undefined,
-          customData: { firebaseUid: uid, plan },
+          customData: {
+            firebaseUid: uid,
+            plan,
+            ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
+          },
           successUrl: `${window.location.origin}/app`,
           onComplete: () => {
             // Optimistic activation — the Convex Paddle webhook is authoritative
@@ -1805,8 +1823,9 @@ export default function App() {
         // is not set in the build). Paddle redirects back via the default payment
         // link (/app/billing?_ptxn=...) which the _ptxn effect handles.
         const result = await createCheckoutSession({
-          priceId: PADDLE_PRICE_IDS[plan],
+          priceId: PADDLE_PRICE_IDS[checkoutPlan],
           plan,
+          ...(checkoutPlan === 'pro' ? {} : { productId: PADDLE_ACCOUNTANT_PRODUCT_IDS[checkoutPlan] }),
           firebaseUid: uid,
           customerEmail: email,
           successUrl: `${window.location.origin}/app?upgraded=${plan}`,
@@ -1852,10 +1871,8 @@ export default function App() {
           } catch {
             /* ignore */
           }
-          // Paddle only distinguishes monthly/yearly on the price id; the
-          // entitlement plan itself remains 'accountant'. Once a yearly price
-          // is provisioned, add it to PADDLE_PRICE_IDS and pass it through here.
-          handleOpenCheckout('accountant');
+          // Use the billing period selected in the accountant upgrade modal.
+          handleOpenCheckout(plan);
         }}
       />
     );
@@ -1876,14 +1893,14 @@ export default function App() {
           setAuthMode('signin');
           setViewMode('auth');
         }}
-        onUnlock={(_plan, guestSessionId) => {
+        onUnlock={(plan, guestSessionId) => {
           try {
             (window as any).__sheetpayGuestSessionId = guestSessionId;
             window.sessionStorage.setItem('sheetpay_guest_session_id_hint', guestSessionId);
           } catch {
             /* ignore */
           }
-          handleOpenCheckout('accountant');
+          handleOpenCheckout(plan);
         }}
       />
     );

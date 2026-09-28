@@ -10,6 +10,7 @@ import { isAdminEmail } from "./admin";
 export const PRICE_TO_PLAN: Record<string, "pro" | "accountant"> = {
   pri_01m00gw728zjvw770d1k94fh6y: "pro",
   pri_01m0r19pgkx604y5q3gp1trhqh: "accountant",
+  pri_01m3mjv9jcjphn3545x04c5gyk: "accountant",
 };
 
 export function planForPriceId(priceId?: string | null): "pro" | "accountant" | null {

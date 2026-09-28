@@ -19,6 +19,7 @@ function getPaddleBase(apiKey: string): string {
 export const createCheckoutSession = action({
   args: {
     priceId: v.string(),
+    productId: v.optional(v.string()),
     plan: v.optional(v.union(v.literal("pro"), v.literal("accountant"))),
     firebaseUid: v.optional(v.string()),
     customerEmail: v.optional(v.string()),
@@ -33,6 +34,7 @@ export const createCheckoutSession = action({
     const customData: Record<string, string> = {};
     if (args.firebaseUid) customData.firebaseUid = args.firebaseUid;
     if (args.plan) customData.plan = args.plan;
+    if (args.productId) customData.productId = args.productId;
 
     const body: Record<string, unknown> = {
       items: [{ price_id: args.priceId, quantity: 1 }],

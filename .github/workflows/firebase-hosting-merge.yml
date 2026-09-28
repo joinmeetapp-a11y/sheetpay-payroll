@@ -29,6 +29,9 @@ jobs:
 
       - run: npm install --no-audit --no-fund
       - run: npm run build:frontend
+        env:
+          VITE_CONVEX_URL: https://glad-bat-528.convex.cloud
+          VITE_PADDLE_CLIENT_TOKEN: live_22e84513c875d91d7a5560cd68e
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
