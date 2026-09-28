@@ -149,7 +149,7 @@ export const GuestAccountantExperience: React.FC<Props> = ({
 
   // ── Limits ─────────────────────────────────────────────────────────────
   const clientsUsed = clients.length;
-  const payrollRunsUsed = activeClient?.payrollRuns?.length ?? (activeClient?.payrollRun ? 1 : 0);
+  const payrollRunsUsed = Number(serverSession?.guestPayrollRunsUsed ?? 0);
   const caylaActionsUsed = Number(serverSession?.caylaActionsUsed ?? 0);
   const ocrScansUsed = Number(serverSession?.ocrScansUsed ?? 0);
 
@@ -560,8 +560,6 @@ export const GuestAccountantExperience: React.FC<Props> = ({
               messages={caylaMessages}
               onBeforeOcr={handleBeforeOcr}
               onUpdateClients={(updated) => setClients(updated.slice(0, 1))}
-              messages={[]}
-              isProcessing={false}
             />
           )}
 
