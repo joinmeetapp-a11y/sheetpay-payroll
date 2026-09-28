@@ -1,9 +1,25 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { isAdminEmail } from "./admin";
 
+async function requireAccountant(ctx: any, expectedUserId?: any) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Unauthenticated");
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_firebase_uid", (q: any) => q.eq("firebaseUid", identity.subject))
+    .first();
+  if (!user || (expectedUserId && user._id !== expectedUserId)) throw new Error("Forbidden");
+  const admin = isAdminEmail(user.email);
+  if (!admin && (user.plan !== "accountant" || user.planStatus !== "active")) {
+    throw new Error("ACCOUNTANT_PLAN_REQUIRED");
+  }
+  return user;
+}
 export const getByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
+    await requireAccountant(ctx, userId);
     return ctx.db
       .query("accountantClients")
       .withIndex("by_accountant_user", (q) => q.eq("accountantUserId", userId))
@@ -46,6 +62,8 @@ export const create = mutation({
     payrollRunsJson: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAccountant(ctx, args.accountantUserId);
+    if (args.accountantFirebaseUid !== user.firebaseUid) throw new Error("Forbidden");
     return ctx.db.insert("accountantClients", {
       ...args,
       createdAt: Date.now(),
@@ -86,6 +104,9 @@ export const update = mutation({
     payrollRunsJson: v.optional(v.string()),
   },
   handler: async (ctx, { clientId, ...fields }) => {
+    const client = await ctx.db.get(clientId);
+    if (!client) throw new Error("Client not found");
+    await requireAccountant(ctx, client.accountantUserId);
     await ctx.db.patch(clientId, { ...fields, updatedAt: Date.now() });
   },
 });
@@ -93,6 +114,9 @@ export const update = mutation({
 export const deleteClient = mutation({
   args: { clientId: v.id("accountantClients") },
   handler: async (ctx, { clientId }) => {
+    const client = await ctx.db.get(clientId);
+    if (!client) return;
+    await requireAccountant(ctx, client.accountantUserId);
     await ctx.db.delete(clientId);
   },
 });
