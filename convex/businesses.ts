@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { isAdminEmail } from "./admin";
+import { getAccessibleBusinesses, requireBusinessAccess } from "./lib/accountantAccess";
 
 async function requireBusinessUser(ctx: any, userId: any) {
   const identity = await ctx.auth.getUserIdentity();
@@ -22,6 +23,11 @@ export const getByUser = query({
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .first();
   },
+});
+
+export const getAccessibleByUser = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => getAccessibleBusinesses(ctx, args.userId),
 });
 
 export const create = mutation({
@@ -113,7 +119,7 @@ export const update = mutation({
   handler: async (ctx, { businessId, ...fields }) => {
     const business = await ctx.db.get(businessId);
     if (!business) throw new Error("Business not found");
-    await requireBusinessUser(ctx, business.userId);
+    await requireBusinessAccess(ctx, business, "manageClients");
     await ctx.db.patch(businessId, { ...fields, updatedAt: Date.now() });
   },
 });
