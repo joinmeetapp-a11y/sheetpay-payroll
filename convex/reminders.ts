@@ -532,6 +532,7 @@ export const syncReminderOccurrenceFromNotification = internalMutation({
     const sent = deliveries.some((delivery) => ["sent", "delivered", "read", "dismissed"].includes(delivery.status));
     const failed = deliveries.some((delivery) => ["failed", "invalid"].includes(delivery.status));
     const status = sent && failed ? "sent_with_errors" : sent ? "sent" : failed ? "failed" : "skipped";
+    if (occurrence.status === status) return { ok: true, status };
     await ctx.db.patch(occurrence._id, {
       status,
       sentAt: sent ? Date.now() : occurrence.sentAt,
