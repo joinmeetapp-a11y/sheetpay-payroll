@@ -322,12 +322,12 @@ export const registerDeviceToken = mutation({
 export const unregisterDeviceToken = mutation({
   args: { requesterUid: v.string(), token: v.string() },
   handler: async (ctx, args) => {
-    await requireUser(ctx, args.requesterUid);
+    const { user } = await requireUser(ctx, args.requesterUid);
     const existing = await ctx.db
       .query("fcmDeviceTokens")
       .withIndex("by_token", (q) => q.eq("token", args.token))
       .first();
-    if (existing) await ctx.db.delete(existing._id);
+    if (existing && existing.userId === user._id) await ctx.db.delete(existing._id);
     return { ok: true };
   },
 });
