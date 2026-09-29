@@ -441,6 +441,8 @@ export const claimDueReminders = internalMutation({
       await ctx.db.patch(r._id, {
         nextRunAt: next ?? scheduledFor + 30 * 86400000,
         lastRunAt: scheduledFor,
+        enabled: next === null && r.frequency === "once" ? false : r.enabled,
+        status: next === null && r.frequency === "once" ? "processing" : r.status,
       });
 
       claimed.push({
@@ -515,6 +517,35 @@ export const disableDeviceToken = internalMutation({
  * userId is already validated upstream in executeTool — this is a trusted
  * internal call, not exposed to the browser.
  */
+
+export const syncReminderOccurrenceFromNotification = internalMutation({
+  args: { notificationId: v.id("notifications") },
+  handler: async (ctx, args) => {
+    const occurrence = await ctx.db.query("reminderOccurrences")
+      .withIndex("by_notification", (q) => q.eq("notificationId", args.notificationId)).first();
+    if (!occurrence) return { ok: false };
+    const deliveries = await ctx.db.query("notificationDeliveries")
+      .withIndex("by_notification_channel", (q) => q.eq("notificationId", args.notificationId)).collect();
+    const terminal = new Set(["sent", "delivered", "read", "dismissed", "skipped", "failed", "invalid"]);
+    if (deliveries.some((delivery) => !terminal.has(delivery.status))) return { ok: true, status: "pending" };
+    const sent = deliveries.some((delivery) => ["sent", "delivered", "read", "dismissed"].includes(delivery.status));
+    const failed = deliveries.some((delivery) => ["failed", "invalid"].includes(delivery.status));
+    const status = sent && failed ? "sent_with_errors" : sent ? "sent" : failed ? "failed" : "skipped";
+    await ctx.db.patch(occurrence._id, {
+      status,
+      sentAt: sent ? Date.now() : occurrence.sentAt,
+      attempts: occurrence.attempts + 1,
+      lastAttemptAt: Date.now(),
+      errorMessage: failed ? "One or more selected notification channels failed." : undefined,
+    });
+    const reminder = await ctx.db.get(occurrence.reminderId);
+    if (reminder?.frequency === "once") {
+      await ctx.db.patch(reminder._id, { status, updatedAt: Date.now() });
+    }
+    return { ok: true, status };
+  },
+});
+
 export const listRemindersForCayla = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
