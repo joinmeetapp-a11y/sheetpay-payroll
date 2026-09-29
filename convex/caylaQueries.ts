@@ -160,7 +160,7 @@ export const getOwnedBusinessForUser = internalQuery({
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.userId))
       .first();
     if (!user) return null;
-    const business = await ctx.db.get(args.businessId as any);
+    const business: any = await ctx.db.get(args.businessId as any);
     return business && business.userId === user._id ? business : null;
   },
 });
