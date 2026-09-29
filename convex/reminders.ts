@@ -50,6 +50,7 @@ interface ReminderConfig {
   frequency: string;
   dayOfWeek?: number;
   dayOfMonth?: number;
+  secondDayOfMonth?: number;
   scheduledTime: string;
   timezone: string;
   fireOnceAt?: number;
@@ -114,6 +115,8 @@ export function computeNextRunAt(cfg: ReminderConfig, after: number): number | n
       match = cfg.dayOfWeek === cw && weekIdx % 2 === 0;
     } else if (cfg.frequency === "monthly") {
       match = cfg.dayOfMonth === cd;
+    } else if (cfg.frequency === "semi_monthly") {
+      match = cfg.dayOfMonth === cd || cfg.secondDayOfMonth === cd;
     } else if (cfg.frequency === "before_payroll") {
       // Payroll-relative reminders schedule themselves off the payroll run —
       // this branch is left for the caller (see `bumpNextRunAt`) to override.
