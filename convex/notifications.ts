@@ -278,6 +278,7 @@ export const getPreferences = query({
       channels: { ...defaultChannels, ...(saved?.channels || {}) },
       categories: { ...defaultCategories, ...(saved?.categories || {}) },
       timezone: saved?.timezone || "UTC",
+      timezoneConfigured: Boolean(saved?.timezone),
     };
   },
 });
