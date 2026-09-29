@@ -658,6 +658,36 @@ function tmplExportReady(data: any): RenderedEmail {
   };
 }
 
+function tmplAccountantReminder(data: any): RenderedEmail {
+  const title = esc(data.title || "Payroll reminder");
+  const businessName = esc(data.businessName || "your client");
+  const message = esc(data.message || "You have an upcoming payroll task to review.");
+  const link = typeof data.actionUrl === "string" && data.actionUrl.startsWith("/")
+    ? `https://sheetpay.app${data.actionUrl}`
+    : `${APP_URL}/accountant`;
+  const content =
+    EmailAlert("info", title, "⏰") +
+    EmailHeading(title) +
+    EmailParagraph(message) +
+    EmailInfoCard([
+      { label: "Client", value: data.businessName || "" },
+      ...(data.employeeCount ? [{ label: "Employees", value: String(data.employeeCount) }] : []),
+      ...(data.payPeriod ? [{ label: "Pay period", value: data.payPeriod }] : []),
+      ...(data.scheduledLabel ? [{ label: "Scheduled", value: data.scheduledLabel }] : []),
+    ]) +
+    `<div style="text-align:center;margin:28px 0;">${EmailButton("Open accountant workspace", link)}</div>` +
+    EmailFallbackLink(link) +
+    EmailParagraph("Review payroll details in Sheetpay before processing.");
+  const allowed = ["payslip", "team", "import", "billing"].includes(data.category) ? data.category : "payroll";
+  return {
+    subject: `${data.subject || title} — ${businessName}`,
+    preheader: `${title} for ${businessName}`,
+    html: EmailLayout({ content, preheader: `${title} for ${businessName}` }),
+    category: allowed,
+    critical: false,
+  };
+}
+
 function tmplTaxFormReady(data: any): RenderedEmail {
   const formName = esc(data.formName || "Tax form");
   const period = esc(data.period || "Current period");
@@ -746,6 +776,7 @@ export const EMAIL_TEMPLATES = {
   accountDeleted: tmplAccountDeleted,
   exportReady: tmplExportReady,
   taxFormReady: tmplTaxFormReady,
+  accountantReminder: tmplAccountantReminder,
   caylaAction: tmplCaylaAction,
 } as const;
 
