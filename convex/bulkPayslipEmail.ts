@@ -221,7 +221,7 @@ export const finishBatch = internalMutation({
         const label = failedCount ? `${sentCount} payslips sent successfully; ${failedCount} need attention.` : `${sentCount} payslips sent successfully.`;
         await createWorkspaceNotification(ctx, {
           businessId: job.businessId,
-          category: failedCount ? "payslip" : "payslip",
+          category: failedCount ? "failedPayslip" : "payslip",
           type: failedCount ? "payslips_failed" : "payslips_sent",
           title: failedCount ? "Payslip delivery needs review" : "Payslips sent",
           message: label,
