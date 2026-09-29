@@ -94,7 +94,7 @@ export const invite = action({
         actionUrl: "/accountant?tab=Team",
         dedupeKey: `team-invitation-sent:${String(invite.id)}`,
         metadata: { email, role: args.role },
-        channels: ["in_app"],
+        channels: ["in_app", "push", "email"],
         includeActor: true,
       });
       return { ok: true, inviteId: invite.id, expiresAt: invite.expiresAt };
