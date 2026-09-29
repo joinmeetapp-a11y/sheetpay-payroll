@@ -269,7 +269,7 @@ export const getPreferences = query({
     return {
       channels: { ...defaultChannels, ...(saved?.channels || {}) },
       categories: { ...defaultCategories, ...(saved?.categories || {}) },
-      timezone: saved?.timezone || "America/Port_of_Spain",
+      timezone: saved?.timezone || "UTC",
     };
   },
 });
