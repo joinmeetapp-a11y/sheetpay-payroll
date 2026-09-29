@@ -35,7 +35,13 @@ export const dispatchNotification = internalAction({
             notificationId: args.notificationId,
           }) as any;
           results.push = result?.status || "processed";
-        } catch (error: any) {
+        } catch {
+          await ctx.runMutation(internal.notifications.updateDelivery, {
+            deliveryId: delivery._id,
+            status: "failed",
+            errorCode: "FCM_DELIVERY_ERROR",
+            errorMessage: "Firebase could not process this notification.",
+          });
           results.push = "failed";
         }
         continue;
