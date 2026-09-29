@@ -1,19 +1,18 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireBusinessAccess, recordAccountantActivity } from "./lib/accountantAccess";
 
-async function requireEmployeeOwner(ctx: any, businessId: any, expectedUserId?: any) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("Unauthenticated");
+async function requireEmployeeOwner(ctx: any, businessId: any, expectedUserId?: any, capability: "manageEmployees" | "editPayroll" = "manageEmployees") {
   const business = await ctx.db.get(businessId);
-  if (!business || (expectedUserId && business.userId !== expectedUserId)) throw new Error("Forbidden");
-  const user = await ctx.db.get(business.userId);
-  if (!user || user.firebaseUid !== identity.subject) throw new Error("Forbidden");
-  return user;
+  if (!business) throw new Error("Forbidden");
+  const access = await requireBusinessAccess(ctx, business, capability);
+  if (expectedUserId && expectedUserId !== business.userId && expectedUserId !== access.actor._id) throw new Error("Forbidden");
+  return access.owner;
 }
 
-async function requireEmployeeRecordOwner(ctx: any, employee: any) {
+async function requireEmployeeRecordOwner(ctx: any, employee: any, capability: "manageEmployees" | "editPayroll" = "manageEmployees") {
   if (!employee) throw new Error("Employee not found");
-  return requireEmployeeOwner(ctx, employee.businessId, employee.userId);
+  return requireEmployeeOwner(ctx, employee.businessId, employee.userId, capability);
 }
 
 export const getByBusiness = query({
@@ -22,8 +21,8 @@ export const getByBusiness = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
     const business = await ctx.db.get(args.businessId);
-    const user = business ? await ctx.db.get(business.userId) : null;
-    if (!user || user.firebaseUid !== identity.subject) return [];
+    if (!business) return [];
+    try { await requireBusinessAccess(ctx, business, "read"); } catch { return []; }
     return ctx.db
       .query("employees")
       .withIndex("by_business", (q) => q.eq("businessId", args.businessId))
@@ -71,8 +70,8 @@ export const create = mutation({
     countryCode: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireEmployeeOwner(ctx, args.businessId, args.userId);
-    return ctx.db.insert("employees", { ...args, createdAt: Date.now() });
+    const owner = await requireEmployeeOwner(ctx, args.businessId, args.userId);
+    return ctx.db.insert("employees", { ...args, userId: owner._id, createdAt: Date.now() });
   },
 });
 
@@ -108,8 +107,9 @@ export const update = mutation({
   },
   handler: async (ctx, { employeeId, ...fields }) => {
     const employee = await ctx.db.get(employeeId);
-    await requireEmployeeRecordOwner(ctx, employee);
+    const owner = await requireEmployeeRecordOwner(ctx, employee, "editPayroll");
     await ctx.db.patch(employeeId, fields);
+    await recordAccountantActivity(ctx, owner._id, (await ctx.auth.getUserIdentity()) ? employee.userId : owner._id, "employee.edited", employee.businessId, { employeeId: String(employeeId) });
   },
 });
 
@@ -122,6 +122,41 @@ export const deleteEmployee = mutation({
   },
 });
 
+
+export const bulkUpdate = mutation({
+  args: {
+    businessId: v.id("businesses"),
+    updates: v.array(v.object({ employeeId: v.id("employees"), fields: v.any() })),
+  },
+  handler: async (ctx, args) => {
+    const business = await ctx.db.get(args.businessId);
+    if (!business) throw new Error("Client not found");
+    const { actor, owner } = await requireBusinessAccess(ctx, business, "editPayroll");
+    if (args.updates.length > 250) throw new Error("Update at most 250 employees per save.");
+    const allowed = new Set(["basicPay", "frequencySalary", "regularHours", "overtimeHours", "overtimeRate", "bonus", "commission", "allowances", "paye", "nis", "healthSurcharge", "otherDeductions", "grossPay", "netPay", "status", "position", "department", "payFrequency", "payType", "hourlyRate", "dailyRate", "weeklyWage", "fortnightlyWage", "monthlySalary", "annualSalary", "payrollIdentifiers", "statutoryData"]);
+    for (const update of args.updates) {
+      const employee = await ctx.db.get(update.employeeId);
+      if (!employee || employee.businessId !== args.businessId) throw new Error("Employee is outside the selected client.");
+      const fields = update.fields as Record<string, unknown>;
+      const safe: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(fields)) {
+        if (!allowed.has(key)) throw new Error("Unsupported employee field.");
+        if (["basicPay", "frequencySalary", "regularHours", "overtimeHours", "overtimeRate", "bonus", "commission", "allowances", "paye", "nis", "healthSurcharge", "otherDeductions", "grossPay", "netPay", "hourlyRate", "dailyRate", "weeklyWage", "fortnightlyWage", "monthlySalary", "annualSalary"].includes(key)) {
+          const numeric = Number(value);
+          if (!Number.isFinite(numeric) || numeric < 0) throw new Error("Payroll values must be valid non-negative numbers.");
+          safe[key] = numeric;
+        } else if (["status", "position", "department", "payFrequency", "payType"].includes(key)) {
+          if (typeof value !== "string" || value.length > 120) throw new Error("Invalid employee field.");
+          safe[key] = value;
+        } else safe[key] = value;
+      }
+      await ctx.db.patch(update.employeeId, safe);
+    }
+    await recordAccountantActivity(ctx, owner._id, actor._id, "employees.bulk_edited", args.businessId, { count: args.updates.length });
+    return { updated: args.updates.length };
+  },
+});
+
 export const bulkCreate = mutation({
   args: {
     businessId: v.id("businesses"),
@@ -129,12 +164,12 @@ export const bulkCreate = mutation({
     employees: v.array(v.any()),
   },
   handler: async (ctx, args) => {
-    await requireEmployeeOwner(ctx, args.businessId, args.userId);
+    const owner = await requireEmployeeOwner(ctx, args.businessId, args.userId);
     const ids = [];
     for (const emp of args.employees) {
       const id = await ctx.db.insert("employees", {
         businessId: args.businessId,
-        userId: args.userId,
+        userId: owner._id,
         name: emp.name,
         employeeId: emp.employeeId || `EMP-${Date.now()}`,
         position: emp.position || "Team Member",
