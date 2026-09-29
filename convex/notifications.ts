@@ -400,7 +400,7 @@ export const retryDelivery = mutation({
     const { actor } = await getActor(ctx);
     const delivery = await ctx.db.get(args.deliveryId);
     if (!delivery || delivery.userId !== actor._id) throw new Error("Delivery not found.");
-    if (!["failed", "invalid"].includes(delivery.status)) throw new Error("Only failed deliveries can be retried.");
+    if (delivery.status !== "failed") throw new Error("Only failed deliveries can be retried.");
     const notification = await ctx.db.get(delivery.notificationId);
     if (!notification || notification.dismissedAt || notification.suppressed) throw new Error("This notification is no longer active.");
     await ctx.db.patch(delivery._id, { status: "queued", errorCode: undefined, errorMessage: undefined, failedAt: undefined, updatedAt: Date.now() });
