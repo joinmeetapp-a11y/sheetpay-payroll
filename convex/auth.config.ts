@@ -2,7 +2,7 @@
 // Sheetpay production Firebase project is "myglowtext".
 // FIREBASE_PROJECT_ID may still override this for another deployment, but
 // production must never deploy with an empty provider list.
-const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || "mysheetpay";
+const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || "myglowtext";
 
 export default {
   providers: [
