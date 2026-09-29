@@ -17,7 +17,7 @@ export const getTeam = query({
   args: { businessId: v.id("businesses") },
   handler: async (ctx, { businessId }) => {
     const business = await ctx.db.get(businessId);
-    const { owner } = await requireBusinessAccess(ctx, business, "manageTeam");
+    const { owner } = await requireBusinessAccess(ctx, business, "read");
     const [members, invites] = await Promise.all([
       ctx.db.query("accountantMemberships").withIndex("by_workspace", (q) => q.eq("workspaceOwnerId", owner._id)).collect(),
       ctx.db.query("accountantInvites").withIndex("by_workspace", (q) => q.eq("workspaceOwnerId", owner._id)).order("desc").take(50),
