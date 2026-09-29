@@ -2,6 +2,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal as _internal } from "./_generated/api";
 import { requireBusinessAccess, recordAccountantActivity } from "./lib/accountantAccess";
+import { createWorkspaceNotification } from "./notifications";
 
 const internal = _internal as any;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -212,7 +213,26 @@ export const finishBatch = internalMutation({
       status, sentCount, failedCount, updatedAt: Date.now(),
       finishedAt: pending ? undefined : Date.now(),
     });
-    if (pending) await ctx.scheduler.runAfter(0, internal.bulkPayslipEmailWorker.processJob, { jobId: args.jobId });
+    if (pending) {
+      await ctx.scheduler.runAfter(0, internal.bulkPayslipEmailWorker.processJob, { jobId: args.jobId });
+    } else {
+      const business = await ctx.db.get(job.businessId);
+      if (business) {
+        const label = failedCount ? `${sentCount} payslips sent successfully; ${failedCount} need attention.` : `${sentCount} payslips sent successfully.`;
+        await createWorkspaceNotification(ctx, {
+          businessId: job.businessId,
+          category: failedCount ? "payslip" : "payslip",
+          type: failedCount ? "payslips_failed" : "payslips_sent",
+          title: failedCount ? "Payslip delivery needs review" : "Payslips sent",
+          message: label,
+          actionUrl: `/accountant?tab=Bulk%20Payslips&clientId=${String(job.businessId)}`,
+          dedupeKey: `bulk-payslip-result:${String(job._id)}`,
+          payrollId: job.payrollRunId,
+          metadata: { sentCount, failedCount, jobId: String(job._id) },
+          channels: ["in_app"],
+        });
+      }
+    }
   },
 });
 
