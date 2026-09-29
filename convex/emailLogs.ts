@@ -52,6 +52,26 @@ export const updateStatusByResendId = internalMutation({
         errorMessage: args.errorMessage,
         deliveredAt: args.deliveredAt ?? existing.deliveredAt,
       });
+      if (existing.emailType === "accountantReminder" && existing.relatedEntityId) {
+        try {
+          const notification = await ctx.db.get(existing.relatedEntityId as any);
+          if (notification) {
+            const delivery = await ctx.db.query("notificationDeliveries")
+              .withIndex("by_notification_channel", (q) => q.eq("notificationId", notification._id).eq("channel", "email")).first();
+            if (delivery) {
+              const deliveryStatus = ["bounced", "complained", "failed"].includes(args.status) ? "invalid" : args.status;
+              await ctx.db.patch(delivery._id, {
+                status: deliveryStatus,
+                deliveredAt: args.deliveredAt ?? (args.status === "delivered" ? Date.now() : delivery.deliveredAt),
+                failedAt: ["bounced", "complained", "failed"].includes(args.status) ? Date.now() : delivery.failedAt,
+                errorCode: ["bounced", "complained", "failed"].includes(args.status) ? args.status.toUpperCase() : delivery.errorCode,
+                errorMessage: args.errorMessage || delivery.errorMessage,
+                updatedAt: Date.now(),
+              });
+            }
+          }
+        } catch { /* Non-notification Resend logs keep using the existing status path. */ }
+      }
       return existing._id;
     }
     return null;
