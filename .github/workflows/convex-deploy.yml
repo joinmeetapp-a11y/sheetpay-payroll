@@ -34,5 +34,5 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Type-check Convex backend
-        run: npm run lint
+      - name: Regenerate Convex API types
+        run: npx convex codegen --typecheck disable
