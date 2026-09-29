@@ -180,6 +180,9 @@ export default defineSchema({
   // Email delivery log — one row per send attempt + webhook-driven status updates
   emailLogs: defineTable({
     recipient: v.string(),
+    employeeId: v.optional(v.string()),
+    payrollRunId: v.optional(v.string()),
+    jobId: v.optional(v.string()),
     emailType: v.string(),
     subject: v.string(),
     // Lifecycle: queued | sending | sent | delivered | bounced | complained | failed | skipped
@@ -314,6 +317,19 @@ export default defineSchema({
     .index("by_job_employee", ["jobId", "employeeId"])
     .index("by_resend_message", ["resendMessageId"])
     .index("by_idempotency", ["idempotencyKey"])
+    .index("by_workspace", ["workspaceOwnerId"]),
+
+  bulkPayslipUploads: defineTable({
+    workspaceOwnerId: v.id("users"),
+    businessId: v.id("businesses"),
+    employeeId: v.id("employees"),
+    storageId: v.id("_storage"),
+    status: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_business_employee", ["businessId", "employeeId"])
     .index("by_workspace", ["workspaceOwnerId"]),
 
   accountantActivity: defineTable({
