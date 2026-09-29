@@ -47,9 +47,9 @@ export const listActivity = query({
       .withIndex("by_workspace", (q) => q.eq("workspaceOwnerId", owner._id))
       .order("desc").take(limit);
     const allowed = new Set([String(args.businessId)]);
-    return rows.filter((row) => !row.businessId || allowed.has(String(row.businessId))).map((row) => ({
-      ...row,
-      actorName: (await ctx.db.get(row.actorUserId))?.displayName || (await ctx.db.get(row.actorUserId))?.email || "Sheetpay user",
+    return Promise.all(rows.filter((row) => !row.businessId || allowed.has(String(row.businessId))).map(async (row) => {
+      const actor = await ctx.db.get(row.actorUserId);
+      return { ...row, actorName: actor?.displayName || actor?.email || "Sheetpay user" };
     }));
   },
 });
