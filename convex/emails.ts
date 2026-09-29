@@ -229,6 +229,33 @@ export const notifySubscription = internalAction({
     }),
 });
 
+/** Server-only reminder email delivery. Secrets and recipient lookup stay in Convex. */
+export const sendAccountantReminder = internalAction({
+  args: {
+    notificationId: v.id("notifications"),
+    to: v.string(),
+    userId: v.string(),
+    businessId: v.optional(v.string()),
+    title: v.string(),
+    message: v.string(),
+    businessName: v.optional(v.string()),
+    category: v.optional(v.string()),
+    actionUrl: v.optional(v.string()),
+    employeeCount: v.optional(v.number()),
+    payPeriod: v.optional(v.string()),
+    scheduledLabel: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => sendEmail(ctx, {
+    to: args.to,
+    emailType: "accountantReminder",
+    data: args,
+    userId: args.userId,
+    businessId: args.businessId,
+    relatedEntityId: String(args.notificationId),
+    idempotencyKey: `notification:${args.notificationId}:email`,
+  }),
+});
+
 // ─── Dev-only template preview ───────────────────────────────────────────────
 
 /**
