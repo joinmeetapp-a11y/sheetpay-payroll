@@ -2,7 +2,7 @@
 
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
+import { internal as _internal } from "./_generated/api";
 import { getGoogleAccessToken } from "./lib/googleAuth";
 
 /**
@@ -19,6 +19,7 @@ import { getGoogleAccessToken } from "./lib/googleAuth";
  */
 
 const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
+const internal = _internal as any;
 
 interface DeviceToken {
   id: any;
@@ -128,7 +129,7 @@ export const deliverOccurrence = internalAction({
       if (result.ok === true) {
         messageIds.push(result.messageId);
       } else {
-        errors.push(`${t.token.slice(0, 12)}…: ${result.code ?? result.error.slice(0, 80)}`);
+        errors.push(result.code ?? "FCM_SEND_FAILED");
         // Invalid or unregistered → disable so we stop trying.
         if (
           result.code === "UNREGISTERED" ||
@@ -152,58 +153,99 @@ export const deliverOccurrence = internalAction({
   },
 });
 
+
+/** Deliver the queued push channel for a persisted notification. */
+export const deliverNotification = internalAction({
+  args: { notificationId: v.id("notifications") },
+  handler: async (ctx, args) => {
+    const internalApi = internal as any;
+    const context: any = await ctx.runQuery(internalApi.notifications.getDeliveryContext, { notificationId: args.notificationId });
+    if (!context) return { status: "skipped" };
+    const delivery = context.deliveries.find((item: any) => item.channel === "push");
+    if (!delivery || delivery.status !== "queued") return { status: delivery?.status || "missing" };
+    if (context.preferences?.channels?.push === false) {
+      await ctx.runMutation(internalApi.notifications.updateDelivery, { deliveryId: delivery._id, status: "skipped", errorCode: "PUSH_DISABLED" });
+      return { status: "skipped" };
+    }
+    const claimed: any = await ctx.runMutation(internalApi.notifications.claimDelivery, { deliveryId: delivery._id });
+    if (!claimed?.claimed) return { status: "already_claimed" };
+
+    const firebaseAdminJson = process.env.FIREBASE_ADMIN_JSON;
+    let adminProjectId: string | undefined;
+    if (firebaseAdminJson) {
+      try { adminProjectId = JSON.parse(firebaseAdminJson).project_id; } catch {}
+    }
+    const projectId = process.env.FIREBASE_PROJECT_ID || adminProjectId;
+    if (!projectId) {
+      await ctx.runMutation(internalApi.notifications.updateDelivery, {
+        deliveryId: delivery._id, status: "failed", errorCode: "FCM_NOT_CONFIGURED",
+        errorMessage: "Firebase project ID is not configured.",
+      });
+      return { status: "failed" };
+    }
+
+    let accessToken: string;
+    try { accessToken = await getGoogleAccessToken(FCM_SCOPE, firebaseAdminJson); }
+    catch {
+      await ctx.runMutation(internalApi.notifications.updateDelivery, {
+        deliveryId: delivery._id, status: "failed", errorCode: "FCM_AUTH_FAILED",
+        errorMessage: "Firebase notification service could not authenticate.",
+      });
+      return { status: "failed" };
+    }
+    const tokens: DeviceToken[] = await ctx.runQuery(internalApi.reminders.getUserDeviceTokens, { userId: context.user._id });
+    if (!tokens.length) {
+      await ctx.runMutation(internalApi.notifications.updateDelivery, {
+        deliveryId: delivery._id, status: "skipped", errorCode: "NO_DEVICE",
+        errorMessage: "No active notification devices are registered.",
+      });
+      return { status: "skipped" };
+    }
+
+    const messageIds: string[] = [];
+    const failures: string[] = [];
+    for (const token of tokens) {
+      const result = await sendFcmMessage(projectId, accessToken, token.token, context.notification.title, context.notification.message, {
+        notificationId: String(context.notification._id),
+        category: String(context.notification.category),
+        deepLink: context.notification.actionUrl || "/accountant",
+      });
+      if (result.ok) messageIds.push(result.messageId);
+      else {
+        const code = result.code || "FCM_SEND_FAILED";
+        failures.push(code);
+        if (["UNREGISTERED", "INVALID_ARGUMENT", "NOT_FOUND"].includes(code)) {
+          await ctx.runMutation(internalApi.reminders.disableDeviceToken, { tokenId: token.id, reason: code });
+        }
+      }
+    }
+    if (messageIds.length) {
+      await ctx.runMutation(internalApi.notifications.updateDelivery, {
+        deliveryId: delivery._id, status: "sent", messageId: messageIds.join(",").slice(0, 1000),
+      });
+      return { status: "sent", deviceCount: messageIds.length };
+    }
+    await ctx.runMutation(internalApi.notifications.updateDelivery, {
+      deliveryId: delivery._id, status: failures.some((code) => ["UNREGISTERED", "INVALID_ARGUMENT", "NOT_FOUND"].includes(code)) ? "invalid" : "failed",
+      errorCode: failures[0] || "FCM_SEND_FAILED",
+      errorMessage: "Firebase could not deliver this notification to the registered devices.",
+    });
+    return { status: "failed" };
+  },
+});
+
 /**
- * Cron entry point. Called every minute. Claims due reminders (idempotent via
- * the reminderOccurrences ledger) and schedules a delivery action per claim.
+ * Cron entry point. Claiming a due reminder creates its notification and
+ * schedules its own per-channel delivery, so this job must not send a second
+ * copy through the legacy direct-push path.
  */
 export const dispatchDueReminders = internalAction({
   args: {},
   handler: async (ctx) => {
-    const claimed: Array<{
-      reminderId: any;
-      userId: any;
-      occurrenceId: string;
-      scheduledFor: number;
-      type: string;
-      title: string;
-      messageTemplate?: string;
-      deepLink?: string;
-    }> = await ctx.runMutation(internal.reminders.claimDueReminders, {
+    const claimed = await ctx.runMutation(internal.reminders.claimDueReminders, {
       now: Date.now(),
       limit: 200,
     });
-
-    // Templates cover the common case with no LLM cost. Personalized bodies
-    // via Cayla can layer on later — see the §8 cost-control brief.
-    const defaultBodyByType: Record<string, string> = {
-      payroll: "Time to run this pay period's payroll. Tap to review and process.",
-      payroll_due: "Payroll is due today. Tap to prepare and review it.",
-      payroll_review: "Your payroll is waiting for review and approval.",
-      payroll_reminder: "Your payroll reminder is due. Tap to continue.",
-      custom_payroll_reminder: "Time to run this week's payroll.",
-      attendance: "Review this pay period's attendance before payroll runs.",
-      timesheet: "Check pending timesheets so payroll can be processed on time.",
-      payslip: "Payslips are ready. Tap to review and approve them.",
-      payslip_due: "Don't forget to generate this pay period's payslips.",
-      payslip_ready: "Payslips are ready for review and approval.",
-      tax_deadline: "A statutory payment or filing deadline is approaching.",
-      custom: "Reminder from Sheetpay.",
-    };
-
-    for (const c of claimed) {
-      const body =
-        c.messageTemplate?.trim() ||
-        defaultBodyByType[c.type] ||
-        defaultBodyByType.custom;
-      await ctx.scheduler.runAfter(0, internal.fcm.deliverOccurrence, {
-        occurrenceId: c.occurrenceId,
-        reminderId: c.reminderId,
-        userId: c.userId,
-        title: c.title,
-        body,
-        deepLink: c.deepLink,
-      });
-    }
     return { claimed: claimed.length };
   },
 });
