@@ -183,7 +183,12 @@ export const listForCurrentUser = query({
       !item.dismissedAt && !item.suppressed && prefs?.channels?.inApp !== false && categoryAllowed(prefs, item.category)
     );
     const unreadCount = visible.filter((item) => !item.readAt).length;
-    return { notifications: visible, unreadCount };
+    const notifications = await Promise.all(visible.map(async (item) => {
+      const business = item.businessId ? await ctx.db.get(item.businessId) : null;
+      const employee = item.employeeId ? await ctx.db.get(item.employeeId) : null;
+      return { ...item, businessName: business?.name, employeeName: employee?.name };
+    }));
+    return { notifications, unreadCount };
   },
 });
 
