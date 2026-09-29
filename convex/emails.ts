@@ -119,8 +119,13 @@ export const send = action({
     idempotencyKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const identityEmail = typeof identity?.email === "string" ? identity.email.trim().toLowerCase() : "";
+    if (!identity || !identityEmail || identityEmail !== args.to.trim().toLowerCase()) {
+      throw new Error("Unauthenticated or recipient does not match the signed-in user");
+    }
     return sendEmail(ctx, {
-      to: args.to,
+      to: identityEmail,
       emailType: args.emailType,
       data: args.data ?? {},
       userId: args.userId,
@@ -132,6 +137,21 @@ export const send = action({
 
 /** Fire-and-forget welcome email after signup. */
 export const sendWelcome = action({
+  args: { to: v.string(), displayName: v.optional(v.string()), userId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const identityEmail = typeof identity?.email === "string" ? identity.email.trim().toLowerCase() : "";
+    if (!identity || !identityEmail || identityEmail !== args.to.trim().toLowerCase()) {
+      throw new Error("Unauthenticated or recipient does not match the signed-in user");
+    }
+    return sendWelcomeEmail(ctx, identityEmail, {
+      displayName: args.displayName,
+      userId: args.userId,
+    });
+  },
+});
+
+export const sendWelcomeInternal = internalAction({
   args: { to: v.string(), displayName: v.optional(v.string()), userId: v.optional(v.string()) },
   handler: async (ctx, args) =>
     sendWelcomeEmail(ctx, args.to, {
