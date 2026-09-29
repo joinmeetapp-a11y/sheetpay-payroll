@@ -229,7 +229,7 @@ export const finishBatch = internalMutation({
           dedupeKey: `bulk-payslip-result:${String(job._id)}`,
           payrollId: job.payrollRunId,
           metadata: { sentCount, failedCount, jobId: String(job._id) },
-          channels: ["in_app"],
+          channels: ["in_app", "push", "email"],
         });
       }
     }
