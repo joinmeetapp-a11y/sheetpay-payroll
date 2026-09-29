@@ -29,7 +29,7 @@ async function preferencesFor(ctx: Ctx, userId: Id<"users">) {
 
 function categoryAllowed(prefs: any, category: string) {
   const key = preferenceKey(category);
-  if (prefs?.categories?.[key] === false) return false;
+  if (typeof prefs?.categories?.[key] === "boolean") return prefs.categories[key];
   const legacyKey = category === "team" ? "team"
     : category === "payslip" || category === "failedPayslip" ? "payslip"
     : category === "import" || category === "ocrReview" ? "import"
