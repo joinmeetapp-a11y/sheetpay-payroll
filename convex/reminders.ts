@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getActor, requireBusinessAccess } from "./lib/accountantAccess";
+import { createNotificationForUser } from "./notifications";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Timezone-aware next-run computation
@@ -386,12 +387,45 @@ export const claimDueReminders = internalMutation({
         continue;
       }
 
+      const business = r.businessId ? await ctx.db.get(r.businessId) : null;
+      if (r.businessId && !business) {
+        await ctx.db.patch(r._id, { enabled: false, status: "cancelled", updatedAt: Date.now() });
+        continue;
+      }
+      if (r.relatedPayrollId) {
+        const payroll = await ctx.db.get(r.relatedPayrollId as Id<"payrollRuns">);
+        if (!payroll || ["completed", "cancelled", "deleted"].includes(String(payroll.status).toLowerCase())) {
+          await ctx.db.patch(r._id, { enabled: false, status: "cancelled", updatedAt: Date.now() });
+          continue;
+        }
+      }
+
+      const eventMessage = r.messageTemplate?.trim() ||
+        (business ? `${business.name} payroll reminder is due. Open Sheetpay to review the client and run payroll.` : "Your Sheetpay reminder is due. Open the workspace to review it.");
+      const target = r.deepLink || (business ? `/accountant?tab=Payroll&clientId=${String(business._id)}` : "/accountant");
+      const notification = await createNotificationForUser(ctx, {
+        userId: r.userId,
+        workspaceOwnerId: r.workspaceOwnerId || business?.userId,
+        businessId: r.businessId,
+        payrollId: r.relatedPayrollId as Id<"payrollRuns"> | undefined,
+        category: r.type === "payslip" ? "payslip" : r.type === "tax_deadline" ? "tax" : "payroll",
+        type: "reminder",
+        title: r.title,
+        message: eventMessage,
+        actionUrl: target,
+        dedupeKey: `reminder:${occurrenceId}`,
+        metadata: { reminderId: String(r._id), scheduledFor, frequency: r.frequency },
+        channels: r.channels?.length ? r.channels : ["in_app"],
+      });
+
       await ctx.db.insert("reminderOccurrences", {
         reminderId: r._id,
         userId: r.userId,
         occurrenceId,
         scheduledFor,
-        status: "pending",
+        notificationId: notification?.id,
+        status: notification ? "pending" : "suppressed",
+        skippedReason: notification ? undefined : "Notification recipient unavailable",
         attempts: 0,
         lastAttemptAt: undefined,
         createdAt: Date.now(),
