@@ -418,6 +418,9 @@ export const chat = action({
     confirmationPayload: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || identity.subject !== args.userId) throw new Error("Unauthenticated");
+
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
@@ -426,8 +429,25 @@ export const chat = action({
       };
     }
 
+    // Reserve one trial use atomically before making any paid OpenAI request.
+    await ctx.runMutation(internal.usage.internalReserveByUid, {
+      firebaseUid: identity.subject,
+      kind: "cayla",
+      opId: `cayla:${identity.subject}:${crypto.randomUUID()}`,
+    });
+
+    // Resolve the requested client from the authenticated user's own businesses.
+    const business = args.businessId
+      ? await ctx.runQuery(internal.caylaQueries.getOwnedBusinessForUser, {
+          userId: identity.subject,
+          businessId: args.businessId,
+        })
+      : await ctx.runQuery(internal.caylaQueries.getBusinessForUser, { userId: identity.subject });
+    if (args.businessId && !business) throw new Error("Business not found");
+    const businessId = business ? String(business._id) : undefined;
+
     // Load conversation history
-    const conv = await ctx.runQuery(internal.caylaQueries.getConversationHistory, { userId: args.userId });
+    const conv = await ctx.runQuery(internal.caylaQueries.getConversationHistory, { userId: identity.subject });
 
     // Get business info for system prompt
     let businessName = "your business";
@@ -461,8 +481,8 @@ export const chat = action({
 
     // Get or create conversation ID
     const conversationId = await ctx.runMutation(internal.caylaQueries.getOrCreateConversation, {
-      userId: args.userId,
-      businessId: args.businessId,
+      userId: identity.subject,
+      businessId,
     });
 
     // Determine model based on message complexity
@@ -525,8 +545,8 @@ export const chat = action({
         });
 
         await ctx.runMutation(internal.caylaQueries.logUsage, {
-          userId: args.userId,
-          businessId: args.businessId,
+          userId: identity.subject,
+          businessId,
           model,
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
@@ -571,8 +591,8 @@ export const chat = action({
           // Execute the tool
           try {
             const result = await executeToolCall(ctx, fnName, args_parsed, {
-              userId: args.userId,
-              businessId: args.businessId,
+              userId: identity.subject,
+              businessId,
               currency,
               currencySymbol,
             });
