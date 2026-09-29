@@ -55,7 +55,7 @@ async function sendFcmMessage(
             },
           },
           webpush: {
-            fcm_options: data?.deepLink ? { link: data.deepLink } : undefined,
+            fcm_options: data?.deepLink ? { link: data.deepLink.startsWith("http") ? data.deepLink : `https://sheetpay.app${data.deepLink.startsWith("/") ? data.deepLink : `/${data.deepLink}`}` } : undefined,
           },
         },
       }),
