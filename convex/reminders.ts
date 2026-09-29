@@ -443,7 +443,7 @@ export const claimDueReminders = internalMutation({
         nextRunAt: next ?? scheduledFor + 30 * 86400000,
         lastRunAt: scheduledFor,
         enabled: next === null && r.frequency === "once" ? false : r.enabled,
-        status: next === null && r.frequency === "once" ? "processing" : r.status,
+        status: next === null && r.frequency === "once" ? notification ? "processing" : "suppressed" : r.status,
       });
 
       claimed.push({
