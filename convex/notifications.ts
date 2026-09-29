@@ -187,7 +187,9 @@ export const listForCurrentUser = query({
     const notifications = await Promise.all(visible.map(async (item) => {
       const business = item.businessId ? await ctx.db.get(item.businessId) : null;
       const employee = item.employeeId ? await ctx.db.get(item.employeeId) : null;
-      return { ...item, businessName: business?.name, employeeName: employee?.name };
+      const deliveries = await ctx.db.query("notificationDeliveries")
+        .withIndex("by_notification_channel", (q) => q.eq("notificationId", item._id)).collect();
+      return { ...item, businessName: business?.name, employeeName: employee?.name, deliveries };
     }));
     return { notifications, unreadCount };
   },
