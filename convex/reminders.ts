@@ -600,6 +600,7 @@ export const deleteReminderForCayla = internalMutation({
 const dashboardReminderFields = {
   businessId: v.optional(v.id("businesses")),
   payrollId: v.optional(v.id("payrollRuns")),
+  idempotencyKey: v.optional(v.string()),
   type: v.string(),
   title: v.string(),
   description: v.optional(v.string()),
@@ -650,6 +651,11 @@ export const createForCurrentUser = mutation({
   handler: async (ctx, args) => {
     const { actor } = await getActor(ctx);
     validateReminderOptions(args.frequency, args.channels, args.timezone);
+    if (args.idempotencyKey) {
+      const duplicate = await ctx.db.query("reminders")
+        .withIndex("by_user_idempotency", (q) => q.eq("userId", actor._id).eq("idempotencyKey", args.idempotencyKey)).first();
+      if (duplicate) return { id: duplicate._id, duplicate: true };
+    }
     let workspaceOwnerId = actor._id;
     let business: any = null;
     if (args.businessId) {
@@ -676,6 +682,7 @@ export const createForCurrentUser = mutation({
       userId: actor._id,
       workspaceOwnerId,
       businessId: business?._id,
+      idempotencyKey: args.idempotencyKey,
       description: args.description,
       channels: [...new Set(args.channels)],
       relatedPayrollId: args.payrollId ? String(args.payrollId) : undefined,
