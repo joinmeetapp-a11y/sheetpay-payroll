@@ -163,6 +163,19 @@ export const acceptInvitation = mutation({
     }
     await ctx.db.patch(invite._id, { status: "accepted", acceptedByUserId: actor._id, acceptedAt: now });
     await recordAccountantActivity(ctx, owner._id, actor._id, "team.invitation_accepted", invite.businessId, { role: invite.role });
+    await createWorkspaceNotification(ctx, {
+      businessId: invite.businessId,
+      actorUserId: actor._id,
+      category: "team",
+      type: "invitation_accepted",
+      title: "Team member joined",
+      message: `${actor.displayName || actor.email} joined your Sheetpay workspace.`,
+      actionUrl: "/accountant?tab=Team",
+      dedupeKey: `team-invitation-accepted:${String(invite._id)}`,
+      metadata: { role: invite.role, memberEmail: invite.email },
+      channels: ["in_app"],
+      includeActor: true,
+    });
     return { ok: true, workspaceName: owner.displayName || owner.email };
   },
 });
