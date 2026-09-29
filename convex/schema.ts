@@ -596,6 +596,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_reminder", ["reminderId"])
+    .index("by_notification", ["notificationId"])
     .index("by_occurrence", ["occurrenceId"])
     .index("by_user", ["userId"]),
 
