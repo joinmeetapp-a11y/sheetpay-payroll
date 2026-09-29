@@ -14,6 +14,7 @@ const defaultCategories = {
 
 function preferenceKey(category: string) {
   if (category === "team") return "teamActivity";
+  if (category === "failedPayslip") return "failedPayslipAlerts";
   if (category === "payslip") return "payslipReminders";
   if (category === "import" || category === "ocrReview") return "ocrReviewAlerts";
   if (category === "billing") return "billingAlerts";
@@ -30,7 +31,7 @@ function categoryAllowed(prefs: any, category: string) {
   const key = preferenceKey(category);
   if (prefs?.categories?.[key] === false) return false;
   const legacyKey = category === "team" ? "team"
-    : category === "payslip" ? "payslip"
+    : category === "payslip" || category === "failedPayslip" ? "payslip"
     : category === "import" || category === "ocrReview" ? "import"
     : category === "billing" ? "billing"
     : category === "tax" ? "payroll"
