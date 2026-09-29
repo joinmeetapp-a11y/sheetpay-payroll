@@ -323,6 +323,16 @@ export const getDeliveryContext = internalQuery({
   },
 });
 
+export const claimDelivery = internalMutation({
+  args: { deliveryId: v.id("notificationDeliveries") },
+  handler: async (ctx, args) => {
+    const delivery = await ctx.db.get(args.deliveryId);
+    if (!delivery || delivery.status !== "queued") return { claimed: false };
+    await ctx.db.patch(delivery._id, { status: "sending", attemptCount: delivery.attemptCount + 1, updatedAt: Date.now() });
+    return { claimed: true };
+  },
+});
+
 export const updateDelivery = internalMutation({
   args: {
     deliveryId: v.id("notificationDeliveries"),
