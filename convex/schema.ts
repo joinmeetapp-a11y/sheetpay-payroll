@@ -82,6 +82,8 @@ export default defineSchema({
     // Payslip customization saved with the business so it survives refresh
     templateId: v.optional(v.string()),
     primaryColor: v.optional(v.string()),
+    fontFamily: v.optional(v.string()),
+    layoutStyle: v.optional(v.string()),
     accentColor: v.optional(v.string()),
     showCompanyLogo: v.optional(v.boolean()),
     showSignature: v.optional(v.boolean()),
