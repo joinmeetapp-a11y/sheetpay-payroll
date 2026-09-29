@@ -87,6 +87,7 @@ export const dispatchNotification = internalAction({
         results.email = "failed";
       }
     }
+    await ctx.runMutation(internal.reminders.syncReminderOccurrenceFromNotification, { notificationId: args.notificationId });
     return { results };
   },
 });
