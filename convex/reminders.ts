@@ -435,6 +435,7 @@ export const claimDueReminders = internalMutation({
         lastAttemptAt: undefined,
         createdAt: Date.now(),
       });
+      if (notification?.id) await ctx.scheduler.runAfter(0, internal.reminders.syncReminderOccurrenceFromNotification, { notificationId: notification.id });
 
       // Advance the reminder immediately so a second worker won't claim it.
       const next = computeNextRunAt(r, scheduledFor);
