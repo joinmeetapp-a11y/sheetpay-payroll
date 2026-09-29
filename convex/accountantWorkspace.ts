@@ -174,7 +174,7 @@ export const acceptInvitation = mutation({
       actionUrl: "/accountant?tab=Team",
       dedupeKey: `team-invitation-accepted:${String(invite._id)}`,
       metadata: { role: invite.role, memberEmail: invite.email },
-      channels: ["in_app"],
+      channels: ["in_app", "push", "email"],
       includeActor: true,
     });
     return { ok: true, workspaceName: owner.displayName || owner.email };
