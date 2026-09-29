@@ -2,6 +2,7 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { v } from "convex/values";
 import { internal as _internal } from "./_generated/api";
 import { getActor, requireBusinessAccess, requireWorkspaceAdmin, recordAccountantActivity } from "./lib/accountantAccess";
+import { createWorkspaceNotification } from "./notifications";
 
 const internal = _internal as any;
 const inviteRoles = new Set(["Admin", "Payroll Manager", "Payroll Assistant", "Viewer"]);
