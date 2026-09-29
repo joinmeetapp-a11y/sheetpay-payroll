@@ -21,7 +21,7 @@ export const executeTool = internalAction({
     switch (toolName) {
       // ── Employee tools ──────────────────────────────────────────────────────
       case "search_employees": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const query = (args.query ?? "").toLowerCase();
         const dept = (args.department ?? "").toLowerCase();
         const status = args.status ?? "all";
@@ -53,7 +53,7 @@ export const executeTool = internalAction({
       }
 
       case "get_employee": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const id = (args.employeeId ?? "").toLowerCase();
         const emp = employees.find(
           (e) =>
@@ -87,7 +87,7 @@ export const executeTool = internalAction({
       }
 
       case "get_employee_count": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const active = employees.filter((e) => e.status === "active" || e.status !== "inactive");
         const byDept: Record<string, number> = {};
         for (const e of active) {
@@ -103,7 +103,7 @@ export const executeTool = internalAction({
 
       // ── Payroll tools ───────────────────────────────────────────────────────
       case "get_payroll_summary": {
-        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId });
+        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId, businessId });
         if (runs.length === 0) return { message: "No payroll runs found yet." };
 
         let targetRun = runs[0];
@@ -121,7 +121,7 @@ export const executeTool = internalAction({
       }
 
       case "get_payroll_run": {
-        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId });
+        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId, businessId });
         const month = (args.month ?? "").toLowerCase();
         const year = args.year;
         const run = runs.find(
@@ -133,7 +133,7 @@ export const executeTool = internalAction({
       }
 
       case "get_payroll_history": {
-        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId });
+        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId, businessId });
         const limit = args.limit ?? 12;
         return {
           count: runs.length,
@@ -148,7 +148,7 @@ export const executeTool = internalAction({
       }
 
       case "calculate_payroll": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const active = employees.filter((e) => e.status !== "inactive");
 
         const totals = active.reduce(
@@ -175,7 +175,7 @@ export const executeTool = internalAction({
       }
 
       case "get_tax_breakdown": {
-        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId });
+        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId, businessId });
         let run = runs[0];
         if (args.period) {
           const p = args.period.toLowerCase();
@@ -210,7 +210,7 @@ export const executeTool = internalAction({
       }
 
       case "get_statutory_deductions": {
-        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId });
+        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId, businessId });
         let run = runs[0];
         if (args.period) {
           const p = args.period.toLowerCase();
@@ -227,8 +227,8 @@ export const executeTool = internalAction({
       }
 
       case "find_payroll_anomalies": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
-        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
+        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId, businessId });
 
         const anomalies: string[] = [];
 
@@ -269,7 +269,7 @@ export const executeTool = internalAction({
       }
 
       case "compare_payroll_periods": {
-        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId });
+        const runs: any[] = await ctx.runQuery(internal.caylaQueries.getPayrollRunsForUser, { userId, businessId });
 
         const find = (period: string) => {
           const p = period.toLowerCase();
@@ -303,7 +303,7 @@ export const executeTool = internalAction({
       }
 
       case "get_attendance_summary": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const withOT = employees.filter((e) => (e.overtimeHours ?? 0) > 0);
         const totalOT = employees.reduce((s, e) => s + (e.overtimeHours ?? 0), 0);
         return {
@@ -321,7 +321,7 @@ export const executeTool = internalAction({
 
       // ── Email / invite tools ────────────────────────────────────────────────
       case "send_payslip_email": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const id = (args.employeeId ?? "").toLowerCase();
         const emp = employees.find(
           (e) => e.name?.toLowerCase().includes(id) || e.employeeId?.toLowerCase() === id
@@ -387,7 +387,7 @@ export const executeTool = internalAction({
       }
 
       case "send_all_payslips": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const withEmail = employees.filter((e) => e.email && e.status !== "inactive");
         const noEmail = employees.filter((e) => !e.email && e.status !== "inactive");
 
@@ -459,7 +459,7 @@ export const executeTool = internalAction({
       }
 
       case "run_payroll": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const active = employees.filter((e) => e.status !== "inactive");
 
         const totals = active.reduce(
@@ -504,7 +504,7 @@ export const executeTool = internalAction({
       }
 
       case "invite_employee": {
-        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId });
+        const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
         const id = (args.employeeId ?? "").toLowerCase();
         const emp = employees.find(
           (e) => e.name?.toLowerCase().includes(id) || e.employeeId?.toLowerCase() === id
@@ -535,7 +535,7 @@ export const executeTool = internalAction({
       case "invite_team_member": {
         // Cayla now uses the full invitation flow (record + secure token +
         // rate-limited resend) instead of firing a raw email.
-        const biz: any = await ctx.runQuery(internal.caylaQueries.getBusinessForUser, { userId });
+        const biz: any = await ctx.runQuery(internal.caylaQueries.getBusinessForUser, { userId, businessId });
         const businessName = biz?.name || "your workspace";
         const result: any = await ctx.runAction(internal.emails.inviteTeamMember as any, {
           organizationId: businessId ?? String(biz?._id ?? userId),
@@ -556,7 +556,7 @@ export const executeTool = internalAction({
 
       // ── Business tools ──────────────────────────────────────────────────────
       case "get_business_info": {
-        const biz: any = await ctx.runQuery(internal.caylaQueries.getBusinessForUser, { userId });
+        const biz: any = await ctx.runQuery(internal.caylaQueries.getBusinessForUser, { userId, businessId });
         if (!biz) return { message: "No business information found." };
         return {
           name: biz.name,
