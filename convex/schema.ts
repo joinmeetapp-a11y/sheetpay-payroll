@@ -344,8 +344,56 @@ export default defineSchema({
     .index("by_business", ["businessId"])
     .index("by_actor", ["actorUserId"]),
 
-  // Per-user notification category preferences.
-  // Security + critical billing emails ignore these toggles.
+  // Accountant notification center. One record per recipient/event; dedupeKey
+  // prevents retries or concurrent jobs from creating duplicates.
+  notifications: defineTable({
+    userId: v.id("users"),
+    workspaceOwnerId: v.optional(v.id("users")),
+    businessId: v.optional(v.id("businesses")),
+    payrollId: v.optional(v.id("payrollRuns")),
+    employeeId: v.optional(v.id("employees")),
+    category: v.string(),
+    type: v.string(),
+    title: v.string(),
+    message: v.string(),
+    actionUrl: v.optional(v.string()),
+    dedupeKey: v.string(),
+    metadata: v.optional(v.any()),
+    suppressed: v.optional(v.boolean()),
+    readAt: v.optional(v.number()),
+    dismissedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_user_created", ["userId", "createdAt"])
+    .index("by_user_dedupe", ["userId", "dedupeKey"])
+    .index("by_workspace", ["workspaceOwnerId"])
+    .index("by_business", ["businessId"]),
+
+  // Delivery state is independent per channel so retries never resend a channel
+  // that already succeeded.
+  notificationDeliveries: defineTable({
+    notificationId: v.id("notifications"),
+    userId: v.id("users"),
+    channel: v.string(),
+    provider: v.string(),
+    status: v.string(),
+    attemptCount: v.number(),
+    messageId: v.optional(v.string()),
+    idempotencyKey: v.string(),
+    sentAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+    failedAt: v.optional(v.number()),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_notification_channel", ["notificationId", "channel"])
+    .index("by_idempotency", ["idempotencyKey"])
+    .index("by_user", ["userId"]),
+
+  // Per-user channel/category preferences. The older category booleans remain
+  // for compatibility with the existing Resend email preference system.
   notificationPreferences: defineTable({
     userId: v.string(),
     payroll: v.optional(v.boolean()),
@@ -356,6 +404,21 @@ export default defineSchema({
     security: v.optional(v.boolean()),
     product: v.optional(v.boolean()),
     account: v.optional(v.boolean()),
+    channels: v.optional(v.object({
+      inApp: v.boolean(),
+      push: v.boolean(),
+      email: v.boolean(),
+    })),
+    categories: v.optional(v.object({
+      payrollReminders: v.boolean(),
+      payslipReminders: v.boolean(),
+      failedPayslipAlerts: v.boolean(),
+      ocrReviewAlerts: v.boolean(),
+      teamActivity: v.boolean(),
+      billingAlerts: v.boolean(),
+      yearlyTaxReminders: v.boolean(),
+    })),
+    timezone: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 
@@ -462,7 +525,12 @@ export default defineSchema({
   // whole table.
   reminders: defineTable({
     userId: v.id("users"),
+    workspaceOwnerId: v.optional(v.id("users")),
     businessId: v.optional(v.id("businesses")),
+    description: v.optional(v.string()),
+    channels: v.optional(v.array(v.string())),
+    completedAt: v.optional(v.number()),
+    snoozedUntil: v.optional(v.number()),
     // 'payroll' | 'attendance' | 'timesheet' | 'payslip' | 'tax_deadline' | 'custom'
     type: v.string(),
     title: v.string(),
@@ -482,6 +550,7 @@ export default defineSchema({
     dayOfWeek: v.optional(v.number()),
     // 1–31, for monthly
     dayOfMonth: v.optional(v.number()),
+    secondDayOfMonth: v.optional(v.number()),
     // 'HH:MM' in the user's timezone
     scheduledTime: v.string(),
     // IANA timezone id, e.g. 'America/Port_of_Spain'
@@ -513,6 +582,7 @@ export default defineSchema({
     userId: v.id("users"),
     occurrenceId: v.string(), // e.g. `${reminderId}:${scheduledFor}`
     scheduledFor: v.number(),
+    notificationId: v.optional(v.id("notifications")),
     sentAt: v.optional(v.number()),
     // 'pending' | 'sent' | 'skipped' | 'failed' | 'suppressed'
     status: v.string(),
