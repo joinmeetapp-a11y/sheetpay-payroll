@@ -2,6 +2,7 @@ import { query, mutation, internalMutation, internalQuery, QueryCtx, MutationCtx
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
+import { getActor, requireBusinessAccess } from "./lib/accountantAccess";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Timezone-aware next-run computation
@@ -133,6 +134,8 @@ async function requireUser(
   ctx: QueryCtx | MutationCtx,
   requesterUid: string
 ): Promise<{ user: { _id: Id<"users">; email: string }; businessId?: Id<"businesses"> }> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity || identity.subject !== requesterUid) throw new Error("Unauthorized");
   const user = await ctx.db
     .query("users")
     .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", requesterUid))
@@ -549,6 +552,190 @@ export const deleteReminderForCayla = internalMutation({
     if (!rem) return { ok: true };
     if (rem.userId !== args.userId) throw new Error("Forbidden");
     await ctx.db.delete(args.reminderId);
+    return { ok: true };
+  },
+});
+
+
+// ─── Authenticated accountant dashboard API ────────────────────────────────
+const dashboardReminderFields = {
+  businessId: v.optional(v.id("businesses")),
+  payrollId: v.optional(v.id("payrollRuns")),
+  type: v.string(),
+  title: v.string(),
+  description: v.optional(v.string()),
+  frequency: v.string(),
+  scheduledAt: v.optional(v.number()),
+  scheduledTime: v.string(),
+  timezone: v.string(),
+  dayOfWeek: v.optional(v.number()),
+  dayOfMonth: v.optional(v.number()),
+  secondDayOfMonth: v.optional(v.number()),
+  channels: v.array(v.string()),
+  messageTemplate: v.optional(v.string()),
+};
+
+function validateReminderOptions(frequency: string, channels: string[], timezone: string) {
+  if (!["once", "daily", "weekly", "biweekly", "monthly", "semi_monthly", "before_payroll"].includes(frequency)) {
+    throw new Error("Choose a supported reminder frequency.");
+  }
+  if (!channels.length || channels.some((channel) => !["in_app", "push", "email"].includes(channel))) {
+    throw new Error("Choose at least one valid notification channel.");
+  }
+  try { new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date()); }
+  catch { throw new Error("Choose a valid IANA timezone."); }
+}
+
+export const listForCurrentUser = query({
+  args: {},
+  handler: async (ctx) => {
+    const { actor } = await getActor(ctx);
+    const rows = await ctx.db.query("reminders")
+      .withIndex("by_user", (q) => q.eq("userId", actor._id)).collect();
+    const visible = [];
+    for (const reminder of rows) {
+      const business = reminder.businessId ? await ctx.db.get(reminder.businessId) : null;
+      if (reminder.businessId && !business) continue;
+      if (business) {
+        try { await requireBusinessAccess(ctx, business, "read"); }
+        catch { continue; }
+      }
+      visible.push({ ...reminder, businessName: business?.name || "Workspace", payrollFrequency: business?.defaultPayrollFrequency });
+    }
+    return visible.sort((a, b) => a.nextRunAt - b.nextRunAt);
+  },
+});
+
+export const createForCurrentUser = mutation({
+  args: dashboardReminderFields,
+  handler: async (ctx, args) => {
+    const { actor } = await getActor(ctx);
+    validateReminderOptions(args.frequency, args.channels, args.timezone);
+    let workspaceOwnerId = actor._id;
+    let business: any = null;
+    if (args.businessId) {
+      business = await ctx.db.get(args.businessId);
+      const access = await requireBusinessAccess(ctx, business, "runPayroll");
+      workspaceOwnerId = access.owner._id;
+    }
+    if (args.payrollId) {
+      const payroll = await ctx.db.get(args.payrollId);
+      if (!payroll || (args.businessId && payroll.businessId !== args.businessId)) throw new Error("Payroll run does not belong to this client.");
+      if (!business) {
+        business = await ctx.db.get(payroll.businessId);
+        const access = await requireBusinessAccess(ctx, business, "runPayroll");
+        workspaceOwnerId = access.owner._id;
+      }
+    }
+    const scheduledTime = args.scheduledTime || "09:00";
+    const fireOnceAt = args.frequency === "once" ? args.scheduledAt : undefined;
+    const schedule = { ...args, scheduledTime, fireOnceAt };
+    const now = Date.now();
+    const nextRunAt = computeNextRunAt(schedule, now);
+    if (!nextRunAt && args.frequency !== "before_payroll") throw new Error("Choose a future reminder date and time.");
+    const id = await ctx.db.insert("reminders", {
+      userId: actor._id,
+      workspaceOwnerId,
+      businessId: business?._id,
+      description: args.description,
+      channels: [...new Set(args.channels)],
+      relatedPayrollId: args.payrollId ? String(args.payrollId) : undefined,
+      type: args.type,
+      title: args.title.trim().slice(0, 180),
+      messageTemplate: args.messageTemplate?.slice(0, 1000),
+      frequency: args.frequency,
+      scheduledAt: args.scheduledAt,
+      fireOnceAt,
+      scheduledTime,
+      timezone: args.timezone,
+      dayOfWeek: args.dayOfWeek,
+      dayOfMonth: args.dayOfMonth,
+      secondDayOfMonth: args.secondDayOfMonth,
+      nextRunAt: nextRunAt ?? now + 365 * 86400000,
+      enabled: true,
+      createdByUserId: actor._id,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { id };
+  },
+});
+
+export const updateForCurrentUser = mutation({
+  args: {
+    reminderId: v.id("reminders"),
+    patch: v.object({
+      title: v.optional(v.string()),
+      description: v.optional(v.string()),
+      type: v.optional(v.string()),
+      frequency: v.optional(v.string()),
+      scheduledAt: v.optional(v.number()),
+      scheduledTime: v.optional(v.string()),
+      timezone: v.optional(v.string()),
+      dayOfWeek: v.optional(v.number()),
+      dayOfMonth: v.optional(v.number()),
+      secondDayOfMonth: v.optional(v.number()),
+      channels: v.optional(v.array(v.string())),
+      messageTemplate: v.optional(v.string()),
+      enabled: v.optional(v.boolean()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const { actor } = await getActor(ctx);
+    const reminder = await ctx.db.get(args.reminderId);
+    if (!reminder || reminder.userId !== actor._id) throw new Error("Reminder not found.");
+    if (reminder.businessId) {
+      const business = await ctx.db.get(reminder.businessId);
+      await requireBusinessAccess(ctx, business, "runPayroll");
+    }
+    const merged = { ...reminder, ...args.patch };
+    validateReminderOptions(merged.frequency, merged.channels || ["in_app"], merged.timezone);
+    const nextRunAt = merged.enabled === false
+      ? reminder.nextRunAt
+      : computeNextRunAt({ ...merged, fireOnceAt: merged.frequency === "once" ? merged.scheduledAt ?? merged.fireOnceAt : undefined }, Date.now());
+    if (merged.enabled !== false && !nextRunAt && merged.frequency !== "before_payroll") throw new Error("Choose a future reminder date and time.");
+    await ctx.db.patch(reminder._id, {
+      ...args.patch,
+      nextRunAt: nextRunAt ?? reminder.nextRunAt,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+export const deleteForCurrentUser = mutation({
+  args: { reminderId: v.id("reminders") },
+  handler: async (ctx, args) => {
+    const { actor } = await getActor(ctx);
+    const reminder = await ctx.db.get(args.reminderId);
+    if (!reminder || reminder.userId !== actor._id) throw new Error("Reminder not found.");
+    if (reminder.businessId) await requireBusinessAccess(ctx, await ctx.db.get(reminder.businessId), "runPayroll");
+    await ctx.db.delete(reminder._id);
+    return { ok: true };
+  },
+});
+
+export const completeForCurrentUser = mutation({
+  args: { reminderId: v.id("reminders") },
+  handler: async (ctx, args) => {
+    const { actor } = await getActor(ctx);
+    const reminder = await ctx.db.get(args.reminderId);
+    if (!reminder || reminder.userId !== actor._id) throw new Error("Reminder not found.");
+    if (reminder.businessId) await requireBusinessAccess(ctx, await ctx.db.get(reminder.businessId), "runPayroll");
+    await ctx.db.patch(reminder._id, { completedAt: Date.now(), enabled: false, status: "completed", updatedAt: Date.now() });
+    return { ok: true };
+  },
+});
+
+export const snoozeForCurrentUser = mutation({
+  args: { reminderId: v.id("reminders"), until: v.number() },
+  handler: async (ctx, args) => {
+    const { actor } = await getActor(ctx);
+    const reminder = await ctx.db.get(args.reminderId);
+    if (!reminder || reminder.userId !== actor._id) throw new Error("Reminder not found.");
+    if (args.until <= Date.now() || args.until > Date.now() + 90 * 86400000) throw new Error("Choose a snooze time within the next 90 days.");
+    if (reminder.businessId) await requireBusinessAccess(ctx, await ctx.db.get(reminder.businessId), "runPayroll");
+    await ctx.db.patch(reminder._id, { nextRunAt: args.until, snoozedUntil: args.until, enabled: true, updatedAt: Date.now() });
     return { ok: true };
   },
 });
