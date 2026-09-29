@@ -38,9 +38,11 @@ async function periodForUser(ctx: QueryCtx | MutationCtx, userId: Id<"users">, n
 
 async function resolveCallerUser(ctx: QueryCtx | MutationCtx, requesterUid?: string) {
   if (!requesterUid) return null;
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity || identity.subject !== requesterUid) return null;
   return await ctx.db
     .query("users")
-    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", requesterUid))
+    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
     .first();
 }
 
@@ -216,6 +218,18 @@ export const internalIncrementByUid = internalMutation({
     opId: v.string(),
   },
   handler: async (ctx, args) => incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId),
+});
+
+export const internalReserveByUid = internalMutation({
+  args: {
+    firebaseUid: v.string(),
+    kind: v.union(v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
+    opId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertWithinLimitByUid(ctx, args.firebaseUid, args.kind);
+    return incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId);
+  },
 });
 
 export const internalAssertLimitByUid = internalMutation({
