@@ -95,9 +95,11 @@ export const logUsage = internalMutation({
 export const getConversation = query({
   args: { userId: v.string() },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || identity.subject !== args.userId) throw new Error("Unauthenticated");
     return await ctx.db
       .query("caylaConversations")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
+      .withIndex("by_user_id", (q) => q.eq("userId", identity.subject))
       .order("desc")
       .first();
   },
@@ -109,15 +111,14 @@ export const getUsageAnalytics = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 100;
-    if (args.userId) {
-      return await ctx.db
-        .query("caylaUsageLogs")
-        .withIndex("by_user_id", (q) => q.eq("userId", args.userId!))
-        .order("desc")
-        .take(limit);
-    }
-    return await ctx.db.query("caylaUsageLogs").order("desc").take(limit);
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || !args.userId || identity.subject !== args.userId) throw new Error("Unauthenticated");
+    const limit = Math.max(1, Math.min(args.limit ?? 100, 500));
+    return await ctx.db
+      .query("caylaUsageLogs")
+      .withIndex("by_user_id", (q) => q.eq("userId", identity.subject))
+      .order("desc")
+      .take(limit);
   },
 });
 
@@ -149,6 +150,18 @@ export const getPayrollRunsForUser = internalQuery({
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(24);
+  },
+});
+
+export const getOwnedBusinessForUser = internalQuery({
+  args: { userId: v.string(), businessId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.query("users")
+      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.userId))
+      .first();
+    if (!user) return null;
+    const business = await ctx.db.get(args.businessId as any);
+    return business && business.userId === user._id ? business : null;
   },
 });
 
