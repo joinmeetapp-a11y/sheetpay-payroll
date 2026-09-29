@@ -17,7 +17,7 @@ export const dispatchNotification = internalAction({
     const deliveries = await ctx.runQuery(internal.notifications.listDeliveriesForNotification, {
       notificationId: args.notificationId,
     }) as any[];
-    const categoryKey: Record<string, string> = { payroll: "payrollReminders", reminder: "payrollReminders", payslip: "payslipReminders", import: "ocrReviewAlerts", ocrReview: "ocrReviewAlerts", team: "teamActivity", billing: "billingAlerts", tax: "yearlyTaxReminders" };
+    const categoryKey: Record<string, string> = { payroll: "payrollReminders", reminder: "payrollReminders", payslip: "payslipReminders", failedPayslip: "failedPayslipAlerts", import: "ocrReviewAlerts", ocrReview: "ocrReviewAlerts", team: "teamActivity", billing: "billingAlerts", tax: "yearlyTaxReminders" };
     const preferenceKey = categoryKey[context.notification.category] || "payrollReminders";
     const categoryEnabled = context.preferences?.categories?.[preferenceKey] !== false;
     const results: Record<string, string> = {};
