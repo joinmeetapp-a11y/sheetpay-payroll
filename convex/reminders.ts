@@ -731,11 +731,15 @@ export const updateForCurrentUser = mutation({
       const access = await requireBusinessAccess(ctx, nextBusiness, "runPayroll");
       workspaceOwnerId = access.owner._id;
     }
-    const nextPayrollId = args.patch.payrollId || (args.patch.businessId && args.patch.businessId !== reminder.businessId ? undefined : reminder.relatedPayrollId ? args.patch.payrollId : undefined);
     if (args.patch.payrollId) {
       const payroll = await ctx.db.get(args.patch.payrollId);
       if (!payroll || (nextBusinessId && payroll.businessId !== nextBusinessId)) throw new Error("Payroll run does not belong to this client.");
-      if (!nextBusinessId) nextBusinessId = payroll.businessId;
+      if (!nextBusinessId) {
+        const payrollBusiness = await ctx.db.get(payroll.businessId);
+        const access = await requireBusinessAccess(ctx, payrollBusiness, "runPayroll");
+        nextBusinessId = payroll.businessId;
+        workspaceOwnerId = access.owner._id;
+      }
     }
     const { payrollId: _payrollId, ...schedulePatch } = args.patch;
     const merged = { ...reminder, ...schedulePatch };
