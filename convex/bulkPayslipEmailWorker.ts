@@ -54,8 +54,7 @@ export const processJob = internalAction({
           recipientId: item._id, status: "sent", resendMessageId: sent.id,
         });
         await ctx.runMutation(internal.emailLogs.logEmail, {
-          recipient: item.recipient, employeeId: String(item.employeeId), payrollRunId: String(item.payrollRunId),
-          jobId: String(item.jobId), emailType: "employee_payslip", subject: batch.job.subject,
+          recipient: item.recipient, emailType: "employee_payslip", subject: batch.job.subject,
           status: "sent", resendMessageId: sent.id, userId: String(batch.job.requestedByUserId),
           businessId: String(item.businessId), clientId: String(item.businessId),
           relatedEntityId: String(item.payrollRunId), idempotencyKey: item.idempotencyKey,
@@ -67,8 +66,7 @@ export const processJob = internalAction({
           recipientId: item._id, status: "failed", errorMessage: message,
         });
         await ctx.runMutation(internal.emailLogs.logEmail, {
-          recipient: item.recipient, employeeId: String(item.employeeId), payrollRunId: String(item.payrollRunId),
-          jobId: String(item.jobId), emailType: "employee_payslip", subject: batch.job.subject,
+          recipient: item.recipient, emailType: "employee_payslip", subject: batch.job.subject,
           status: "failed", userId: String(batch.job.requestedByUserId), businessId: String(item.businessId),
           clientId: String(item.businessId), relatedEntityId: String(item.payrollRunId),
           idempotencyKey: item.idempotencyKey, category: "payslip", attempts: item.attemptCount,
