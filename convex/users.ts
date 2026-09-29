@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 
@@ -25,6 +25,22 @@ export const getCurrentUser = query({
     return ctx.db.query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
       .first();
+  },
+});
+
+/** Server-only billing lookup used by the Paddle cancellation action. */
+export const getBillingDetailsInternal = internalQuery({
+  args: { firebaseUid: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.query("users")
+      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid))
+      .first();
+    if (!user) return null;
+    return {
+      plan: user.plan,
+      planStatus: user.planStatus,
+      paddleSubscriptionId: user.paddleSubscriptionId,
+    };
   },
 });
 
