@@ -84,6 +84,19 @@ export const invite = action({
         error: result.success ? undefined : (result.error || "Resend could not send the invitation."),
       });
       if (!result.success) return { ok: false, inviteId: invite.id, error: "The invitation was saved, but the email could not be sent. Try again later." };
+      await ctx.runMutation(internal.notifications.createWorkspaceEvent, {
+        businessId: context.business._id,
+        actorUserId: context.actor._id,
+        category: "team",
+        type: "invitation_sent",
+        title: "Team invitation sent",
+        message: `Invitation sent to ${email}.`,
+        actionUrl: "/accountant?tab=Team",
+        dedupeKey: `team-invitation-sent:${String(invite.id)}`,
+        metadata: { email, role: args.role },
+        channels: ["in_app"],
+        includeActor: true,
+      });
       return { ok: true, inviteId: invite.id, expiresAt: invite.expiresAt };
     } catch (_error) {
       await ctx.runMutation(internal.accountantWorkspace.updateInviteDelivery, {
