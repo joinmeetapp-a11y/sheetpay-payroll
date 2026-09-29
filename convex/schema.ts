@@ -102,6 +102,7 @@ export default defineSchema({
     avatar: v.optional(v.string()),
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
+    address: v.optional(v.string()),
     payFrequency: v.string(),
     basicPay: v.number(),
     frequencySalary: v.number(),
