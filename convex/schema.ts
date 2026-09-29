@@ -527,6 +527,7 @@ export default defineSchema({
     userId: v.id("users"),
     workspaceOwnerId: v.optional(v.id("users")),
     businessId: v.optional(v.id("businesses")),
+    idempotencyKey: v.optional(v.string()),
     description: v.optional(v.string()),
     channels: v.optional(v.array(v.string())),
     completedAt: v.optional(v.number()),
@@ -571,6 +572,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_user", ["userId"])
+    .index("by_user_idempotency", ["userId", "idempotencyKey"])
     .index("by_business", ["businessId"])
     .index("by_next_run_at", ["nextRunAt"])
     .index("by_enabled_next_run", ["enabled", "nextRunAt"]),
