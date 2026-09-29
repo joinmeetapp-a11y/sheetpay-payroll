@@ -222,6 +222,7 @@ export const updateReminder = mutation({
     requesterUid: v.string(),
     reminderId: v.id("reminders"),
     patch: v.object({
+      businessId: v.optional(v.id("businesses")),
       title: v.optional(v.string()),
       enabled: v.optional(v.boolean()),
       frequency: v.optional(v.string()),
@@ -721,9 +722,12 @@ export const updateForCurrentUser = mutation({
     const { actor } = await getActor(ctx);
     const reminder = await ctx.db.get(args.reminderId);
     if (!reminder || reminder.userId !== actor._id) throw new Error("Reminder not found.");
-    if (reminder.businessId) {
-      const business = await ctx.db.get(reminder.businessId);
-      await requireBusinessAccess(ctx, business, "runPayroll");
+    let workspaceOwnerId = reminder.workspaceOwnerId;
+    if (reminder.businessId) await requireBusinessAccess(ctx, await ctx.db.get(reminder.businessId), "runPayroll");
+    if (args.patch.businessId) {
+      const nextBusiness = await ctx.db.get(args.patch.businessId);
+      const access = await requireBusinessAccess(ctx, nextBusiness, "runPayroll");
+      workspaceOwnerId = access.owner._id;
     }
     const merged = { ...reminder, ...args.patch };
     validateReminderOptions(merged.frequency, merged.channels || ["in_app"], merged.timezone);
@@ -733,6 +737,7 @@ export const updateForCurrentUser = mutation({
     if (merged.enabled !== false && !nextRunAt && merged.frequency !== "before_payroll") throw new Error("Choose a future reminder date and time.");
     await ctx.db.patch(reminder._id, {
       ...args.patch,
+      workspaceOwnerId,
       nextRunAt: nextRunAt ?? reminder.nextRunAt,
       updatedAt: Date.now(),
     });
