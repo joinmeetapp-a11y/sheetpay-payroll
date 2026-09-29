@@ -183,12 +183,16 @@ export const listForCurrentUser = query({
     const candidates = rows.filter((item) =>
       !item.dismissedAt && !item.suppressed && prefs?.channels?.inApp !== false && categoryAllowed(prefs, item.category)
     );
-    const visible = [];
+    const visible: typeof rows = [];
     for (const item of candidates) {
       if (item.businessId) {
         const business = await ctx.db.get(item.businessId);
-        try { await requireBusinessAccess(ctx, business, "read"); }
-        catch { continue; }
+        if (!business) continue;
+        if (business.userId !== actor._id) {
+          const membership = await ctx.db.query("accountantMemberships")
+            .withIndex("by_workspace_member", (q) => q.eq("workspaceOwnerId", business.userId).eq("memberUserId", actor._id)).first();
+          if (!membership || membership.status !== "active" || (!membership.allClients && !membership.clientIds.includes(String(business._id)))) continue;
+        }
       }
       visible.push(item);
     }
