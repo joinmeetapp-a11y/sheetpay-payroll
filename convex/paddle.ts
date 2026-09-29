@@ -1,5 +1,6 @@
 "use node";
 import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 // Use sandbox-api.paddle.com when PADDLE_SANDBOX=true or the key starts with
@@ -93,5 +94,63 @@ export const createCheckoutSession = action({
     }
 
     return { url, transactionId: txnId };
+  },
+});
+
+
+/**
+ * Schedules cancellation of the signed-in accountant's Paddle subscription.
+ * Paddle remains the billing authority; access stays active through the paid term.
+ */
+export const cancelSubscription = action({
+  args: {
+    effectiveFrom: v.optional(v.literal("next_billing_period")),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity?.subject) throw new Error("Unauthenticated");
+
+    const user = await ctx.runQuery(internal.users.getBillingDetailsInternal, {
+      firebaseUid: identity.subject,
+    });
+    if (!user || user.plan !== "accountant" || user.planStatus !== "active") {
+      throw new Error("No active Sheetpay Accountant subscription was found for this account.");
+    }
+    if (!user.paddleSubscriptionId) {
+      throw new Error("Paddle has not linked a subscription to this account yet. Please contact support.");
+    }
+
+    const apiKey = process.env.PADDLE_API_KEY;
+    if (!apiKey) throw new Error("PADDLE_API_KEY not configured in Convex environment variables");
+
+    const paddleBase = getPaddleBase(apiKey);
+    const res = await fetch(
+      `${paddleBase}/subscriptions/${encodeURIComponent(user.paddleSubscriptionId)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ effective_from: args.effectiveFrom ?? "next_billing_period" }),
+      },
+    );
+
+    const responseText = await res.text();
+    let payload: any = {};
+    try { payload = responseText ? JSON.parse(responseText) : {}; } catch { /* Keep Paddle's raw error below. */ }
+    if (!res.ok) {
+      const detail = payload?.error?.detail || payload?.error?.message || responseText;
+      throw new Error(`Paddle API error ${res.status}: ${detail || "Cancellation failed."}`);
+    }
+
+    const effectiveAt = payload?.data?.scheduled_change?.effective_at;
+    return {
+      success: true,
+      effectiveAt,
+      message: effectiveAt
+        ? `Cancellation scheduled for ${effectiveAt}. Your access remains active until then.`
+        : "Cancellation scheduled for the end of your current billing period. Your access remains active until then.",
+    };
   },
 });
