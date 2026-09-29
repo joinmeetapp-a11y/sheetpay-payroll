@@ -108,6 +108,7 @@ export default defineSchema({
     payFrequency: v.string(),
     basicPay: v.number(),
     frequencySalary: v.number(),
+    regularHours: v.optional(v.number()),
     overtimeHours: v.number(),
     overtimeRate: v.number(),
     bonus: v.number(),
@@ -226,6 +227,106 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_invitee_email", ["inviteeEmail"])
     .index("by_status", ["status"]),
+
+  accountantMemberships: defineTable({
+    workspaceOwnerId: v.id("users"),
+    memberUserId: v.id("users"),
+    email: v.string(),
+    role: v.string(),
+    clientIds: v.array(v.string()),
+    allClients: v.boolean(),
+    canSendPayslips: v.boolean(),
+    status: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    lastActiveAt: v.optional(v.number()),
+  })
+    .index("by_member", ["memberUserId"])
+    .index("by_workspace", ["workspaceOwnerId"])
+    .index("by_workspace_member", ["workspaceOwnerId", "memberUserId"])
+    .index("by_email_workspace", ["workspaceOwnerId", "email"]),
+
+  accountantInvites: defineTable({
+    workspaceOwnerId: v.id("users"),
+    businessId: v.optional(v.id("businesses")),
+    email: v.string(),
+    role: v.string(),
+    clientIds: v.array(v.string()),
+    allClients: v.boolean(),
+    canSendPayslips: v.boolean(),
+    inviterUserId: v.id("users"),
+    tokenHash: v.string(),
+    status: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    acceptedByUserId: v.optional(v.id("users")),
+    acceptedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    resendMessageId: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    .index("by_workspace", ["workspaceOwnerId"])
+    .index("by_email_workspace", ["workspaceOwnerId", "email"])
+    .index("by_status", ["status"]),
+
+  bulkEmailJobs: defineTable({
+    workspaceOwnerId: v.id("users"),
+    requestedByUserId: v.id("users"),
+    businessId: v.id("businesses"),
+    payrollRunId: v.id("payrollRuns"),
+    status: v.string(),
+    subject: v.string(),
+    message: v.string(),
+    replyTo: v.optional(v.string()),
+    employeeCount: v.number(),
+    sentCount: v.number(),
+    failedCount: v.number(),
+    idempotencyKey: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+  })
+    .index("by_workspace", ["workspaceOwnerId"])
+    .index("by_business", ["businessId"])
+    .index("by_idempotency", ["idempotencyKey"]),
+
+  bulkEmailRecipients: defineTable({
+    jobId: v.id("bulkEmailJobs"),
+    workspaceOwnerId: v.id("users"),
+    businessId: v.id("businesses"),
+    payrollRunId: v.id("payrollRuns"),
+    employeeId: v.id("employees"),
+    employeeName: v.string(),
+    recipient: v.string(),
+    storageId: v.id("_storage"),
+    filename: v.string(),
+    status: v.string(),
+    resendMessageId: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    attemptCount: v.number(),
+    idempotencyKey: v.string(),
+    createdAt: v.number(),
+    sentAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_job_employee", ["jobId", "employeeId"])
+    .index("by_resend_message", ["resendMessageId"])
+    .index("by_idempotency", ["idempotencyKey"])
+    .index("by_workspace", ["workspaceOwnerId"]),
+
+  accountantActivity: defineTable({
+    workspaceOwnerId: v.id("users"),
+    actorUserId: v.id("users"),
+    businessId: v.optional(v.id("businesses")),
+    action: v.string(),
+    details: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_workspace", ["workspaceOwnerId"])
+    .index("by_business", ["businessId"])
+    .index("by_actor", ["actorUserId"]),
 
   // Per-user notification category preferences.
   // Security + critical billing emails ignore these toggles.
