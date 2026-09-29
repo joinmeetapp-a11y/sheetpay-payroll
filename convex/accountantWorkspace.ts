@@ -69,7 +69,15 @@ export const getInviteContext = internalQuery({
       if (!member || member.status !== "active" || member.role !== "Admin" ||
         (!member.allClients && !member.clientIds.includes(String(business._id)))) throw new Error("PERMISSION_DENIED");
     }
-    return { owner, actor, business };
+    const clients = await ctx.db.query("businesses").withIndex("by_user", (q) => q.eq("userId", owner._id)).collect();
+    if (actor._id !== owner._id) {
+      const member = await ctx.db.query("accountantMemberships")
+        .withIndex("by_workspace_member", (q) => q.eq("workspaceOwnerId", owner._id).eq("memberUserId", actor._id)).first();
+      const permitted = new Set(clients.filter((client) => member?.allClients || member?.clientIds.includes(String(client._id))).map((client) => String(client._id)));
+      if (member?.role !== "Admin") throw new Error("PERMISSION_DENIED");
+      return { owner, actor, business, clients: clients.filter((client) => permitted.has(String(client._id))) };
+    }
+    return { owner, actor, business, clients };
   },
 });
 
