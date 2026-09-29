@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { assertWithinLimit, incrementUsageIdempotent } from "./usage";
+import { createWorkspaceNotification } from "./notifications";
 
 async function requirePayrollOwner(ctx: any, userId: any, businessId?: any) {
   const identity = await ctx.auth.getUserIdentity();
@@ -108,6 +109,21 @@ export const update = mutation({
             payrollRunId: String(runId),
             userId: String(before.userId),
             businessId: String(before.businessId),
+          });
+        }
+        if (business) {
+          const period = before.periodLabel || `${before.month} ${before.year}`;
+          await createWorkspaceNotification(ctx, {
+            businessId: before.businessId,
+            category: "payroll",
+            type: "payroll_completed",
+            title: "Payroll completed",
+            message: `${business.name} payroll for ${period} was completed.`,
+            actionUrl: `/accountant?tab=Payroll&clientId=${String(before.businessId)}`,
+            dedupeKey: `payroll-completed:${String(runId)}`,
+            payrollId: runId,
+            metadata: { employeeCount: before.employeesSnapshot?.length ?? 0, period },
+            channels: ["in_app"],
           });
         }
       }
