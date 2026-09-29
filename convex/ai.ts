@@ -17,7 +17,14 @@ export const transcribeAudio = action({
     mimeType: v.string(),
     language: v.optional(v.string()),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    await ctx.runMutation(internal.usage.internalReserveByUid, {
+      firebaseUid: identity.subject,
+      kind: "cayla",
+      opId: `cayla-audio:${identity.subject}:${crypto.randomUUID()}`,
+    });
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return { text: "", error: "OPENAI_API_KEY not configured" };
@@ -72,6 +79,8 @@ export const extractPayrollDocument = action({
     requesterUid: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<any> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || !args.requesterUid || identity.subject !== args.requesterUid) throw new Error("Unauthenticated");
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
@@ -89,27 +98,24 @@ export const extractPayrollDocument = action({
       };
     }
 
-    // Enforce free-plan OCR cap BEFORE burning an OpenAI vision call. The
-    // check runs against the caller's account; over-limit throws which we
-    // convert to a structured error the UI translates into an upgrade prompt.
-    if (args.requesterUid) {
-      try {
-        await ctx.runMutation(internal.usage.internalAssertLimitByUid, {
-          firebaseUid: args.requesterUid,
-          kind: "ocr",
-        });
-      } catch (err: any) {
-        const msg = String(err?.message ?? err);
-        if (msg.includes("FREE_LIMIT_REACHED")) {
-          return {
-            ok: false,
-            error: "FREE_LIMIT_REACHED:ocr",
-            reason: "Your free-plan OCR scans are used up for this month. Upgrade to keep scanning.",
-            employees: [],
-          };
-        }
-        throw err;
+    // Reserve the trial scan atomically before the OpenAI call.
+    try {
+      await ctx.runMutation(internal.usage.internalReserveByUid, {
+        firebaseUid: args.requesterUid,
+        kind: "ocr",
+        opId: `ocr:${args.requesterUid}:${crypto.randomUUID()}`,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      if (msg.includes("FREE_LIMIT_REACHED")) {
+        return {
+          ok: false,
+          error: "FREE_LIMIT_REACHED:ocr",
+          reason: "Your three accountant trial OCR scans are used. Upgrade to keep scanning.",
+          employees: [],
+        };
       }
+      throw err;
     }
 
     const dataUrl = `data:${args.mimeType};base64,${args.fileBase64}`;
@@ -194,24 +200,6 @@ Rules:
         parsed = {};
       }
       const employees = Array.isArray(parsed.employees) ? parsed.employees : [];
-
-      // Count usage only for genuinely successful extractions. A parse failure
-      // that returns zero employees should not consume a scan. opId derived
-      // from a hash of the fileName + first-employee marker so a UI retry of
-      // the same file dedupes; different files get different ids.
-      if (args.requesterUid && employees.length > 0) {
-        const marker = `${args.fileName ?? "ocr"}:${employees[0]?.name ?? ""}:${employees.length}`;
-        const opId = `ocr:${marker}`;
-        try {
-          await ctx.runMutation(internal.usage.internalIncrementByUid, {
-            firebaseUid: args.requesterUid,
-            kind: "ocr",
-            opId,
-          });
-        } catch (err) {
-          console.error("[ai.extractPayrollDocument] usage increment failed:", err);
-        }
-      }
 
       return {
         ok: true,

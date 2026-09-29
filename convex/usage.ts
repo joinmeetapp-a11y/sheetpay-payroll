@@ -4,18 +4,17 @@ import { Id } from "./_generated/dataModel";
 import { isAdminEmail } from "./admin";
 
 /**
- * Free-plan monthly allowances. Keep in sync with the pricing copy on the
- * landing page and SettingsView. Paid plans (pro/accountant) are treated as
- * unlimited server-side — a null limit means "no ceiling".
+ * Accountant onboarding uses a one-time trial allowance. Other product usage
+ * remains monthly. Paid plans are unlimited server-side.
  */
 export const FREE_LIMITS = {
   payslip: 10,
-  payroll: 10,
+  payroll: 3,
   ocr: 3,
   // Cayla actions on Free are limited — pick a conservative number so the
   // free trial is genuinely useful without letting a single free account
   // consume the OpenAI budget for the month.
-  cayla: 50,
+  cayla: 3,
 } as const;
 
 export type UsageKind = keyof typeof FREE_LIMITS;
@@ -32,11 +31,18 @@ function currentPeriod(now: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+async function periodForUser(ctx: QueryCtx | MutationCtx, userId: Id<"users">, now = Date.now()) {
+  const user = await ctx.db.get(userId);
+  return user?.accountType === "accountant" ? "accountant-trial" : currentPeriod(now);
+}
+
 async function resolveCallerUser(ctx: QueryCtx | MutationCtx, requesterUid?: string) {
   if (!requesterUid) return null;
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity || identity.subject !== requesterUid) return null;
   return await ctx.db
     .query("users")
-    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", requesterUid))
+    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
     .first();
 }
 
@@ -83,7 +89,7 @@ export const getMonthlyUsage = query({
   handler: async (ctx, args) => {
     const user = await resolveCallerUser(ctx, args.requesterUid);
     if (!user) return null;
-    const period = currentPeriod(Date.now());
+    const period = user.accountType === "accountant" ? "accountant-trial" : currentPeriod(Date.now());
     const row = await ctx.db
       .query("usageCounters")
       .withIndex("by_user_period", (q) => q.eq("userId", user._id).eq("period", period))
@@ -98,7 +104,7 @@ export const getMonthlyUsage = query({
         .query("caylaUsageLogs")
         .withIndex("by_user_id", (q) => q.eq("userId", user._id))
         .collect()
-    ).filter((l) => l.createdAt >= monthStart).length;
+    ).filter((l) => user.accountType === "accountant" || l.createdAt >= monthStart).length;
 
     return {
       plan,
@@ -108,7 +114,7 @@ export const getMonthlyUsage = query({
       ocrScansUsed: row?.ocrScansUsed ?? 0,
       caylaActionsUsed: Math.max(row?.caylaActionsUsed ?? 0, caylaFromLogs),
       limits: plan === "free"
-        ? { payslip: FREE_LIMITS.payslip, payroll: FREE_LIMITS.payroll, ocr: FREE_LIMITS.ocr, cayla: FREE_LIMITS.cayla }
+        ? { payslip: user.accountType === "accountant" ? null : FREE_LIMITS.payslip, payroll: FREE_LIMITS.payroll, ocr: FREE_LIMITS.ocr, cayla: FREE_LIMITS.cayla }
         : { payslip: null, payroll: null, ocr: null, cayla: null },
     };
   },
@@ -128,8 +134,8 @@ export async function assertWithinLimit(
   kind: UsageKind
 ): Promise<void> {
   const plan = await planFor(user);
-  if (plan !== "free") return;
-  const period = currentPeriod(Date.now());
+  if (plan !== "free" || (user as any).accountType === "accountant" && kind === "payslip") return;
+  const period = (user as any).accountType === "accountant" ? "accountant-trial" : currentPeriod(Date.now());
   const row = await readOrCreateCounter(ctx, user._id, period);
   const field = KIND_TO_FIELD[kind];
   const used = row[field] ?? 0;
@@ -154,7 +160,7 @@ export async function incrementUsageIdempotent(
     .query("usageIncrements")
     .withIndex("by_op", (q) => q.eq("opId", opId))
     .first();
-  const period = currentPeriod(Date.now());
+  const period = await periodForUser(ctx, userId);
   const row = await readOrCreateCounter(ctx, userId, period);
   const field = KIND_TO_FIELD[kind];
   if (existing) return { counted: false, used: row[field] };
@@ -212,6 +218,18 @@ export const internalIncrementByUid = internalMutation({
     opId: v.string(),
   },
   handler: async (ctx, args) => incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId),
+});
+
+export const internalReserveByUid = internalMutation({
+  args: {
+    firebaseUid: v.string(),
+    kind: v.union(v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
+    opId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertWithinLimitByUid(ctx, args.firebaseUid, args.kind);
+    return incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId);
+  },
 });
 
 export const internalAssertLimitByUid = internalMutation({

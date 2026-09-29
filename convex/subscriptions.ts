@@ -175,7 +175,7 @@ export const applyPaddleEvent = internalMutation({
       args.plan === "accountant" ? "Sheetpay Accountant" : "Sheetpay Pro";
     let kind: string | null = null;
     if (args.planStatus === "canceled") kind = "subscriptionCancelled";
-    else if (previousPlan === "free" && args.plan !== "free") kind = "subscriptionStarted";
+    else if (previousPlan === "free") kind = "subscriptionStarted";
     else if (previousPlan !== args.plan && args.plan === "accountant") kind = "subscriptionUpgraded";
     else if (previousPlan !== args.plan && previousPlan === "accountant") kind = "subscriptionDowngraded";
     else if (previousStatus !== "active" && args.planStatus === "active") kind = "subscriptionStarted";

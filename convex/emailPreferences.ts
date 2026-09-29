@@ -72,7 +72,9 @@ export const updateMine = mutation({
     return ctx.db.insert("notificationPreferences", {
       userId,
       ...defaults,
-      ...patch,
+      ...rest,
+      security: true,
+      updatedAt: Date.now(),
     });
   },
 });

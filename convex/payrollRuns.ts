@@ -3,9 +3,26 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { assertWithinLimit, incrementUsageIdempotent } from "./usage";
 
+async function requirePayrollOwner(ctx: any, userId: any, businessId?: any) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Unauthenticated");
+  const user = await ctx.db.get(userId);
+  if (!user || user.firebaseUid !== identity.subject) throw new Error("Forbidden");
+  if (businessId) {
+    const business = await ctx.db.get(businessId);
+    if (!business || business.userId !== userId) throw new Error("Forbidden");
+  }
+  return user;
+}
+
 export const getByBusiness = query({
   args: { businessId: v.id("businesses") },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    const business = await ctx.db.get(args.businessId);
+    const user = business ? await ctx.db.get(business.userId) : null;
+    if (!user || user.firebaseUid !== identity.subject) return [];
     return ctx.db
       .query("payrollRuns")
       .withIndex("by_business", (q) => q.eq("businessId", args.businessId))
@@ -33,8 +50,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     // Enforce free-plan limit BEFORE inserting; throws FREE_LIMIT_REACHED:payroll
     // which the UI translates into an upgrade prompt.
-    const user = await ctx.db.get(args.userId);
-    if (!user) throw new Error("Unauthorized");
+    const user = await requirePayrollOwner(ctx, args.userId, args.businessId);
     await assertWithinLimit(ctx, user, "payroll");
 
     const runId = await ctx.db.insert("payrollRuns", {
@@ -66,6 +82,8 @@ export const update = mutation({
   },
   handler: async (ctx, { runId, ...fields }) => {
     const before = await ctx.db.get(runId);
+    if (!before) throw new Error("Payroll run not found");
+    await requirePayrollOwner(ctx, before.userId, before.businessId);
     await ctx.db.patch(runId, { ...fields, updatedAt: Date.now() });
 
     // Fire payroll-completed email once, when the run transitions to a

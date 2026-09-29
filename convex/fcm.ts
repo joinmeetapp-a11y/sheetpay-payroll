@@ -125,7 +125,7 @@ export const deliverOccurrence = internalAction({
         reminderId: String(args.reminderId),
         occurrenceId: args.occurrenceId,
       });
-      if (result.ok) {
+      if (result.ok === true) {
         messageIds.push(result.messageId);
       } else {
         errors.push(`${t.token.slice(0, 12)}…: ${result.code ?? result.error.slice(0, 80)}`);

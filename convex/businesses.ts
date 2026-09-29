@@ -2,9 +2,21 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { isAdminEmail } from "./admin";
 
+async function requireBusinessUser(ctx: any, userId: any) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Unauthenticated");
+  const user = await ctx.db.get(userId);
+  if (!user || user.firebaseUid !== identity.subject) throw new Error("Forbidden");
+  return user;
+}
+
 export const getByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const user = await ctx.db.get(args.userId);
+    if (!user || user.firebaseUid !== identity.subject) return null;
     return ctx.db
       .query("businesses")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
@@ -26,6 +38,9 @@ export const create = mutation({
     signatoryTitle: v.optional(v.string()),
     currency: v.string(),
     currencySymbol: v.string(),
+    countryCode: v.optional(v.string()),
+    countryName: v.optional(v.string()),
+    defaultPayrollFrequency: v.optional(v.string()),
     logo: v.optional(v.string()),
     signatureUrl: v.optional(v.string()),
     templateId: v.optional(v.string()),
@@ -39,6 +54,7 @@ export const create = mutation({
     showQrVerification: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    const user = await requireBusinessUser(ctx, args.userId);
     // Multi-business support is a paid feature. Free plan gets exactly one
     // business row; a second attempt requires Pro or Accountant. Admins and
     // paid users pass through.
@@ -47,8 +63,7 @@ export const create = mutation({
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .collect();
     if (existing.length >= 1) {
-      const user = await ctx.db.get(args.userId);
-      const isAdmin = user && isAdminEmail(user.email);
+      const isAdmin = isAdminEmail(user.email);
       const plan = (user?.plan ?? "free") as string;
       const status = user?.planStatus ?? (plan === "free" ? "none" : "active");
       const active = status === "active" || status === "pending" || status === "trialing";
@@ -78,6 +93,9 @@ export const update = mutation({
     signatoryTitle: v.optional(v.string()),
     currency: v.optional(v.string()),
     currencySymbol: v.optional(v.string()),
+    countryCode: v.optional(v.string()),
+    countryName: v.optional(v.string()),
+    defaultPayrollFrequency: v.optional(v.string()),
     logo: v.optional(v.string()),
     signatureUrl: v.optional(v.string()),
     templateId: v.optional(v.string()),
@@ -91,6 +109,9 @@ export const update = mutation({
     showQrVerification: v.optional(v.boolean()),
   },
   handler: async (ctx, { businessId, ...fields }) => {
+    const business = await ctx.db.get(businessId);
+    if (!business) throw new Error("Business not found");
+    await requireBusinessUser(ctx, business.userId);
     await ctx.db.patch(businessId, { ...fields, updatedAt: Date.now() });
   },
 });

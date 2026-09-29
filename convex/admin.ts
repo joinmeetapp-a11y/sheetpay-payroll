@@ -34,6 +34,8 @@ async function resolveAdmin(
   requesterUid: string | undefined
 ): Promise<AuthContext | null> {
   if (!requesterUid) return null;
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity || identity.subject !== requesterUid) return null;
   const user = await ctx.db
     .query("users")
     .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", requesterUid))

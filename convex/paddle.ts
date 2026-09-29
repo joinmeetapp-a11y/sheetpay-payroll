@@ -25,7 +25,11 @@ export const createCheckoutSession = action({
     customerEmail: v.optional(v.string()),
     successUrl: v.optional(v.string()),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || !args.firebaseUid || identity.subject !== args.firebaseUid || args.plan !== "accountant") {
+      throw new Error("Unauthenticated");
+    }
     const apiKey = process.env.PADDLE_API_KEY;
     if (!apiKey) throw new Error("PADDLE_API_KEY not configured in Convex environment variables");
 
