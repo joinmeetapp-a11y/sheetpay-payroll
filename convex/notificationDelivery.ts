@@ -12,7 +12,17 @@ export const dispatchNotification = internalAction({
     const context = await ctx.runQuery(internal.notifications.getDeliveryContext, {
       notificationId: args.notificationId,
     }) as any;
-    if (!context) return { skipped: "notification or recipient unavailable" };
+    if (!context) {
+      const unavailableDeliveries = await ctx.runQuery(internal.notifications.listDeliveriesForNotification, { notificationId: args.notificationId }) as any[];
+      for (const delivery of unavailableDeliveries) {
+        if (delivery.status === "queued") await ctx.runMutation(internal.notifications.updateDelivery, {
+          deliveryId: delivery._id, status: "skipped", errorCode: "RECIPIENT_UNAVAILABLE",
+          errorMessage: "Recipient or workspace access is no longer active.",
+        });
+      }
+      await ctx.runMutation(internal.reminders.syncReminderOccurrenceFromNotification, { notificationId: args.notificationId });
+      return { skipped: "notification or recipient unavailable" };
+    }
 
     const deliveries = await ctx.runQuery(internal.notifications.listDeliveriesForNotification, {
       notificationId: args.notificationId,
