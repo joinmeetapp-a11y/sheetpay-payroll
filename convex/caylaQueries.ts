@@ -123,33 +123,35 @@ export const getUsageAnalytics = query({
 });
 
 export const getEmployeesForUser = internalQuery({
-  args: { userId: v.string() },
+  args: { userId: v.string(), businessId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.userId))
       .first();
     if (!user) return [];
-    return await ctx.db
+    const employees = await ctx.db
       .query("employees")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
+    return args.businessId ? employees.filter((employee) => String(employee.businessId) === args.businessId) : employees;
   },
 });
 
 export const getPayrollRunsForUser = internalQuery({
-  args: { userId: v.string() },
+  args: { userId: v.string(), businessId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.userId))
       .first();
     if (!user) return [];
-    return await ctx.db
+    const runs = await ctx.db
       .query("payrollRuns")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .order("desc")
-      .take(24);
+      .take(100);
+    return args.businessId ? runs.filter((run) => String(run.businessId) === args.businessId).slice(0, 24) : runs.slice(0, 24);
   },
 });
 
@@ -166,13 +168,17 @@ export const getOwnedBusinessForUser = internalQuery({
 });
 
 export const getBusinessForUser = internalQuery({
-  args: { userId: v.string() },
+  args: { userId: v.string(), businessId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.userId))
       .first();
     if (!user) return null;
+    if (args.businessId) {
+      const selected: any = await ctx.db.get(args.businessId as any);
+      return selected?.userId === user._id ? selected : null;
+    }
     return await ctx.db
       .query("businesses")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
@@ -202,11 +208,8 @@ export const savePayrollRun = internalMutation({
       .first();
     if (!user) throw new Error("User not found");
 
-    const business = await ctx.db
-      .query("businesses")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-    if (!business) throw new Error("Business not found");
+    const business: any = await ctx.db.get(args.businessId as any);
+    if (!business || business.userId !== user._id) throw new Error("Business not found");
 
     const now = Date.now();
     const existing = await ctx.db
