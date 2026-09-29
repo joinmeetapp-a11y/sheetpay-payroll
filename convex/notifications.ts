@@ -180,9 +180,18 @@ export const listForCurrentUser = query({
       .withIndex("by_user_created", (q) => q.eq("userId", actor._id))
       .order("desc")
       .take(Math.max(1, Math.min(200, args.limit ?? 100)));
-    const visible = rows.filter((item) =>
+    const candidates = rows.filter((item) =>
       !item.dismissedAt && !item.suppressed && prefs?.channels?.inApp !== false && categoryAllowed(prefs, item.category)
     );
+    const visible = [];
+    for (const item of candidates) {
+      if (item.businessId) {
+        const business = await ctx.db.get(item.businessId);
+        try { await requireBusinessAccess(ctx, business, "read"); }
+        catch { continue; }
+      }
+      visible.push(item);
+    }
     const unreadCount = visible.filter((item) => !item.readAt).length;
     const notifications = await Promise.all(visible.map(async (item) => {
       const business = item.businessId ? await ctx.db.get(item.businessId) : null;
@@ -320,6 +329,11 @@ export const getDeliveryContext = internalQuery({
     if (!user) return null;
     const business = notification.businessId ? await ctx.db.get(notification.businessId) : null;
     if (notification.businessId && !business) return null;
+    if (business && business.userId !== notification.userId) {
+      const membership = await ctx.db.query("accountantMemberships")
+        .withIndex("by_workspace_member", (q) => q.eq("workspaceOwnerId", business.userId).eq("memberUserId", notification.userId)).first();
+      if (!membership || membership.status !== "active" || (!membership.allClients && !membership.clientIds.includes(String(business._id)))) return null;
+    }
     const deliveries = await ctx.db.query("notificationDeliveries")
       .withIndex("by_notification_channel", (q) => q.eq("notificationId", notification._id))
       .collect();
