@@ -172,9 +172,11 @@ export const takeQueued = internalMutation({
     if (!job) return null;
     const recipients = await ctx.db.query("bulkEmailRecipients").withIndex("by_job", (q) => q.eq("jobId", args.jobId)).collect();
     const queued = recipients.filter((row) => row.status === "queued").slice(0, Math.min(10, args.limit ?? 10));
+    const business = await ctx.db.get(job.businessId);
+    const run = await ctx.db.get(job.payrollRunId);
     for (const row of queued) await ctx.db.patch(row._id, { status: "sending", attemptCount: row.attemptCount + 1 });
     if (queued.length && job.status === "queued") await ctx.db.patch(job._id, { status: "sending", updatedAt: Date.now() });
-    return { job, recipients: queued };
+    return { job, recipients: queued, business, run };
   },
 });
 
