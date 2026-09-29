@@ -57,9 +57,19 @@ export const listActivity = query({
 export const getInviteContext = internalQuery({
   args: { businessId: v.id("businesses"), firebaseUid: v.string(), email: v.string() },
   handler: async (ctx, args) => {
+    const actor = await ctx.db.query("users").withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid)).first();
+    if (!actor || actor.email.trim().toLowerCase() !== args.email.trim().toLowerCase()) throw new Error("Forbidden");
     const business = await ctx.db.get(args.businessId);
-    const access = await requireBusinessAccess(ctx, business, "manageTeam");
-    return { owner: access.owner, actor: access.actor, business };
+    if (!business) throw new Error("Client not found");
+    const owner = await ctx.db.get(business.userId);
+    if (!owner) throw new Error("Workspace not found");
+    if (actor._id !== owner._id) {
+      const member = await ctx.db.query("accountantMemberships")
+        .withIndex("by_workspace_member", (q) => q.eq("workspaceOwnerId", owner._id).eq("memberUserId", actor._id)).first();
+      if (!member || member.status !== "active" || member.role !== "Admin" ||
+        (!member.allClients && !member.clientIds.includes(String(business._id)))) throw new Error("PERMISSION_DENIED");
+    }
+    return { owner, actor, business };
   },
 });
 
