@@ -314,8 +314,10 @@ export const getDeliveryContext = internalQuery({
     const deliveries = await ctx.db.query("notificationDeliveries")
       .withIndex("by_notification_channel", (q) => q.eq("notificationId", notification._id))
       .collect();
+    const preferences = await preferencesFor(ctx, notification.userId);
     return {
       notification,
+      preferences,
       user: { _id: user._id, email: user.email, displayName: user.displayName },
       business: business ? { _id: business._id, name: business.name } : null,
       deliveries,
