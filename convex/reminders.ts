@@ -223,6 +223,7 @@ export const updateReminder = mutation({
     reminderId: v.id("reminders"),
     patch: v.object({
       businessId: v.optional(v.id("businesses")),
+      payrollId: v.optional(v.id("payrollRuns")),
       title: v.optional(v.string()),
       enabled: v.optional(v.boolean()),
       frequency: v.optional(v.string()),
@@ -724,19 +725,29 @@ export const updateForCurrentUser = mutation({
     if (!reminder || reminder.userId !== actor._id) throw new Error("Reminder not found.");
     let workspaceOwnerId = reminder.workspaceOwnerId;
     if (reminder.businessId) await requireBusinessAccess(ctx, await ctx.db.get(reminder.businessId), "runPayroll");
+    let nextBusinessId = args.patch.businessId || reminder.businessId;
     if (args.patch.businessId) {
       const nextBusiness = await ctx.db.get(args.patch.businessId);
       const access = await requireBusinessAccess(ctx, nextBusiness, "runPayroll");
       workspaceOwnerId = access.owner._id;
     }
-    const merged = { ...reminder, ...args.patch };
+    const nextPayrollId = args.patch.payrollId || (args.patch.businessId && args.patch.businessId !== reminder.businessId ? undefined : reminder.relatedPayrollId ? args.patch.payrollId : undefined);
+    if (args.patch.payrollId) {
+      const payroll = await ctx.db.get(args.patch.payrollId);
+      if (!payroll || (nextBusinessId && payroll.businessId !== nextBusinessId)) throw new Error("Payroll run does not belong to this client.");
+      if (!nextBusinessId) nextBusinessId = payroll.businessId;
+    }
+    const { payrollId: _payrollId, ...schedulePatch } = args.patch;
+    const merged = { ...reminder, ...schedulePatch };
     validateReminderOptions(merged.frequency, merged.channels || ["in_app"], merged.timezone);
     const nextRunAt = merged.enabled === false
       ? reminder.nextRunAt
       : computeNextRunAt({ ...merged, fireOnceAt: merged.frequency === "once" ? merged.scheduledAt ?? merged.fireOnceAt : undefined }, Date.now());
     if (merged.enabled !== false && !nextRunAt && merged.frequency !== "before_payroll") throw new Error("Choose a future reminder date and time.");
     await ctx.db.patch(reminder._id, {
-      ...args.patch,
+      ...schedulePatch,
+      businessId: nextBusinessId,
+      relatedPayrollId: args.patch.payrollId ? String(args.patch.payrollId) : args.patch.businessId && args.patch.businessId !== reminder.businessId ? undefined : reminder.relatedPayrollId,
       workspaceOwnerId,
       nextRunAt: nextRunAt ?? reminder.nextRunAt,
       updatedAt: Date.now(),
