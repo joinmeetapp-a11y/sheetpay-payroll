@@ -9,11 +9,12 @@ export const getOrCreateConversation = internalMutation({
     businessId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const existing = await ctx.db
+    const conversations = await ctx.db
       .query("caylaConversations")
       .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
       .order("desc")
-      .first();
+      .collect();
+    const existing = conversations.find((conversation) => conversation.businessId === args.businessId);
     if (existing) return existing._id;
     return await ctx.db.insert("caylaConversations", {
       userId: args.userId,
@@ -53,13 +54,14 @@ export const appendMessages = internalMutation({
 });
 
 export const getConversationHistory = internalQuery({
-  args: { userId: v.string() },
+  args: { userId: v.string(), businessId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const conversations = await ctx.db
       .query("caylaConversations")
       .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
       .order("desc")
-      .first();
+      .collect();
+    return conversations.find((conversation) => conversation.businessId === args.businessId) ?? null;
   },
 });
 
