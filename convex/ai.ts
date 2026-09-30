@@ -170,7 +170,7 @@ Rules:
               role: "user",
               content: [
                 { type: "input_text", text: schemaDescription },
-                { type: "input_file", filename: args.fileName || "payroll.pdf", file_data: dataUrl, detail: "high" },
+                { type: "input_file", filename: args.fileName || "payroll.pdf", file_data: dataUrl },
               ],
             },
           ],
