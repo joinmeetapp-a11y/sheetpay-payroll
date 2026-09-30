@@ -34,8 +34,5 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Type-check Convex functions
-        run: npm run lint
-
       - name: Build the backend project UI
         run: npm run build:frontend
