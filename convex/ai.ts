@@ -90,13 +90,16 @@ export const extractPayrollDocument = action({
       };
     }
 
-    if (!args.mimeType.startsWith("image/")) {
+    const isPdf = args.mimeType === "application/pdf" || /\.pdf$/i.test(args.fileName || "");
+    const isImage = args.mimeType.startsWith("image/");
+    if (!isImage && !isPdf) {
       return {
         ok: false,
-        error: "OCR only supports image uploads. Convert PDFs to images first.",
+        error: "Choose a payroll image or PDF for OCR.",
         employees: [],
       };
     }
+    const uploadMimeType = isPdf ? "application/pdf" : args.mimeType;
 
     // Reserve the trial scan atomically before the OpenAI call.
     try {
@@ -118,7 +121,7 @@ export const extractPayrollDocument = action({
       throw err;
     }
 
-    const dataUrl = `data:${args.mimeType};base64,${args.fileBase64}`;
+    const dataUrl = `data:${uploadMimeType};base64,${args.fileBase64}`;
 
     const schemaDescription = `Return ONLY valid JSON matching this schema:
 {
@@ -156,29 +159,46 @@ Rules:
 - Numeric fields: return raw numbers (no currency symbols, no commas).
 - If the document shows a single payslip, return a single-employee array.`;
 
-    const body = {
-      model: VISION_MODEL,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a strict payroll OCR engine for Caribbean payroll documents (PAYE, NIS, Health Surcharge). Only return JSON.",
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: schemaDescription },
-            { type: "image_url", image_url: { url: dataUrl } },
+    const endpoint = isPdf ? `${OPENAI_URL}/responses` : `${OPENAI_URL}/chat/completions`;
+    const body = isPdf
+      ? {
+          model: VISION_MODEL,
+          store: false,
+          input: [
+            { role: "system", content: [{ type: "input_text", text: "You are a strict payroll OCR engine for Caribbean payroll documents. Return only JSON." }] },
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: schemaDescription },
+                { type: "input_file", filename: args.fileName || "payroll.pdf", file_data: dataUrl },
+              ],
+            },
           ],
-        },
-      ],
-      response_format: { type: "json_object" },
-      max_tokens: 4096,
-      temperature: 0,
-    };
+          text: { format: { type: "json_object" } },
+          max_output_tokens: 4096,
+        }
+      : {
+          model: VISION_MODEL,
+          messages: [
+            {
+              role: "system",
+              content: "You are a strict payroll OCR engine for Caribbean payroll documents (PAYE, NIS, Health Surcharge). Only return JSON.",
+            },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: schemaDescription },
+                { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+              ],
+            },
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 4096,
+          temperature: 0,
+        };
 
     try {
-      const res = await fetch(`${OPENAI_URL}/chat/completions`, {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -192,7 +212,9 @@ Rules:
         return { ok: false, error: `OpenAI ${res.status}`, employees: [] };
       }
       const json = (await res.json()) as any;
-      const content = json.choices?.[0]?.message?.content ?? "{}";
+      const content = isPdf
+        ? json.output_text ?? json.output?.flatMap((item: any) => item.content ?? []).find((part: any) => part.type === "output_text")?.text ?? "{}"
+        : json.choices?.[0]?.message?.content ?? "{}";
       let parsed: any = {};
       try {
         parsed = JSON.parse(content);
