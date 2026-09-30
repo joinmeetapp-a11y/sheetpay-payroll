@@ -380,13 +380,13 @@ const SENSITIVE_TOOLS = new Set([
 ]);
 
 // ─── System prompt ────────────────────────────────────────────────────────────
-function buildSystemPrompt(businessName: string, currency: string, currencySymbol: string): string {
-  return `You are Cayla, the AI payroll assistant built into Sheetpay — an AI-powered payroll management platform for Caribbean businesses.
+function buildSystemPrompt(businessName: string, currency: string, currencySymbol: string, countryName: string): string {
+  return `You are Cayla, the AI payroll assistant built into Sheetpay — an AI-powered payroll management platform.
 
 Business context:
 - Business: ${businessName || "this business"}
 - Currency: ${currency} (${currencySymbol})
-- Jurisdiction: Trinidad & Tobago / Caribbean (PAYE, NIS, Health Surcharge apply)
+- Jurisdiction: ${countryName || "the selected business's configured country"}
 - Today: ${new Date().toDateString()}
 
 Your personality:
@@ -447,12 +447,13 @@ export const chat = action({
     const businessId = business ? String(business._id) : undefined;
 
     // Load conversation history
-    const conv = await ctx.runQuery(internal.caylaQueries.getConversationHistory, { userId: identity.subject });
+    const conv = await ctx.runQuery(internal.caylaQueries.getConversationHistory, { userId: identity.subject, businessId });
 
     // Get business info for system prompt
-    let businessName = "your business";
-    let currency = "TTD";
-    let currencySymbol = "$";
+    let businessName = business?.name || "your business";
+    let currency = business?.currency || "TTD";
+    let currencySymbol = business?.currencySymbol || "$";
+    let countryName = business?.countryName || business?.countryCode || "the selected business's configured country";
 
     // Build history from stored conversation
     const historyMessages: any[] = conv
@@ -474,7 +475,7 @@ export const chat = action({
       : args.message;
 
     const messages: any[] = [
-      { role: "system", content: buildSystemPrompt(businessName, currency, currencySymbol) },
+      { role: "system", content: buildSystemPrompt(businessName, currency, currencySymbol, countryName) },
       ...historyMessages,
       { role: "user", content: userMessageContent },
     ];
