@@ -6,6 +6,7 @@ import { createWorkspaceNotification } from "./notifications";
 
 const internal = _internal as any;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const safeFilePart = (value: string) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "Sheetpay";
 
 export const generatePayslipUploadUrl = mutation({
   args: { businessId: v.id("businesses"), employeeId: v.id("employees") },
@@ -15,7 +16,7 @@ export const generatePayslipUploadUrl = mutation({
     const employee = await ctx.db.get(args.employeeId);
     if (!employee || employee.businessId !== args.businessId) throw new Error("Employee is outside the selected client.");
     const uploadUrl = await ctx.storage.generateUploadUrl();
-    return { uploadUrl, workspaceOwnerId: owner._id };
+    return { uploadUrl };
   },
 });
 
@@ -103,7 +104,7 @@ export const createBulkEmailJob = mutation({
         jobId, workspaceOwnerId: owner._id, businessId: args.businessId,
         payrollRunId: args.payrollRunId, employeeId: employee._id, employeeName: employee.name,
         recipient: employee.email.trim().toLowerCase(), storageId: upload.storageId,
-        filename: "Sheetpay-Payslip-" + String(employee.employeeId || employee._id) + ".pdf",
+        filename: safeFilePart(business.name) + "_" + safeFilePart(employee.name) + "_" + safeFilePart(run.periodLabel || (run.month + " " + run.year)) + ".pdf",
         status: "queued", attemptCount: 0,
         idempotencyKey: "payslip:" + String(args.payrollRunId) + ":" + String(employee._id) + ":" + args.idempotencyKey,
         createdAt: now,
@@ -157,7 +158,7 @@ export const retryFailed = mutation({
         jobId: retryJobId, workspaceOwnerId: owner._id, businessId: prior.businessId,
         payrollRunId: prior.payrollRunId, employeeId: item.employeeId, employeeName: item.employeeName,
         recipient: item.recipient, storageId: item.storageId, filename: item.filename, status: "queued",
-        attemptCount: item.attemptCount, idempotencyKey: item.idempotencyKey + ":retry:" + args.idempotencyKey, createdAt: now,
+        attemptCount: item.attemptCount, idempotencyKey: item.idempotencyKey, createdAt: now,
       });
       await ctx.db.patch(item._id, { status: "retry_queued" });
     }
