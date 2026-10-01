@@ -12,13 +12,17 @@ export default defineSchema({
     onboardingStep: v.optional(v.number()),
     // ─── Billing / entitlement (Paddle) ──────────────────────────────────────
     plan: v.optional(
-      v.union(v.literal("free"), v.literal("pro"), v.literal("accountant"))
+      v.union(v.literal("free"), v.literal("pro"), v.literal("accountant"), v.literal("accountant_monthly"), v.literal("accountant_yearly"))
     ),
     planStatus: v.optional(v.string()), // 'active' | 'pending' | 'canceled' | 'past_due'
     paddleCustomerId: v.optional(v.string()),
     paddleSubscriptionId: v.optional(v.string()),
     paddleTransactionId: v.optional(v.string()),
     planUpdatedAt: v.optional(v.number()),
+    paddlePriceId: v.optional(v.string()),
+    billingPeriodStart: v.optional(v.number()),
+    billingPeriodEnd: v.optional(v.number()),
+    billingEventAt: v.optional(v.number()),
   })
     .index("by_firebase_uid", ["firebaseUid"])
     .index("by_paddle_customer", ["paddleCustomerId"]),
@@ -480,6 +484,8 @@ export default defineSchema({
 
   // Paddle webhook idempotency + audit. One row per delivered event_id.
   // Existence of a row = event already processed; do not re-apply.
+  accountantCheckouts: defineTable({ userId: v.id("users"), plan: v.union(v.literal("accountant_monthly"), v.literal("accountant_yearly")), status: v.union(v.literal("creating"), v.literal("ready"), v.literal("failed")), transactionId: v.optional(v.string()), expiresAt: v.number(), updatedAt: v.number() }).index("by_user_plan", ["userId", "plan"]),
+
   paddleEvents: defineTable({
     eventId: v.string(),
     eventType: v.string(),
@@ -642,6 +648,8 @@ export default defineSchema({
     payrollRunsUsed: v.number(),
     ocrScansUsed: v.number(),
     caylaActionsUsed: v.number(),
+    emailsReserved: v.optional(v.number()),
+    payslipEmailsUsed: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_user", ["userId"])
@@ -653,6 +661,7 @@ export default defineSchema({
   usageIncrements: defineTable({
     userId: v.id("users"),
     period: v.string(),
+    amount: v.optional(v.number()),
     kind: v.string(), // 'payslip' | 'payroll' | 'ocr' | 'cayla'
     opId: v.string(),
     createdAt: v.number(),

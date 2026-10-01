@@ -37,6 +37,9 @@ jobs:
       - name: Test private bulk payslip email delivery
         run: npm run test:bulk
 
+      - name: Verify Accountant pricing and usage enforcement
+        run: npm run test:pricing && npx tsc --noEmit
+
       - name: Build the backend project UI
         run: npm run build:frontend
 

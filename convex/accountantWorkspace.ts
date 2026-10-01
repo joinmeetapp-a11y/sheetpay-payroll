@@ -1,3 +1,4 @@
+import { assertCapacity } from "./usage";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal as _internal } from "./_generated/api";
@@ -102,6 +103,9 @@ export const createInviteRecord = internalMutation({
     if (pending.some((invite) => ["pending", "failed"].includes(invite.status) && invite.expiresAt > Date.now())) {
       throw new Error("A pending invitation already exists for this email.");
     }
+    const owner = await ctx.db.get(args.workspaceOwnerId);
+    if (!owner) throw new Error("Workspace not found");
+    await assertCapacity(ctx, owner, "team", 1);
     const now = Date.now();
     const id = await ctx.db.insert("accountantInvites", {
       ...args, email, status: "pending", createdAt: now, expiresAt: now + INVITE_TTL_MS,
@@ -149,6 +153,7 @@ export const acceptInvitation = mutation({
     if (actor._id === owner._id) throw new Error("Workspace owners already have access.");
     const existing = await ctx.db.query("accountantMemberships")
       .withIndex("by_workspace_member", (q) => q.eq("workspaceOwnerId", owner._id).eq("memberUserId", actor._id)).first();
+    await assertCapacity(ctx, owner, "team", 0);
     const now = Date.now();
     if (existing) {
       await ctx.db.patch(existing._id, {
@@ -234,3 +239,4 @@ export const revokeInvitation = mutation({
     return { ok: true };
   },
 });
+

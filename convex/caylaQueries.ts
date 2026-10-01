@@ -1,6 +1,7 @@
+import { validatePayrollSnapshot } from "./payrollRuns";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { assertWithinLimit, incrementUsageIdempotent } from "./usage";
+import { assertWithinLimit, incrementUsageIdempotent, historyAccessible, reserveUsage } from "./usage";
 
 // ─── Conversation store (called from cayla.ts actions) ────────────────────────
 export const getOrCreateConversation = internalMutation({
@@ -153,7 +154,8 @@ export const getPayrollRunsForUser = internalQuery({
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(100);
-    return args.businessId ? runs.filter((run) => String(run.businessId) === args.businessId).slice(0, 24) : runs.slice(0, 24);
+    const visible = runs.filter(run => historyAccessible(user, run.createdAt));
+    return args.businessId ? visible.filter((run) => String(run.businessId) === args.businessId).slice(0, 24) : visible.slice(0, 24);
   },
 });
 
@@ -217,10 +219,14 @@ export const savePayrollRun = internalMutation({
     const existing = await ctx.db
       .query("payrollRuns")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .filter((q) => q.and(q.eq(q.field("month"), args.month), q.eq(q.field("year"), args.year)))
+      .filter((q) => q.and(q.eq(q.field("month"), args.month), q.eq(q.field("year"), args.year), q.eq(q.field("businessId"), business._id)))
       .first();
 
+    await validatePayrollSnapshot(ctx, business._id, args.employeesSnapshot);
     if (existing) {
+      const oldIds = new Set(existing.employeesSnapshot.map((row: any) => row._id));
+      const added = args.employeesSnapshot.filter((row: any) => !oldIds.has(row._id));
+      for (const employee of added) await reserveUsage(ctx, user._id, "payslip", `cayla-added:${existing._id}:${employee._id}`);
       // Updating an existing run for the same period doesn't consume another
       // payroll credit — it's the same logical operation.
       await ctx.db.patch(existing._id, {
@@ -242,6 +248,7 @@ export const savePayrollRun = internalMutation({
 
     // New run: enforce free-plan cap first, then insert + count.
     await assertWithinLimit(ctx, user, "payroll");
+    await assertWithinLimit(ctx, user, "payslip", args.employeesSnapshot.length);
 
     const runId = await ctx.db.insert("payrollRuns", {
       userId: user._id,
@@ -261,6 +268,8 @@ export const savePayrollRun = internalMutation({
       updatedAt: now,
     });
     await incrementUsageIdempotent(ctx, user._id, "payroll", `payroll:${runId}`);
+    await incrementUsageIdempotent(ctx, user._id, "payslip", `payslips:${runId}`, args.employeesSnapshot.length);
     return runId;
   },
 });
+

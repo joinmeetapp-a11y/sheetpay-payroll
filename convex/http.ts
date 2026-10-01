@@ -25,7 +25,7 @@ async function verifyPaddleSignature(
 
   const ts = parts["ts"];
   const h1 = parts["h1"];
-  if (!ts || !h1) return false;
+  if (!ts || !h1 || !Number.isFinite(Number(ts)) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
 
   const key = await crypto.subtle.importKey(
     "raw",
@@ -189,7 +189,8 @@ http.route({
     const secret = process.env.PADDLE_WEBHOOK_SECRET;
     const rawBody = await request.text();
 
-    if (secret) {
+    if (!secret) return new Response("Paddle webhook signing secret is not configured", { status: 503 });
+    {
       const ok = await verifyPaddleSignature(
         rawBody,
         request.headers.get("Paddle-Signature"),
@@ -265,15 +266,13 @@ http.route({
       data?.items?.[0]?.price?.id ??
       data?.details?.line_items?.[0]?.price?.id ??
       data?.items?.[0]?.price_id;
-    const plan =
-      (customData?.plan as "pro" | "accountant" | undefined) ??
-      planForPriceId(priceId) ??
-      "pro";
+    const plan = planForPriceId(priceId);
+    if (!plan) { await ctx.runMutation(internal.subscriptions.finishPaddleEvent, { docId: guard.docId, status: "ignored" }); return new Response("Unknown price", { status: 200 }); }
 
     // Map Paddle event/status → our planStatus.
     let planStatus = "active";
-    if (type === "subscription.canceled") planStatus = "canceled";
-    else if (type === "subscription.paused") planStatus = "paused";
+    if (type === "subscription.canceled" || data?.status === "canceled") planStatus = "canceled";
+    else if (type === "subscription.paused" || data?.status === "paused") planStatus = "paused";
     else if (type === "subscription.past_due" || data?.status === "past_due")
       planStatus = "past_due";
     else if (type === "subscription.resumed" || type === "subscription.activated")
@@ -281,7 +280,7 @@ http.route({
     else if (data?.status === "trialing") planStatus = "active";
 
     try {
-      await ctx.runMutation(internal.subscriptions.applyPaddleEvent, {
+      const result = await ctx.runMutation(internal.subscriptions.applyPaddleEvent, {
         firebaseUid,
         paddleCustomerId,
         plan,
@@ -289,7 +288,11 @@ http.route({
         paddleSubscriptionId,
         paddleTransactionId,
         priceId,
+        ...(Number.isFinite(Date.parse(event.occurred_at)) ? { occurredAt: Date.parse(event.occurred_at) } : {}),
+        ...(data.current_billing_period?.starts_at ? { billingPeriodStart: Date.parse(data.current_billing_period.starts_at) } : {}),
+        ...(data.current_billing_period?.ends_at ? { billingPeriodEnd: Date.parse(data.current_billing_period.ends_at) } : {}),
       });
+      if (!result.ok) throw new Error("Paddle account could not be matched; retry after account setup.");
       await ctx.runMutation(internal.subscriptions.finishPaddleEvent, {
         docId: guard.docId,
         status: "processed",

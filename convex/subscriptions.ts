@@ -1,21 +1,18 @@
 import { mutation, query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { ACCOUNTANT_PLANS, effectiveAccountantPlan } from "../shared/accountantPlans";
 import { isAdminEmail } from "./admin";
 
 /**
  * Paddle price → internal plan mapping.
  * Keep in sync with PADDLE_PRICE_IDS in src/App.tsx and convex/paddle.ts.
  */
-export const PRICE_TO_PLAN: Record<string, "pro" | "accountant"> = {
-  pri_01m00gw728zjvw770d1k94fh6y: "pro",
-  pri_01m0r19pgkx604y5q3gp1trhqh: "accountant",
-  pri_01m3mjv9jcjphn3545x04c5gyk: "accountant",
-};
-
-export function planForPriceId(priceId?: string | null): "pro" | "accountant" | null {
+export function planForPriceId(priceId?: string | null): "pro" | "accountant_monthly" | "accountant_yearly" | null {
   if (!priceId) return null;
-  return PRICE_TO_PLAN[priceId] ?? null;
+  if (priceId === (process.env.PADDLE_ACCOUNTANT_MONTHLY_PRICE || ACCOUNTANT_PLANS.accountant_monthly.paddlePriceId)) return "accountant_monthly";
+  if (priceId === (process.env.PADDLE_ACCOUNTANT_YEARLY_PRICE || ACCOUNTANT_PLANS.accountant_yearly.paddlePriceId)) return "accountant_yearly";
+  return priceId === "pri_01m00gw728zjvw770d1k94fh6y" ? "pro" : null;
 }
 
 /**
@@ -29,6 +26,8 @@ export const getEntitlement = query({
     if (!args.firebaseUid) {
       return { plan: "free" as const, planStatus: "none", isPro: false, isAccountant: false };
     }
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || identity.subject !== args.firebaseUid) throw new Error("Unauthenticated");
     const user = await ctx.db
       .query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid!))
@@ -47,14 +46,14 @@ export const getEntitlement = query({
       };
     }
 
-    const plan = (user?.plan ?? "free") as "free" | "pro" | "accountant";
+    const plan = user?.plan === "pro" ? "pro" : effectiveAccountantPlan(user);
     const planStatus = user?.planStatus ?? "none";
     const isActive = planStatus === "active";
     return {
       plan,
       planStatus,
-      isPro: isActive && (plan === "pro" || plan === "accountant"),
-      isAccountant: isActive && plan === "accountant",
+      isPro: isActive && (plan === "pro" || plan.startsWith("accountant")),
+      isAccountant: isActive && plan.startsWith("accountant"),
       isAdmin: false,
       paddleSubscriptionId: user?.paddleSubscriptionId,
       planUpdatedAt: user?.planUpdatedAt,
@@ -84,8 +83,8 @@ export const beginPaddleEvent = internalMutation({
       .first();
     if (existing) {
       // Allow a Paddle retry to reprocess if the previous attempt errored.
-      if (existing.status === "failed") {
-        await ctx.db.patch(existing._id, { status: "pending", errorMessage: undefined });
+      if (existing.status === "failed" || (existing.status === "pending" && existing.receivedAt < Date.now() - 300000)) {
+        await ctx.db.patch(existing._id, { status: "pending", receivedAt: Date.now(), errorMessage: undefined });
         return { alreadyProcessed: false as const, docId: existing._id };
       }
       return { alreadyProcessed: true as const, docId: existing._id };
@@ -132,7 +131,10 @@ export const applyPaddleEvent = internalMutation({
   args: {
     firebaseUid: v.optional(v.string()),
     paddleCustomerId: v.optional(v.string()),
-    plan: v.union(v.literal("pro"), v.literal("accountant")),
+    plan: v.union(v.literal("pro"), v.literal("accountant"), v.literal("accountant_monthly"), v.literal("accountant_yearly")),
+    occurredAt: v.optional(v.number()),
+    billingPeriodStart: v.optional(v.number()),
+    billingPeriodEnd: v.optional(v.number()),
     planStatus: v.string(),
     paddleSubscriptionId: v.optional(v.string()),
     paddleTransactionId: v.optional(v.string()),
@@ -157,6 +159,8 @@ export const applyPaddleEvent = internalMutation({
 
     if (!user) return { ok: false, reason: "user_not_found" };
 
+    if (args.occurredAt && user.billingEventAt && args.occurredAt < user.billingEventAt) return { ok: true, ignored: "older_event" };
+    if (user.paddleSubscriptionId && args.paddleSubscriptionId && args.paddleSubscriptionId !== user.paddleSubscriptionId && user.planStatus === "active") return { ok: true, ignored: "different_active_subscription" };
     const previousPlan = user.plan ?? "free";
     const previousStatus = user.planStatus ?? "none";
     await ctx.db.patch(user._id, {
@@ -166,13 +170,17 @@ export const applyPaddleEvent = internalMutation({
       paddleSubscriptionId: args.paddleSubscriptionId ?? user.paddleSubscriptionId,
       paddleTransactionId: args.paddleTransactionId ?? user.paddleTransactionId,
       planUpdatedAt: Date.now(),
+      paddlePriceId: args.priceId ?? user.paddlePriceId,
+      billingPeriodStart: args.billingPeriodStart ?? user.billingPeriodStart,
+      billingPeriodEnd: args.billingPeriodEnd ?? user.billingPeriodEnd,
+      billingEventAt: args.occurredAt ?? user.billingEventAt,
     });
 
     // Fire the appropriate subscription email based on the state transition.
     // internal.emails.notifySubscription is idempotent via eventId (the
     // transaction/subscription id), so replaying webhooks won't double-send.
     const planName =
-      args.plan === "accountant" ? "Sheetpay Accountant" : "Sheetpay Pro";
+      args.plan.startsWith("accountant") ? "Sheetpay Accountant" : "Sheetpay Pro";
     let kind: string | null = null;
     if (args.planStatus === "canceled") kind = "subscriptionCancelled";
     else if (previousPlan === "free") kind = "subscriptionStarted";
@@ -187,11 +195,11 @@ export const applyPaddleEvent = internalMutation({
         kind,
         data: {
           planName,
-          amount: args.plan === "accountant"
-            ? (args.priceId === "pri_01m3mjv9jcjphn3545x04c5gyk" ? "1970.00" : "197.00")
+          amount: args.plan.startsWith("accountant")
+            ? ACCOUNTANT_PLANS[planForPriceId(args.priceId) === "accountant_yearly" ? "accountant_yearly" : "accountant_monthly"].price.toFixed(2)
             : "29.00",
           currency: "USD",
-          billingPeriod: args.priceId === "pri_01m3mjv9jcjphn3545x04c5gyk" ? "yearly" : "monthly",
+          billingPeriod: planForPriceId(args.priceId) === "accountant_yearly" ? "yearly" : "monthly",
           displayName: user.displayName,
         },
         userId: user._id,
@@ -204,3 +212,4 @@ export const applyPaddleEvent = internalMutation({
     return { ok: true };
   },
 });
+

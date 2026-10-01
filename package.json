@@ -14,7 +14,8 @@
     "convex:deploy": "npx convex deploy",
     "firebase:deploy": "firebase deploy --only hosting",
     "deploy": "npm run build:frontend && firebase deploy --only hosting",
-    "test:bulk": "vitest run tests/bulkPayslipEmail.test.ts"
+    "test:bulk": "vitest run tests/bulkPayslipEmail.test.ts",
+    "test:pricing": "vitest run tests/accountantPricing.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -31,6 +32,7 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "openai": "^7.5.0",
+    "pdf-lib": "^1.17.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.10.1",
@@ -43,12 +45,12 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "autoprefixer": "^10.4.21",
+    "convex-test": "^0.0.60",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "convex-test": "^0.0.60",
     "vitest": "^5.0.3"
   }
 }

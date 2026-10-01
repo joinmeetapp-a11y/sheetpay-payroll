@@ -1,5 +1,6 @@
 "use node";
 import { action, internalAction } from "./_generated/server";
+import { internal as _internal } from "./_generated/api";
 import { v } from "convex/values";
 import { sendEmail as sendEmailImpl } from "./lib/email";
 
@@ -40,13 +41,14 @@ export const sendEmail = action({
     clientId: v.optional(v.string()),
     idempotencyKey: v.optional(v.string()),
   },
-  handler: async (ctx, args) =>
-    sendEmailImpl(ctx, {
-      to: args.to,
-      emailType: args.emailType,
-      data: args.data ?? {},
-      userId: args.userId,
-      businessId: args.businessId,
-      idempotencyKey: args.idempotencyKey,
-    }),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || (args.userId && args.userId !== identity.subject)) throw new Error("Unauthorized");
+    if (args.emailType === "employeePayslip") {
+      await ctx.runMutation((_internal as any).usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: args.idempotencyKey || crypto.randomUUID() });
+    } else if (args.emailType !== "welcome" || args.to.trim().toLowerCase() !== String(identity.email || "").toLowerCase()) {
+      throw new Error("Use the authorized Sheetpay workflow for this email.");
+    }
+    return sendEmailImpl(ctx, { ...args, userId: identity.subject, data: args.data ?? {} });
+  },
 });

@@ -1,301 +1,135 @@
-import { query, mutation, internalMutation, QueryCtx, MutationCtx } from "./_generated/server";
-import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
-import { isAdminEmail } from "./admin";
-
-/**
- * Accountant onboarding uses a one-time trial allowance. Other product usage
- * remains monthly. Paid plans are unlimited server-side.
- */
-export const FREE_LIMITS = {
-  payslip: 10,
-  payroll: 3,
-  ocr: 3,
-  // Cayla actions on Free are limited — pick a conservative number so the
-  // free trial is genuinely useful without letting a single free account
-  // consume the OpenAI budget for the month.
-  cayla: 3,
-} as const;
-
-export type UsageKind = keyof typeof FREE_LIMITS;
-
-const KIND_TO_FIELD: Record<UsageKind, "payslipsUsed" | "payrollRunsUsed" | "ocrScansUsed" | "caylaActionsUsed"> = {
-  payslip: "payslipsUsed",
-  payroll: "payrollRunsUsed",
-  ocr: "ocrScansUsed",
-  cayla: "caylaActionsUsed",
-};
-
-function currentPeriod(now: number): string {
-  const d = new Date(now);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+import { query, mutation, internalMutation, QueryCtx, MutationCtx } from './_generated/server';
+import { ConvexError, v } from 'convex/values';
+import { Id } from './_generated/dataModel';
+import { isAdminEmail } from './admin';
+import { ACCOUNTANT_PLANS, effectiveAccountantPlan, usagePeriod, limitMessage, type AccountantLimitKind } from '../shared/accountantPlans';
+export { ACCOUNTANT_PLANS } from '../shared/accountantPlans';
+export const FREE_LIMITS = ACCOUNTANT_PLANS.free.limits;
+export type UsageKind = 'payslip' | 'payroll' | 'ocr' | 'cayla' | 'email';
+const fields = { payslip: 'payslipsUsed', payroll: 'payrollRunsUsed', ocr: 'ocrScansUsed', cayla: 'caylaActionsUsed', email: 'emailsReserved' } as const;
+const kinds = v.union(v.literal('payslip'), v.literal('payroll'), v.literal('ocr'), v.literal('cayla'), v.literal('email'));
+export function accountantPlanFor(user: any) {
+  return isAdminEmail(user?.email || '') ? 'accountant_monthly' as const : effectiveAccountantPlan(user);
 }
-
-async function periodForUser(ctx: QueryCtx | MutationCtx, userId: Id<"users">, now = Date.now()) {
-  const user = await ctx.db.get(userId);
-  return user?.accountType === "accountant" ? "accountant-trial" : currentPeriod(now);
+export function historyAccessible(user: any, createdAt: number) {
+  const days = ACCOUNTANT_PLANS[accountantPlanFor(user)].historyDays;
+  return days === null || createdAt >= Date.now() - days * 86400000;
 }
-
+export function throwLimit(user: any, kind: AccountantLimitKind, used: number, limit: number): never {
+  throw new ConvexError({ code: 'PLAN_LIMIT_REACHED', kind, used, limit, message: limitMessage(accountantPlanFor(user), kind, used, limit) });
+}
 async function resolveCallerUser(ctx: QueryCtx | MutationCtx, requesterUid?: string) {
-  if (!requesterUid) return null;
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity || identity.subject !== requesterUid) return null;
-  return await ctx.db
-    .query("users")
-    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
-    .first();
+  if (!identity || (requesterUid && identity.subject !== requesterUid)) return null;
+  return ctx.db.query('users').withIndex('by_firebase_uid', q => q.eq('firebaseUid', identity.subject)).first();
 }
-
-async function planFor(user: { plan?: string; planStatus?: string; email: string }): Promise<"free" | "pro" | "accountant"> {
-  // Admins get unlimited so internal testing doesn't burn free-plan quota.
-  if (isAdminEmail(user.email)) return "accountant";
-  const plan = (user.plan ?? "free") as string;
-  if (plan === "free") return "free";
-  const status = user.planStatus ?? "none";
-  const active = status === "active";
-  if (!active) return "free";
-  return (plan as "pro" | "accountant") ?? "free";
+async function counter(ctx: QueryCtx | MutationCtx, userId: Id<'users'>) {
+  return ctx.db.query('usageCounters').withIndex('by_user_period', q => q.eq('userId', userId).eq('period', usagePeriod())).first();
 }
-
-async function readOrCreateCounter(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  period: string
-) {
-  const existing = await ctx.db
-    .query("usageCounters")
-    .withIndex("by_user_period", (q) => q.eq("userId", userId).eq("period", period))
-    .first();
-  if (existing) return existing;
-  const id = await ctx.db.insert("usageCounters", {
-    userId,
-    period,
-    payslipsUsed: 0,
-    payrollRunsUsed: 0,
-    ocrScansUsed: 0,
-    caylaActionsUsed: 0,
-    updatedAt: Date.now(),
-  });
-  const row = await ctx.db.get(id);
-  return row!;
+async function writableCounter(ctx: MutationCtx, userId: Id<'users'>) {
+  const row = await counter(ctx, userId);
+  if (row) return row;
+  const id = await ctx.db.insert('usageCounters', { userId, period: usagePeriod(), payslipsUsed: 0, payrollRunsUsed: 0, ocrScansUsed: 0, caylaActionsUsed: 0, emailsReserved: 0, payslipEmailsUsed: 0, updatedAt: Date.now() });
+  return (await ctx.db.get(id))!;
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Public read — the Settings page reads this to render live usage
-// ═════════════════════════════════════════════════════════════════════════════
-
-export const getMonthlyUsage = query({
-  args: { requesterUid: v.optional(v.string()) },
-  handler: async (ctx, args) => {
-    const user = await resolveCallerUser(ctx, args.requesterUid);
-    if (!user) return null;
-    const period = user.accountType === "accountant" ? "accountant-trial" : currentPeriod(Date.now());
-    const row = await ctx.db
-      .query("usageCounters")
-      .withIndex("by_user_period", (q) => q.eq("userId", user._id).eq("period", period))
-      .first();
-    const plan = await planFor(user);
-
-    // Cayla usage — count logs in the current UTC month. Uses the existing
-    // caylaUsageLogs table so every historical OpenAI call is already reflected.
-    const monthStart = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1);
-    const caylaFromLogs = (
-      await ctx.db
-        .query("caylaUsageLogs")
-        .withIndex("by_user_id", (q) => q.eq("userId", user._id))
-        .collect()
-    ).filter((l) => user.accountType === "accountant" || l.createdAt >= monthStart).length;
-
-    return {
-      plan,
-      period,
-      payslipsUsed: row?.payslipsUsed ?? 0,
-      payrollRunsUsed: row?.payrollRunsUsed ?? 0,
-      ocrScansUsed: row?.ocrScansUsed ?? 0,
-      caylaActionsUsed: Math.max(row?.caylaActionsUsed ?? 0, caylaFromLogs),
-      limits: plan === "free"
-        ? { payslip: user.accountType === "accountant" ? null : FREE_LIMITS.payslip, payroll: FREE_LIMITS.payroll, ocr: FREE_LIMITS.ocr, cayla: FREE_LIMITS.cayla }
-        : { payslip: null, payroll: null, ocr: null, cayla: null },
-    };
-  },
-});
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Enforcement + increment
-// ═════════════════════════════════════════════════════════════════════════════
-
-/**
- * Enforce the caller's plan limit for `kind`. Throws when the operation would
- * exceed the free-plan allowance. Always call BEFORE performing the operation.
- */
-export async function assertWithinLimit(
-  ctx: MutationCtx,
-  user: { _id: Id<"users">; email: string; plan?: string; planStatus?: string },
-  kind: UsageKind
-): Promise<void> {
-  const plan = await planFor(user);
-  if (plan !== "free" || (user as any).accountType === "accountant" && kind === "payslip") return;
-  const period = (user as any).accountType === "accountant" ? "accountant-trial" : currentPeriod(Date.now());
-  const row = await readOrCreateCounter(ctx, user._id, period);
-  const field = KIND_TO_FIELD[kind];
-  const used = row[field] ?? 0;
-  const limit = FREE_LIMITS[kind];
-  if (used >= limit) {
-    throw new Error(`FREE_LIMIT_REACHED:${kind}:${used}/${limit}`);
+export async function assertWithinLimit(ctx: MutationCtx, user: any, kind: UsageKind, amount = 1) {
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new ConvexError('Invalid usage amount.');
+  // Keep existing non-accountant Pro users entitled; accountant plans have finite allowances.
+  if (user.accountType !== 'accountant' && user.plan === 'pro' && user.planStatus === 'active') return;
+  const limit = ACCOUNTANT_PLANS[accountantPlanFor(user)].limits[kind];
+  const row = await counter(ctx, user._id);
+  const used = row?.[fields[kind]] || 0;
+  if (limit !== null && used + amount > limit) throwLimit(user, kind, used, limit);
+}
+async function increment(ctx: MutationCtx, userId: Id<'users'>, kind: UsageKind, opId: string, amount = 1, enforce = false) {
+  if (!Number.isSafeInteger(amount) || amount < 0 || amount > 10000 || !opId || opId.length > 300) throw new ConvexError('Invalid usage request.');
+  const scopedOp = `${userId}:${kind}:${kind === "email" ? usagePeriod() + ":" : ""}${opId}`;
+  const existing = await ctx.db.query('usageIncrements').withIndex('by_op', q => q.eq('opId', scopedOp)).first();
+  const row = await writableCounter(ctx, userId);
+  if (existing) return { counted: false, used: row[fields[kind]] || 0 };
+  const user = await ctx.db.get(userId);
+  if (!user) throw new ConvexError('Account not found.');
+  if (enforce) await assertWithinLimit(ctx, user, kind, amount);
+  await ctx.db.insert('usageIncrements', { userId, period: usagePeriod(), kind, opId: scopedOp, amount, createdAt: Date.now() });
+  const used = (row[fields[kind]] || 0) + amount;
+  await ctx.db.patch(row._id, { [fields[kind]]: used, updatedAt: Date.now() });
+  return { counted: true, used };
+}
+export const incrementUsageIdempotent = (ctx: MutationCtx, userId: Id<'users'>, kind: UsageKind, opId: string, amount = 1) => increment(ctx, userId, kind, opId, amount);
+export const reserveUsage = (ctx: MutationCtx, userId: Id<'users'>, kind: UsageKind, opId: string, amount = 1) => increment(ctx, userId, kind, opId, amount, true);
+export async function assertCapacity(ctx: MutationCtx, user: any, kind: 'clients' | 'employees' | 'team', amount: number) {
+  let used = 0;
+  if (kind === 'clients') used = (await ctx.db.query('businesses').withIndex('by_user', q => q.eq('userId', user._id)).collect()).length;
+  if (kind === 'employees') used = (await ctx.db.query('employees').withIndex('by_user', q => q.eq('userId', user._id)).collect()).length;
+  if (kind === 'team') {
+    const members = await ctx.db.query('accountantMemberships').withIndex('by_workspace', q => q.eq('workspaceOwnerId', user._id)).collect();
+    const invites = await ctx.db.query('accountantInvites').withIndex('by_workspace', q => q.eq('workspaceOwnerId', user._id)).collect();
+    const emails = new Set(members.filter(m => m.status === 'active').map(m => m.email.toLowerCase()));
+    for (const invite of invites) if (['pending', 'failed'].includes(invite.status) && invite.expiresAt > Date.now()) emails.add(invite.email.toLowerCase());
+    used = 1 + emails.size;
   }
+  const limit = ACCOUNTANT_PLANS[accountantPlanFor(user)].limits[kind];
+  if (used + amount > limit) throwLimit(user, kind, used, limit);
 }
-
-/**
- * Increment usage idempotently. `opId` must be stable across retries for the
- * same logical operation (e.g. `payroll:${runId}`, `payslip:${runId}:${empId}`,
- * `ocr:${uploadHash}`). Duplicate opIds are silently ignored.
- */
-export async function incrementUsageIdempotent(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  kind: UsageKind,
-  opId: string
-): Promise<{ counted: boolean; used: number }> {
-  const existing = await ctx.db
-    .query("usageIncrements")
-    .withIndex("by_op", (q) => q.eq("opId", opId))
-    .first();
-  const period = await periodForUser(ctx, userId);
-  const row = await readOrCreateCounter(ctx, userId, period);
-  const field = KIND_TO_FIELD[kind];
-  if (existing) return { counted: false, used: row[field] };
-
-  await ctx.db.insert("usageIncrements", {
-    userId,
-    period,
-    kind,
-    opId,
-    createdAt: Date.now(),
-  });
-  const next = (row[field] ?? 0) + 1;
-  await ctx.db.patch(row._id, { [field]: next, updatedAt: Date.now() });
-  return { counted: true, used: next };
+export const getMonthlyUsage = query({ args: { requesterUid: v.optional(v.string()), businessId: v.optional(v.id('businesses')) }, handler: async (ctx, args) => {
+  const actor = await resolveCallerUser(ctx, args.requesterUid);
+  if (!actor) return null;
+  let user = actor;
+  if (args.businessId) {
+    const { requireBusinessAccess } = await import('./lib/accountantAccess');
+    user = (await requireBusinessAccess(ctx, await ctx.db.get(args.businessId), 'read')).owner;
+  }
+  const row = await counter(ctx, user._id);
+  const [clients, employees, members] = await Promise.all([
+    ctx.db.query('businesses').withIndex('by_user', q => q.eq('userId', user._id)).collect(),
+    ctx.db.query('employees').withIndex('by_user', q => q.eq('userId', user._id)).collect(),
+    ctx.db.query('accountantMemberships').withIndex('by_workspace', q => q.eq('workspaceOwnerId', user._id)).collect(),
+  ]);
+  const plan = accountantPlanFor(user);
+  return { plan, planStatus: user.planStatus || 'none', period: usagePeriod(), resetsAt: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1), billingPeriodStart: user.billingPeriodStart, billingPeriodEnd: user.billingPeriodEnd,
+    clientCount: clients.length, employeeCount: employees.length, teamMemberCount: 1 + members.filter(m => m.status === 'active').length,
+    payslipsUsed: row?.payslipsUsed || 0, payrollRunsUsed: row?.payrollRunsUsed || 0, ocrScansUsed: row?.ocrScansUsed || 0, caylaActionsUsed: row?.caylaActionsUsed || 0, emailsReserved: row?.emailsReserved || 0, payslipEmailsUsed: row?.payslipEmailsUsed || 0, limits: ACCOUNTANT_PLANS[plan].limits };
+} });
+async function byUid(ctx: MutationCtx, firebaseUid: string) {
+  const user = await ctx.db.query('users').withIndex('by_firebase_uid', q => q.eq('firebaseUid', firebaseUid)).first();
+  if (!user) throw new ConvexError('Unauthorized');
+  return user;
 }
-
-/**
- * Firebase-UID variants for callers that only hold the Firebase uid string
- * (Cayla tools, actions). They resolve to the Convex user row before
- * enforcing / incrementing.
- */
-export async function assertWithinLimitByUid(
-  ctx: MutationCtx,
-  firebaseUid: string,
-  kind: UsageKind
-): Promise<{ userId: Id<"users"> }> {
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", firebaseUid))
-    .first();
-  if (!user) throw new Error("Unauthorized");
-  await assertWithinLimit(ctx, user, kind);
-  return { userId: user._id };
-}
-
-export async function incrementByUidIdempotent(
-  ctx: MutationCtx,
-  firebaseUid: string,
-  kind: UsageKind,
-  opId: string
-): Promise<{ counted: boolean; used: number }> {
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", firebaseUid))
-    .first();
-  if (!user) throw new Error("Unauthorized");
-  return await incrementUsageIdempotent(ctx, user._id, kind, opId);
-}
-
-/** Internal mutation form of the above for actions (which can't share ctx). */
-export const internalIncrementByUid = internalMutation({
-  args: {
-    firebaseUid: v.string(),
-    kind: v.union(v.literal("payslip"), v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
-    opId: v.string(),
-  },
-  handler: async (ctx, args) => incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId),
-});
-
-export const internalReserveByUid = internalMutation({
-  args: {
-    firebaseUid: v.string(),
-    kind: v.union(v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
-    opId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await assertWithinLimitByUid(ctx, args.firebaseUid, args.kind);
-    return incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId);
-  },
-});
-
-export const internalAssertLimitByUid = internalMutation({
-  args: {
-    firebaseUid: v.string(),
-    kind: v.union(v.literal("payslip"), v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
-  },
-  handler: async (ctx, args) => {
-    await assertWithinLimitByUid(ctx, args.firebaseUid, args.kind);
-    return { ok: true };
-  },
-});
-
-/**
- * Server-side increment exposed to internal callers (e.g. OCR action,
- * payslip generation, Cayla dispatcher). Not exposed to the browser — the
- * frontend must not be able to decrement or reset its own counters.
- */
-export const internalIncrement = internalMutation({
-  args: {
-    userId: v.id("users"),
-    kind: v.union(v.literal("payslip"), v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
-    opId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    return await incrementUsageIdempotent(ctx, args.userId, args.kind, args.opId);
-  },
-});
-
-/**
- * Public mutation callers use when they hold a firebaseUid rather than a
- * resolved user id. Enforces plan limit and dedupes.
- */
-export const trackUsage = mutation({
-  args: {
-    requesterUid: v.string(),
-    kind: v.union(v.literal("payslip"), v.literal("payroll"), v.literal("ocr"), v.literal("cayla")),
-    opId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const user = await resolveCallerUser(ctx, args.requesterUid);
-    if (!user) throw new Error("Unauthorized");
-    await assertWithinLimit(ctx, user, args.kind);
-    return await incrementUsageIdempotent(ctx, user._id, args.kind, args.opId);
-  },
-});
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Plan gate helper — for accountant-only or business-only mutations
-// ═════════════════════════════════════════════════════════════════════════════
-
-/**
- * Throws if the caller isn't on a plan that includes `minPlan` features.
- * Ordering: accountant > pro > free. An accountant plan also satisfies pro.
- */
-export async function requirePlan(
-  ctx: QueryCtx | MutationCtx,
-  requesterUid: string,
-  minPlan: "pro" | "accountant"
-): Promise<{ userId: Id<"users">; plan: "pro" | "accountant" }> {
+export async function assertWithinLimitByUid(ctx: MutationCtx, uid: string, kind: UsageKind) { const user = await byUid(ctx, uid); await assertWithinLimit(ctx, user, kind); return { userId: user._id }; }
+export async function incrementByUidIdempotent(ctx: MutationCtx, uid: string, kind: UsageKind, opId: string) { return incrementUsageIdempotent(ctx, (await byUid(ctx, uid))._id, kind, opId); }
+export const internalReserveByUid = internalMutation({ args: { firebaseUid: v.string(), kind: kinds, opId: v.string(), amount: v.optional(v.number()) }, handler: async (ctx, args) => reserveUsage(ctx, (await byUid(ctx, args.firebaseUid))._id, args.kind, args.opId, args.amount) });
+export const internalIncrementByUid = internalMutation({ args: { firebaseUid: v.string(), kind: kinds, opId: v.string() }, handler: (ctx, args) => incrementByUidIdempotent(ctx, args.firebaseUid, args.kind, args.opId) });
+export const internalAssertLimitByUid = internalMutation({ args: { firebaseUid: v.string(), kind: kinds }, handler: async (ctx, args) => { await assertWithinLimitByUid(ctx, args.firebaseUid, args.kind); return { ok: true }; } });
+export const internalIncrement = internalMutation({ args: { userId: v.id('users'), kind: kinds, opId: v.string() }, handler: (ctx, args) => incrementUsageIdempotent(ctx, args.userId, args.kind, args.opId) });
+export const trackUsage = mutation({ args: { requesterUid: v.string(), kind: kinds, opId: v.string() }, handler: async (ctx, args) => { const user = await resolveCallerUser(ctx, args.requesterUid); if (!user) throw new ConvexError('Unauthorized'); return reserveUsage(ctx, user._id, args.kind, args.opId); } });
+export async function requirePlan(ctx: QueryCtx | MutationCtx, requesterUid: string, minPlan: 'pro' | 'accountant') {
   const user = await resolveCallerUser(ctx, requesterUid);
-  if (!user) throw new Error("Unauthorized");
-  const plan = await planFor(user);
-  if (plan === "free") throw new Error(`PLAN_REQUIRED:${minPlan}`);
-  if (minPlan === "accountant" && plan !== "accountant") {
-    throw new Error(`PLAN_REQUIRED:accountant`);
-  }
-  return { userId: user._id, plan: plan as "pro" | "accountant" };
+  if (!user) throw new ConvexError('Unauthorized');
+  const paid = accountantPlanFor(user) !== 'free';
+  if (!paid && !(minPlan === 'pro' && user.plan === 'pro' && user.planStatus === 'active')) throw new ConvexError(`PLAN_REQUIRED:${minPlan}`);
+  return { userId: user._id, plan: paid ? 'accountant' as const : 'pro' as const };
 }
+
+// Internal facade for older email tools. Validate real employee recipients and
+// reserve the complete batch atomically before any provider request.
+export const authorizeLegacyEmail = internalMutation({
+  args: { firebaseUid: v.string(), businessId: v.optional(v.string()), recipients: v.array(v.string()), opId: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await byUid(ctx, args.firebaseUid);
+    if (!args.businessId || !args.recipients.length || args.recipients.length > 2500) throw new ConvexError('Select a client and employee recipients.');
+    const businessId = ctx.db.normalizeId('businesses', args.businessId);
+    const business = businessId ? await ctx.db.get(businessId) : null;
+    const { requireBusinessAccess } = await import('./lib/accountantAccess');
+    const access = await requireBusinessAccess(ctx, business, 'sendPayslips');
+    if (access.actor._id !== actor._id) throw new ConvexError('Unauthorized');
+    const employees = await ctx.db.query('employees').withIndex('by_business', q => q.eq('businessId', business!._id)).collect();
+    const unique = [...new Set(args.recipients.map(email => email.trim().toLowerCase()))];
+    for (const email of unique) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ConvexError('Invalid employee email.');
+      const employee = employees.find(row => row.email?.trim().toLowerCase() === email);
+      if (!employee) throw new ConvexError('Recipient does not belong to the selected client.');
+      await reserveUsage(ctx, access.owner._id, 'email', `legacy:${args.opId}:${employee._id}`);
+    }
+    return { userId: access.owner._id };
+  },
+});

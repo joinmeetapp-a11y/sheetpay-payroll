@@ -1,3 +1,4 @@
+import { assertCapacity } from "./usage";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireBusinessAccess, recordAccountantActivity } from "./lib/accountantAccess";
@@ -71,6 +72,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const owner = await requireEmployeeOwner(ctx, args.businessId, args.userId);
+    await assertCapacity(ctx, owner, "employees", 1);
     return ctx.db.insert("employees", { ...args, userId: owner._id, createdAt: Date.now() });
   },
 });
@@ -165,6 +167,8 @@ export const bulkCreate = mutation({
   },
   handler: async (ctx, args) => {
     const owner = await requireEmployeeOwner(ctx, args.businessId, args.userId);
+    if (!args.employees.length || args.employees.length > 2500) throw new Error("Import 1 to 2,500 employees per batch.");
+    await assertCapacity(ctx, owner, "employees", args.employees.length);
     const ids = [];
     for (const emp of args.employees) {
       const id = await ctx.db.insert("employees", {
@@ -212,3 +216,4 @@ export const bulkCreate = mutation({
     return ids;
   },
 });
+

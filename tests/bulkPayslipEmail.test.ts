@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { anyApi } from "convex/server";
@@ -9,7 +10,7 @@ const pdfBytes = new TextEncoder().encode("%PDF-1.4\nsynthetic employee payslip 
 async function fixture() {
   const t = convexTest(schema, modules);
   const ids = await t.run(async (ctx) => {
-    const owner = await ctx.db.insert("users", { firebaseUid: "owner", email: "owner@example.com" });
+    const owner = await ctx.db.insert("users", { firebaseUid: "owner", email: "owner@example.com", accountType: "accountant", plan: "accountant_monthly", planStatus: "active" });
     const outsider = await ctx.db.insert("users", { firebaseUid: "outsider", email: "outsider@example.com" });
     const viewer = await ctx.db.insert("users", { firebaseUid: "viewer", email: "viewer@example.com" });
     const business = await ctx.db.insert("businesses", { userId: owner, name: "Trini Builders", currency: "TTD", currencySymbol: "$", updatedAt: Date.now() });
@@ -31,7 +32,7 @@ async function fixture() {
   const upload = async (employeeId = ids.john, runId = ids.run) => {
     const uploadId = await owner.action(api.bulkPayslipEmail.storePayslip, { businessId: ids.business, payrollRunId: runId, employeeId, payrollRunUpdatedAt: ids.runUpdatedAt, pdf: new TextEncoder().encode(`%PDF-1.4\nemployee:${employeeId}\n%%EOF`).buffer });
     // convex-test currently omits Blob.type from stored file metadata.
-    await t.run(async (ctx) => { const upload = await ctx.db.get(uploadId); await ctx.db.patch(upload.storageId, { contentType: "application/pdf" } as any); });
+    await t.run(async (ctx) => { const upload: any = await ctx.db.get(uploadId); await ctx.db.patch(upload.storageId, { contentType: "application/pdf" } as any); });
     return uploadId;
   };
   const job = async (employeeIds = [ids.john, ids.jane], uploadIds?: any[], key = "initial") => owner.mutation(api.bulkPayslipEmail.createBulkEmailJob, {

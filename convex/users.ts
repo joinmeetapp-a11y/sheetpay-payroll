@@ -37,9 +37,11 @@ export const getBillingDetailsInternal = internalQuery({
       .first();
     if (!user) return null;
     return {
+      userId: user._id,
       plan: user.plan,
       planStatus: user.planStatus,
       paddleSubscriptionId: user.paddleSubscriptionId,
+      paddleCustomerId: user.paddleCustomerId,
     };
   },
 });
@@ -117,3 +119,4 @@ export const setOnboardingCompleted = mutation({
     if (user) await ctx.db.patch(user._id, { onboardingCompleted: true });
   },
 });
+

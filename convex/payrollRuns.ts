@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { assertWithinLimit, incrementUsageIdempotent } from "./usage";
+import { assertWithinLimit, incrementUsageIdempotent, historyAccessible, reserveUsage } from "./usage";
 import { createWorkspaceNotification } from "./notifications";
 import { requireBusinessAccess } from "./lib/accountantAccess";
 
@@ -23,12 +23,14 @@ export const getByBusiness = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
     const business = await ctx.db.get(args.businessId);
-    try { await requireBusinessAccess(ctx, business, "read"); } catch { return []; }
-    return ctx.db
+    let owner;
+    try { owner = (await requireBusinessAccess(ctx, business, "read")).owner; } catch { return []; }
+    const runs = await ctx.db
       .query("payrollRuns")
       .withIndex("by_business", (q) => q.eq("businessId", args.businessId))
       .order("desc")
       .collect();
+    return runs.filter(run => historyAccessible(owner, run.createdAt));
   },
 });
 
@@ -53,6 +55,8 @@ export const create = mutation({
     // which the UI translates into an upgrade prompt.
     const user = await requirePayrollOwner(ctx, args.userId, args.businessId);
     await assertWithinLimit(ctx, user, "payroll");
+    await assertWithinLimit(ctx, user, "payslip", args.employeesSnapshot.length);
+    await validatePayrollSnapshot(ctx, args.businessId, args.employeesSnapshot);
 
     const runId = await ctx.db.insert("payrollRuns", {
       ...args,
@@ -65,6 +69,7 @@ export const create = mutation({
     // possible (Convex assigns a new id per insert). This still deduplicates
     // if any orchestration layer replays the increment step.
     await incrementUsageIdempotent(ctx, args.userId, "payroll", `payroll:${runId}`);
+    await incrementUsageIdempotent(ctx, args.userId, "payslip", `payslips:${runId}`, args.employeesSnapshot.length);
     return runId;
   },
 });
@@ -84,7 +89,13 @@ export const update = mutation({
   handler: async (ctx, { runId, ...fields }) => {
     const before = await ctx.db.get(runId);
     if (!before) throw new Error("Payroll run not found");
-    await requirePayrollOwner(ctx, before.userId, before.businessId);
+    const owner = await requirePayrollOwner(ctx, before.userId, before.businessId);
+    if (fields.employeesSnapshot) {
+      await validatePayrollSnapshot(ctx, before.businessId, fields.employeesSnapshot);
+      const oldIds = new Set(before.employeesSnapshot.map((row: any) => row._id));
+      const added = fields.employeesSnapshot.filter((row: any) => !oldIds.has(row._id));
+      for (const employee of added) await reserveUsage(ctx, owner._id, "payslip", `payslips-added:${runId}:${employee._id}`);
+    }
     await ctx.db.patch(runId, { ...fields, updatedAt: Date.now() });
 
     // Fire payroll-completed email once, when the run transitions to a
@@ -130,3 +141,14 @@ export const update = mutation({
     }
   },
 });
+
+export async function validatePayrollSnapshot(ctx: any, businessId: any, rows: any[]) {
+  if (!rows.length || rows.length > 2500) throw new Error("Choose 1 to 2,500 employees for payroll.");
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const id = ctx.db.normalizeId("employees", String(row._id || ''));
+    const employee = id ? await ctx.db.get(id) : null;
+    if (!employee || employee.businessId !== businessId || seen.has(String(id))) throw new Error("Payroll employees must be unique and belong to this client.");
+    seen.add(String(id));
+  }
+}

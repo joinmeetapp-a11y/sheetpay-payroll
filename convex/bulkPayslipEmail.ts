@@ -2,6 +2,8 @@ import { action, internalMutation, mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { internal as _internal } from "./_generated/api";
 import { requireBusinessAccess, recordAccountantActivity } from "./lib/accountantAccess";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { accountantPlanFor, ACCOUNTANT_PLANS, assertWithinLimit, reserveUsage, historyAccessible } from "./usage";
 import { createWorkspaceNotification } from "./notifications";
 
 const internal = _internal as any;
@@ -15,6 +17,7 @@ async function requireRun(ctx: any, businessId: any, payrollRunId: any, capabili
   const access = await requireBusinessAccess(ctx, business, capability);
   const run = await ctx.db.get(payrollRunId);
   if (!run || run.businessId !== businessId || run.userId !== access.owner._id) throw new ConvexError("Payroll run is outside the selected client.");
+  if (!historyAccessible(access.owner, run.createdAt)) throw new ConvexError({ code: "PLAN_LIMIT_REACHED", kind: "history", message: "Free includes 30-day payroll history. Your older payroll is saved; upgrade to access it." });
   return { business, run, ...access };
 }
 
@@ -34,7 +37,7 @@ async function priorRecipients(ctx: any, runId: any, employeeId: any) {
 export const reviewRun = query({
   args: { businessId: v.id("businesses"), payrollRunId: v.id("payrollRuns") },
   handler: async (ctx, args) => {
-    const { run, business } = await requireRun(ctx, args.businessId, args.payrollRunId, "read");
+    const { run, business, owner } = await requireRun(ctx, args.businessId, args.payrollRunId, "read");
     let canSend = true;
     try { await requireBusinessAccess(ctx, business, "sendPayslips"); } catch { canSend = false; }
     const seen = new Set<string>();
@@ -53,7 +56,7 @@ export const reviewRun = query({
       rows.push({ employeeId: id, name: row.name || "Unknown employee", email,
         status: !validEmployee || !ready(row) ? "not_ready" : !emailPattern.test(email) ? "missing_email" : accepted ? "already_sent" : pending ? "pending" : failed ? "failed" : "ready" });
     }
-    return { canSend, periodLabel: periodOf(run), rows };
+    return { canSend, periodLabel: periodOf(run), rows, plan: accountantPlanFor(owner), watermark: ACCOUNTANT_PLANS[accountantPlanFor(owner)].watermark };
   },
 });
 
@@ -67,7 +70,7 @@ export const authorizeUpload = internalMutation({
     if (access.run.updatedAt !== args.payrollRunUpdatedAt) throw new ConvexError("Payroll run changed. Refresh the preview and generate the attachment again.");
     const employee = await ctx.db.get(args.employeeId);
     if (!employee || employee.businessId !== args.businessId || !ready(snapshotRow(access.run, args.employeeId))) throw new ConvexError("Employee payslip is not ready in this payroll run.");
-    return { ownerId: access.owner._id, actorId: access.actor._id };
+    return { ownerId: access.owner._id, actorId: access.actor._id, watermark: ACCOUNTANT_PLANS[accountantPlanFor(access.owner)].watermark };
   },
 });
 
@@ -87,10 +90,20 @@ export const registerPrivateUpload = internalMutation({
 export const storePayslip = action({
   args: { businessId: v.id("businesses"), payrollRunId: v.id("payrollRuns"), employeeId: v.id("employees"), payrollRunUpdatedAt: v.number(), pdf: v.bytes() },
   handler: async (ctx, { pdf, ...args }): Promise<any> => {
-    await ctx.runMutation(internal.bulkPayslipEmail.authorizeUpload, args);
+    const authorization = await ctx.runMutation(internal.bulkPayslipEmail.authorizeUpload, args);
     const bytes = new Uint8Array(pdf);
     if (bytes.length < 8 || bytes.length > 5 * 1024 * 1024 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") throw new ConvexError("Generate a valid PDF under 5 MB before sending.");
-    const storageId = await ctx.storage.store(new Blob([pdf], { type: "application/pdf" }));
+    let attachment: Uint8Array = bytes;
+    if (authorization?.watermark) {
+      let document: PDFDocument;
+      try { document = await PDFDocument.load(bytes); } catch { throw new ConvexError("Generate a readable PDF before sending."); }
+      if (document.getPageCount() !== 1) throw new ConvexError("Each employee attachment must contain only their own payslip page.");
+      const font = await document.embedFont(StandardFonts.Helvetica);
+      const page = document.getPage(0), label = "Created with Sheetpay · Free plan";
+      page.drawText(label, { x: Math.max(10, (page.getWidth() - font.widthOfTextAtSize(label, 9)) / 2), y: 12, size: 9, font, color: rgb(.3, .45, .36) });
+      attachment = await document.save();
+    }
+    const storageId = await ctx.storage.store(new Blob([attachment as BlobPart], { type: "application/pdf" }));
     try { return await ctx.runMutation(internal.bulkPayslipEmail.registerPrivateUpload, { ...args, storageId }); }
     catch (error) { await ctx.storage.delete(storageId); throw error; }
   },
@@ -129,6 +142,7 @@ export const createBulkEmailJob = mutation({
       if (!metadata || metadata.contentType !== "application/pdf" || metadata.size > 5 * 1024 * 1024) throw new ConvexError("Payslip attachment is no longer available. Generate it again.");
       recipients.push({ employee, upload, snapshot });
     }
+    for (const { employee } of recipients) await reserveUsage(ctx, owner._id, "email", `bulk:${run._id}:${employee._id}`);
     const now = Date.now();
     const jobId = await ctx.db.insert("bulkEmailJobs", { workspaceOwnerId: owner._id, requestedByUserId: actor._id,
       businessId: args.businessId, payrollRunId: args.payrollRunId, status: "queued", subject, message, replyTo,
@@ -187,6 +201,7 @@ export const retryFailed = mutation({
       if (item.outcomeUnknown && now - item.createdAt >= 23 * 60 * 60 * 1000) throw new ConvexError("The provider did not confirm this email. Check Resend delivery logs before resending; its duplicate protection window has expired.");
       if (!await ctx.db.system.get(item.storageId)) throw new ConvexError("PDF attachment is no longer available.");
     }
+    for (const item of failedRows) await reserveUsage(ctx, owner._id, "email", `bulk:${item.payrollRunId}:${item.employeeId}`);
     const jobId = await ctx.db.insert("bulkEmailJobs", { workspaceOwnerId: owner._id, requestedByUserId: actor._id,
       businessId: prior.businessId, payrollRunId: prior.payrollRunId, status: "queued", subject: prior.subject,
       message: prior.message, replyTo: prior.replyTo, employeeCount: failedRows.length, sentCount: 0, failedCount: 0,
@@ -214,6 +229,8 @@ export const takeQueued = internalMutation({
     }
     const recipient = rows.find((row) => row.status === "queued");
     if (recipient) {
+      try { await reserveUsage(ctx, recipient.workspaceOwnerId, "email", `bulk:${recipient.payrollRunId}:${recipient.employeeId}`); }
+      catch (error: any) { await ctx.db.patch(recipient._id, { status: "failed", errorMessage: error?.data?.message || "Monthly payslip email allowance reached. Retry after upgrading or after the monthly reset." }); return { job, recipient: null }; }
       await ctx.db.patch(recipient._id, { status: "sending", sendingAt: Date.now(), attemptCount: recipient.attemptCount + 1 });
       await ctx.db.patch(job._id, { status: "sending", updatedAt: Date.now() });
       // Watchdog recovers a crashed action; the claim prevents duplicate workers.
@@ -229,6 +246,16 @@ export const updateRecipient = internalMutation({
     const row = await ctx.db.get(args.recipientId);
     if (!row || acceptedStatuses.includes(row.status)) return;
     if (args.status === "sent" && !args.resendMessageId) throw new ConvexError("Provider confirmation is required.");
+    if (args.status === "sent") {
+      const op = `${row.workspaceOwnerId}:email-sent:${row.payrollRunId}:${row.employeeId}`;
+      if (!await ctx.db.query("usageIncrements").withIndex("by_op", q => q.eq("opId", op)).first()) {
+        const period = new Date().toISOString().slice(0, 7);
+        let counter = await ctx.db.query("usageCounters").withIndex("by_user_period", q => q.eq("userId", row.workspaceOwnerId).eq("period", period)).first();
+        if (!counter) { await reserveUsage(ctx, row.workspaceOwnerId, "email", `bulk:${row.payrollRunId}:${row.employeeId}`); counter = await ctx.db.query("usageCounters").withIndex("by_user_period", q => q.eq("userId", row.workspaceOwnerId).eq("period", period)).first(); }
+        if (counter) await ctx.db.patch(counter._id, { payslipEmailsUsed: (counter.payslipEmailsUsed || 0) + 1 });
+        await ctx.db.insert("usageIncrements", { userId: row.workspaceOwnerId, period, kind: "email-sent", opId: op, amount: 1, createdAt: Date.now() });
+      }
+    }
     await ctx.db.patch(row._id, { status: args.status, resendMessageId: args.resendMessageId,
       errorMessage: args.errorMessage, outcomeUnknown: args.outcomeUnknown, sentAt: args.status === "sent" ? Date.now() : row.sentAt });
   },
@@ -261,5 +288,30 @@ export const updateDeliveryFromWebhook = internalMutation({
       if (["bounced", "complained"].includes(row.status) || (row.status === "delivered" && ["sent", "delayed"].includes(args.status))) continue;
       await ctx.db.patch(row._id, { status: args.status, deliveredAt: args.deliveredAt ?? row.deliveredAt, errorMessage: args.errorMessage ?? row.errorMessage });
     }
+  },
+});
+
+export const authorizeExport = mutation({
+  args: { businessId: v.id("businesses"), payrollRunId: v.id("payrollRuns"), employeeIds: v.array(v.id("employees")) },
+  handler: async (ctx, args) => {
+    const { owner, run } = await requireRun(ctx, args.businessId, args.payrollRunId, "read");
+    if (!args.employeeIds.length || new Set(args.employeeIds).size !== args.employeeIds.length) throw new ConvexError("Choose unique payslips from the saved run.");
+    for (const id of args.employeeIds) if (!snapshotRow(run, id)) throw new ConvexError("Employee is outside this payroll run.");
+    const plan = accountantPlanFor(owner);
+    if (plan === "free" && args.employeeIds.length > ACCOUNTANT_PLANS.free.limits.payslip) throw new ConvexError({ code: "PLAN_LIMIT_REACHED", message: "Free allows exporting up to 10 payslips from your saved monthly payroll run. Your work is saved." });
+    return { plan, watermark: ACCOUNTANT_PLANS[plan].watermark };
+  },
+});
+export const reserveEmailBatch = mutation({
+  args: { businessId: v.id("businesses"), payrollRunId: v.id("payrollRuns"), employeeIds: v.array(v.id("employees")) },
+  handler: async (ctx, args) => {
+    const { owner, run } = await requireRun(ctx, args.businessId, args.payrollRunId, "sendPayslips");
+    if (!args.employeeIds.length || args.employeeIds.length > 2500 || new Set(args.employeeIds).size !== args.employeeIds.length) throw new ConvexError("Choose 1 to 2,500 unique payslips.");
+    for (const id of args.employeeIds) {
+      const employee = await ctx.db.get(id);
+      if (!employee || employee.businessId !== args.businessId || !ready(snapshotRow(run, id)) || !emailPattern.test(employee.email || '')) throw new ConvexError("Every recipient needs a ready payslip and a valid email.");
+      await reserveUsage(ctx, owner._id, "email", `bulk:${run._id}:${id}`);
+    }
+    return { reserved: args.employeeIds.length };
   },
 });

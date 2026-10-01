@@ -1,6 +1,7 @@
 "use node";
 import { action } from "./_generated/server";
 import { v } from "convex/values";
+import { PDFDocument } from "pdf-lib";
 import { internal } from "./_generated/api";
 
 const OPENAI_URL = "https://api.openai.com/v1";
@@ -101,20 +102,29 @@ export const extractPayrollDocument = action({
     }
     const uploadMimeType = isPdf ? "application/pdf" : args.mimeType;
 
-    // Reserve the trial scan atomically before the OpenAI call.
+    const bytes = Buffer.from(args.fileBase64, "base64");
+    if (!bytes.length || bytes.length > 15 * 1024 * 1024) throw new Error("Upload a document under 15 MB.");
+    let pageCount = 1;
+    if (isPdf) {
+      try { pageCount = (await PDFDocument.load(bytes)).getPageCount(); }
+      catch { throw new Error("Choose a readable PDF without password protection."); }
+    }
+    if (pageCount < 1 || pageCount > 100) throw new Error("Scan up to 100 PDF pages per request.");
+    // Count actual PDF pages server-side and reserve the whole batch before OCR.
     try {
       await ctx.runMutation(internal.usage.internalReserveByUid, {
         firebaseUid: args.requesterUid,
         kind: "ocr",
+        amount: pageCount,
         opId: `ocr:${args.requesterUid}:${crypto.randomUUID()}`,
       });
     } catch (err: any) {
       const msg = String(err?.message ?? err);
-      if (msg.includes("FREE_LIMIT_REACHED")) {
+      if (msg.includes("FREE_LIMIT_REACHED") || err?.data?.code === "PLAN_LIMIT_REACHED") {
         return {
           ok: false,
-          error: "FREE_LIMIT_REACHED:ocr",
-          reason: "Your three accountant trial OCR scans are used. Upgrade to keep scanning.",
+          error: "PLAN_LIMIT_REACHED:ocr",
+          reason: err?.data?.message || "Your monthly OCR page allowance is used. Your work is saved.",
           employees: [],
         };
       }
@@ -243,3 +253,4 @@ Rules:
     }
   },
 });
+

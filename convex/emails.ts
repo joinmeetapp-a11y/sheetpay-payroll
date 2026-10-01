@@ -124,6 +124,7 @@ export const send = action({
     if (!identity || !identityEmail || identityEmail !== args.to.trim().toLowerCase()) {
       throw new Error("Unauthenticated or recipient does not match the signed-in user");
     }
+    if (args.emailType !== "welcome") throw new Error("Use the authorized Sheetpay workflow for this email.");
     return sendEmail(ctx, {
       to: identityEmail,
       emailType: args.emailType,
@@ -177,7 +178,12 @@ export const sendPayslip = action({
     userId: v.optional(v.string()),
     businessId: v.optional(v.string()),
   },
-  handler: async (ctx, args) => sendPayslipEmail(ctx, args.to, args as any),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || (args.userId && args.userId !== identity.subject)) throw new Error("Unauthorized");
+    await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: `payslip:${args.payslipId}` });
+    return sendPayslipEmail(ctx, args.to, { ...args, userId: identity.subject } as any);
+  },
 });
 
 /** Internal action — payroll completion. Called from payrollRuns.update. */
@@ -275,3 +281,4 @@ export const previewTemplate = action({
     return { ok: true, ...rendered };
   },
 });
+

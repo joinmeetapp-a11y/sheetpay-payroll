@@ -29,7 +29,7 @@ export const invite = action({
     const inviterEmail = typeof identity?.email === "string" ? identity.email.trim().toLowerCase() : "";
     if (!firebaseUid || !inviterEmail) throw new Error("Sign in to invite a team member.");
     const email = args.email.trim().toLowerCase();
-    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
     if (!roles.has(args.role)) throw new Error("Choose a valid workspace role.");
     if (email === inviterEmail) throw new Error("You already have access to your workspace.");
 
@@ -107,3 +107,4 @@ export const invite = action({
     }
   },
 });
+
