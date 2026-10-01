@@ -284,7 +284,7 @@ export default function App() {
   const entitlement = useQuery(
     (api as any).subscriptions.getEntitlement,
     { firebaseUid: currentUser?.uid }
-  ) as { plan: 'free' | 'pro' | 'accountant'; planStatus: string; isPro: boolean; isAccountant: boolean } | undefined;
+  ) as { plan: 'free' | 'pro' | 'accountant' | 'accountant_monthly' | 'accountant_yearly'; planStatus: string; isPro: boolean; isAccountant: boolean } | undefined;
   // Admin accounts (e.g. the owner) get full access to every feature.
   const isAdmin = isAdminEmail(currentUser?.email);
   const plan = isAdmin ? 'accountant' : (entitlement?.plan ?? 'free');
@@ -736,10 +736,10 @@ export default function App() {
     const prev = prevPlanRef.current;
     prevPlanRef.current = newPlan;
     if (!prev || !currentUser || viewMode !== 'app') return;
-    if (newPlan === 'accountant') {
+    if (newPlan?.startsWith('accountant')) {
       setAccountType('accountant');
       setActiveTab('accountant_dashboard');
-    } else if (prev === 'accountant' && newPlan !== 'accountant') {
+    } else if (prev?.startsWith('accountant') && !newPlan?.startsWith('accountant')) {
       setAccountType('business');
       setActiveTab('dashboard');
     }
