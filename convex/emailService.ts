@@ -45,7 +45,7 @@ export const sendEmail = action({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity || (args.userId && args.userId !== identity.subject)) throw new Error("Unauthorized");
     if (args.emailType === "employeePayslip") {
-      await ctx.runMutation((_internal as any).usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: args.idempotencyKey || crypto.randomUUID() });
+      await ctx.runMutation((_internal as any).usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: crypto.randomUUID() });
     } else if (args.emailType !== "welcome" || args.to.trim().toLowerCase() !== String(identity.email || "").toLowerCase()) {
       throw new Error("Use the authorized Sheetpay workflow for this email.");
     }

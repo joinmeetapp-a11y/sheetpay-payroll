@@ -330,7 +330,7 @@ export const executeTool = internalAction({
         if (!emp) return { error: `Employee not found: ${args.employeeId}` };
         if (!emp.email) return { error: `${emp.name} has no email address on file` };
 
-        await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: userId, businessId, recipients: [emp.email], opId: `cayla:${args.period || "current"}` });
+        await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: userId, businessId, recipients: [emp.email], opId: `cayla:${crypto.randomUUID()}` });
 
         const result = await ctx.runAction(internal.emailService.sendEmailInternal, {
           to: emp.email,
@@ -370,7 +370,7 @@ export const executeTool = internalAction({
         let failed = 0;
         let quotaHit = false;
 
-        if (withEmail.length) await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: userId, businessId, recipients: withEmail.map(emp => emp.email), opId: `cayla:${args.period || "current"}` });
+        if (withEmail.length) await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: userId, businessId, recipients: withEmail.map(emp => emp.email), opId: `cayla:${crypto.randomUUID()}` });
         for (const emp of withEmail) {
           const result = await ctx.runAction(internal.emailService.sendEmailInternal, {
             to: emp.email,

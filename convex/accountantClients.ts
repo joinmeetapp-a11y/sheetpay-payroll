@@ -1,5 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { effectiveAccountantPlan } from "../shared/accountantPlans";
+import { assertCapacity } from "./usage";
 import { isAdminEmail } from "./admin";
 
 async function requireAccountant(ctx: any, expectedUserId?: any) {
@@ -11,7 +13,7 @@ async function requireAccountant(ctx: any, expectedUserId?: any) {
     .first();
   if (!user || (expectedUserId && user._id !== expectedUserId)) throw new Error("Forbidden");
   const admin = isAdminEmail(user.email);
-  if (!admin && (user.plan !== "accountant" || user.planStatus !== "active")) {
+  if (!admin && effectiveAccountantPlan(user) === "free") {
     throw new Error("ACCOUNTANT_PLAN_REQUIRED");
   }
   return user;
@@ -30,7 +32,7 @@ export const getByUser = query({
       .withIndex("by_firebase_uid", (q: any) => q.eq("firebaseUid", identity.subject))
       .first();
     if (!user || user._id !== userId) return [];
-    if (!isAdminEmail(user.email) && (user.plan !== "accountant" || user.planStatus !== "active")) return [];
+    if (!isAdminEmail(user.email) && effectiveAccountantPlan(user) === "free") return [];
 
     return ctx.db
       .query("accountantClients")
@@ -76,6 +78,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const user = await requireAccountant(ctx, args.accountantUserId);
     if (args.accountantFirebaseUid !== user.firebaseUid) throw new Error("Forbidden");
+    await assertCapacity(ctx, user, "clients", 1);
     return ctx.db.insert("accountantClients", {
       ...args,
       createdAt: Date.now(),
@@ -132,3 +135,4 @@ export const deleteClient = mutation({
     await ctx.db.delete(clientId);
   },
 });
+

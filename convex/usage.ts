@@ -59,7 +59,7 @@ export const incrementUsageIdempotent = (ctx: MutationCtx, userId: Id<'users'>, 
 export const reserveUsage = (ctx: MutationCtx, userId: Id<'users'>, kind: UsageKind, opId: string, amount = 1) => increment(ctx, userId, kind, opId, amount, true);
 export async function assertCapacity(ctx: MutationCtx, user: any, kind: 'clients' | 'employees' | 'team', amount: number) {
   let used = 0;
-  if (kind === 'clients') used = (await ctx.db.query('businesses').withIndex('by_user', q => q.eq('userId', user._id)).collect()).length;
+  if (kind === 'clients') used = (await ctx.db.query('businesses').withIndex('by_user', q => q.eq('userId', user._id)).collect()).length + (await ctx.db.query('accountantClients').withIndex('by_accountant_user', q => q.eq('accountantUserId', user._id)).collect()).length;
   if (kind === 'employees') used = (await ctx.db.query('employees').withIndex('by_user', q => q.eq('userId', user._id)).collect()).length;
   if (kind === 'team') {
     const members = await ctx.db.query('accountantMemberships').withIndex('by_workspace', q => q.eq('workspaceOwnerId', user._id)).collect();
@@ -80,14 +80,15 @@ export const getMonthlyUsage = query({ args: { requesterUid: v.optional(v.string
     user = (await requireBusinessAccess(ctx, await ctx.db.get(args.businessId), 'read')).owner;
   }
   const row = await counter(ctx, user._id);
-  const [clients, employees, members] = await Promise.all([
+  const [clients, employees, members, legacyClients] = await Promise.all([
     ctx.db.query('businesses').withIndex('by_user', q => q.eq('userId', user._id)).collect(),
     ctx.db.query('employees').withIndex('by_user', q => q.eq('userId', user._id)).collect(),
     ctx.db.query('accountantMemberships').withIndex('by_workspace', q => q.eq('workspaceOwnerId', user._id)).collect(),
+    ctx.db.query('accountantClients').withIndex('by_accountant_user', q => q.eq('accountantUserId', user._id)).collect(),
   ]);
   const plan = accountantPlanFor(user);
   return { plan, planStatus: user.planStatus || 'none', period: usagePeriod(), resetsAt: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1), billingPeriodStart: user.billingPeriodStart, billingPeriodEnd: user.billingPeriodEnd,
-    clientCount: clients.length, employeeCount: employees.length, teamMemberCount: 1 + members.filter(m => m.status === 'active').length,
+    clientCount: clients.length + legacyClients.length, employeeCount: employees.length, teamMemberCount: 1 + members.filter(m => m.status === 'active').length,
     payslipsUsed: row?.payslipsUsed || 0, payrollRunsUsed: row?.payrollRunsUsed || 0, ocrScansUsed: row?.ocrScansUsed || 0, caylaActionsUsed: row?.caylaActionsUsed || 0, emailsReserved: row?.emailsReserved || 0, payslipEmailsUsed: row?.payslipEmailsUsed || 0, limits: ACCOUNTANT_PLANS[plan].limits };
 } });
 async function byUid(ctx: MutationCtx, firebaseUid: string) {

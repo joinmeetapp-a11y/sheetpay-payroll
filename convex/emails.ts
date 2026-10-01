@@ -181,7 +181,7 @@ export const sendPayslip = action({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity || (args.userId && args.userId !== identity.subject)) throw new Error("Unauthorized");
-    await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: `payslip:${args.payslipId}` });
+    await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: `payslip:${crypto.randomUUID()}` });
     return sendPayslipEmail(ctx, args.to, { ...args, userId: identity.subject } as any);
   },
 });
