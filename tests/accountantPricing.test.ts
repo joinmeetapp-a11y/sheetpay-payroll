@@ -154,3 +154,55 @@ describe('Accountant pricing and authoritative limits', () => {
     expect(await t.run(ctx => ctx.db.get(ids.business))).toBeTruthy();
   });
 });
+
+
+// Scheduled reminder emails consume workspace allowances before provider work.
+async function reminderDelivery(t: ReturnType<typeof convexTest>, ids: any, recipient = ids.user, type = 'reminder') {
+ return t.run(async ctx => {
+  const notification = await ctx.db.insert('notifications', {userId:recipient, workspaceOwnerId:ids.user, businessId:ids.business, category:'payroll', type, title:'Payroll reminder', message:'Review payroll', dedupeKey:crypto.randomUUID(), createdAt:Date.now()});
+  const email = await ctx.db.insert('notificationDeliveries', {notificationId:notification,userId:recipient,channel:'email',provider:'Resend',status:'queued',attemptCount:0,idempotencyKey:`${notification}:email`,createdAt:Date.now(),updatedAt:Date.now()});
+  const push = await ctx.db.insert('notificationDeliveries', {notificationId:notification,userId:recipient,channel:'push',provider:'Firebase',status:'queued',attemptCount:0,idempotencyKey:`${notification}:push`,createdAt:Date.now(),updatedAt:Date.now()});
+  return {notification,email,push};
+ });
+}
+describe('Accountant reminder email allowances',()=>{
+ for(const [plan,limit] of [['accountant_monthly',500],['accountant_yearly',750]] as const)it(`${plan} enforces ${limit} email reminders monthly without limiting push`,async()=>{
+  const {t,ids,owner}=await fixture(plan);
+  expect(ACCOUNTANT_PLANS[plan].reminders).toEqual({push:null,email:limit});
+  await t.run(ctx=>ctx.db.insert('usageCounters',{userId:ids.user,period:usagePeriod(),payslipsUsed:0,payrollRunsUsed:0,ocrScansUsed:0,caylaActionsUsed:0,reminderEmailsReserved:limit-1,updatedAt:Date.now()}));
+  const first=await reminderDelivery(t,ids);
+  expect(await t.mutation(api.notifications.claimDelivery,{deliveryId:first.email})).toMatchObject({claimed:true});
+  // A failed provider retry uses the original reservation, not another allowance.
+  await t.run(ctx=>ctx.db.patch(first.email,{status:'queued'}));
+  expect(await t.mutation(api.notifications.claimDelivery,{deliveryId:first.email})).toMatchObject({claimed:true});
+  const blocked=await reminderDelivery(t,ids);
+  expect(await t.mutation(api.notifications.claimDelivery,{deliveryId:blocked.email})).toMatchObject({claimed:false,reason:'PLAN_LIMIT_REACHED'});
+  expect(await t.run(ctx=>ctx.db.get(blocked.email))).toMatchObject({status:'failed',errorCode:'PLAN_LIMIT_REACHED'});
+  expect(await t.mutation(api.notifications.claimDelivery,{deliveryId:blocked.push})).toMatchObject({claimed:true});
+  const usage=await owner.query(api.usage.getMonthlyUsage,{});
+  expect(usage).toMatchObject({reminderEmailsReserved:limit,emailsReserved:0,reminderLimits:{push:null,email:limit}});
+  expect(await t.run(ctx=>ctx.db.get(blocked.notification))).toBeTruthy();
+  vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
+  expect(await owner.query(api.usage.getMonthlyUsage,{})).toMatchObject({reminderEmailsReserved:0});
+  await t.run(ctx=>ctx.db.patch(blocked.email,{status:'queued'}));
+  expect(await t.mutation(api.notifications.claimDelivery,{deliveryId:blocked.email})).toMatchObject({claimed:true});
+  expect(await owner.query(api.usage.getMonthlyUsage,{})).toMatchObject({reminderEmailsReserved:1,emailsReserved:0});
+ });
+ it('charges team recipients to their workspace owner and keeps other accounts isolated',async()=>{
+  const {t,ids,owner}=await fixture('accountant_monthly');
+  const delivery=await reminderDelivery(t,ids,ids.other);
+  await t.mutation(api.notifications.claimDelivery,{deliveryId:delivery.email});
+  expect(await owner.query(api.usage.getMonthlyUsage,{})).toMatchObject({reminderEmailsReserved:1});
+  const other=t.withIdentity({subject:'pricing-other'});
+  expect(await other.query(api.usage.getMonthlyUsage,{})).toMatchObject({reminderEmailsReserved:0});
+  await expect(other.mutation(api.notifications.retryDelivery,{deliveryId:delivery.email})).rejects.toThrow();
+ });
+ it('does not apply reminder allowances to billing alerts or change Free reminder access',async()=>{
+  const {t,ids,owner}=await fixture();
+  const reminder=await reminderDelivery(t,ids);
+  expect(await t.mutation(api.notifications.claimDelivery,{deliveryId:reminder.email})).toMatchObject({claimed:true});
+  const billing=await reminderDelivery(t,ids,ids.user,'billing');
+  expect(await t.mutation(api.notifications.claimDelivery,{deliveryId:billing.email})).toMatchObject({claimed:true});
+  expect(await owner.query(api.usage.getMonthlyUsage,{})).toMatchObject({reminderEmailsReserved:1});
+ });
+});

@@ -1,5 +1,6 @@
 import { internalMutation, internalQuery, mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
+import { reserveReminderEmail } from "./usage";
 import { Id } from "./_generated/dataModel";
 import { internal as _internal } from "./_generated/api";
 import { getActor, requireBusinessAccess } from "./lib/accountantAccess";
@@ -357,6 +358,20 @@ export const claimDelivery = internalMutation({
   handler: async (ctx, args) => {
     const delivery = await ctx.db.get(args.deliveryId);
     if (!delivery || delivery.status !== "queued") return { claimed: false };
+    if (delivery.channel === "email") {
+      const notification = await ctx.db.get(delivery.notificationId);
+      if (notification?.type === "reminder") {
+        const business = notification.businessId ? await ctx.db.get(notification.businessId) : null;
+        const ownerId = business?.userId || notification.workspaceOwnerId || notification.userId;
+        try {
+          await reserveReminderEmail(ctx, ownerId, notification._id);
+        } catch (error) {
+          if (!(error instanceof ConvexError) || typeof error.data !== "object" || (error.data as any)?.code !== "PLAN_LIMIT_REACHED") throw error;
+          await ctx.db.patch(delivery._id, { status: "failed", errorCode: "PLAN_LIMIT_REACHED", errorMessage: String((error.data as any).message), failedAt: Date.now(), updatedAt: Date.now() });
+          return { claimed: false, reason: "PLAN_LIMIT_REACHED" };
+        }
+      }
+    }
     await ctx.db.patch(delivery._id, { status: "sending", attemptCount: delivery.attemptCount + 1, updatedAt: Date.now() });
     return { claimed: true };
   },
@@ -451,3 +466,4 @@ export const getPreferencesForUser = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => preferencesFor(ctx, args.userId),
 });
+

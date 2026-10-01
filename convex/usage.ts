@@ -89,7 +89,7 @@ export const getMonthlyUsage = query({ args: { requesterUid: v.optional(v.string
   const plan = accountantPlanFor(user);
   return { plan, planStatus: user.planStatus || 'none', period: usagePeriod(), resetsAt: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1), billingPeriodStart: user.billingPeriodStart, billingPeriodEnd: user.billingPeriodEnd,
     clientCount: clients.length + legacyClients.length, employeeCount: employees.length, teamMemberCount: 1 + members.filter(m => m.status === 'active').length,
-    payslipsUsed: row?.payslipsUsed || 0, payrollRunsUsed: row?.payrollRunsUsed || 0, ocrScansUsed: row?.ocrScansUsed || 0, caylaActionsUsed: row?.caylaActionsUsed || 0, emailsReserved: row?.emailsReserved || 0, payslipEmailsUsed: row?.payslipEmailsUsed || 0, limits: ACCOUNTANT_PLANS[plan].limits };
+    payslipsUsed: row?.payslipsUsed || 0, payrollRunsUsed: row?.payrollRunsUsed || 0, ocrScansUsed: row?.ocrScansUsed || 0, caylaActionsUsed: row?.caylaActionsUsed || 0, emailsReserved: row?.emailsReserved || 0, payslipEmailsUsed: row?.payslipEmailsUsed || 0, reminderEmailsReserved: row?.reminderEmailsReserved || 0, reminderLimits: ACCOUNTANT_PLANS[plan].reminders, limits: ACCOUNTANT_PLANS[plan].limits };
 } });
 async function byUid(ctx: MutationCtx, firebaseUid: string) {
   const user = await ctx.db.query('users').withIndex('by_firebase_uid', q => q.eq('firebaseUid', firebaseUid)).first();
@@ -134,3 +134,22 @@ export const authorizeLegacyEmail = internalMutation({
     return { userId: access.owner._id };
   },
 });
+
+
+// Reminder email reservations are independent from payslip email allowances.
+// One notification represents one recipient; retries retain the reservation.
+export async function reserveReminderEmail(ctx: MutationCtx, userId: Id<'users'>, notificationId: Id<'notifications'>) {
+  const user = await ctx.db.get(userId);
+  if (!user) throw new ConvexError('Workspace owner unavailable.');
+  const opId = `${userId}:reminderEmail:${notificationId}`;
+  const existing = await ctx.db.query('usageIncrements').withIndex('by_op', q => q.eq('opId', opId)).first();
+  if (existing) return { counted: false };
+  const plan = accountantPlanFor(user);
+  const limit = ACCOUNTANT_PLANS[plan].reminders.email;
+  const row = await writableCounter(ctx, userId);
+  const used = row.reminderEmailsReserved || 0;
+  if (limit !== null && used >= limit) throw new ConvexError({code:'PLAN_LIMIT_REACHED',kind:'reminderEmail',used,limit,message:`You've reached your ${ACCOUNTANT_PLANS[plan].name} allowance of ${limit} email reminders this month. Your reminders are saved. Push and in-app reminders remain available.`});
+  await ctx.db.insert('usageIncrements', { userId, period: usagePeriod(), kind: 'reminderEmail', opId, amount: 1, createdAt: Date.now() });
+  await ctx.db.patch(row._id, { reminderEmailsReserved: used + 1, updatedAt: Date.now() });
+  return { counted: true, used: used + 1 };
+}

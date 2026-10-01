@@ -37,7 +37,7 @@ export async function accountContext(ctx:any) {
  if (!user) return {signedIn:true, accountReady:false};
  const plan = effectiveAccountantPlan(user);
  const row = await ctx.db.query('usageCounters').withIndex('by_user_period',(q:any)=>q.eq('userId',user._id).eq('period',usagePeriod())).first();
- return {signedIn:true,plan,subscriptionStatus:user.planStatus || 'none', limits:ACCOUNTANT_PLANS[plan].limits, usage:{payslips:row?.payslipsUsed || 0,cayla:row?.caylaActionsUsed || 0,ocr:row?.ocrScansUsed || 0,emails:row?.emailsReserved || 0}};
+ return {signedIn:true,plan,subscriptionStatus:user.planStatus || 'none', limits:ACCOUNTANT_PLANS[plan].limits, reminderLimits:ACCOUNTANT_PLANS[plan].reminders, usage:{payslips:row?.payslipsUsed || 0,cayla:row?.caylaActionsUsed || 0,ocr:row?.ocrScansUsed || 0,emails:row?.emailsReserved || 0,reminderEmails:row?.reminderEmailsReserved || 0}};
 }
 export const reserveChat = internalMutation({args:{token:v.optional(v.string())},handler:async(ctx,args)=>{
  const actor = await principal(ctx,args.token);

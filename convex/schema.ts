@@ -653,6 +653,7 @@ export default defineSchema({
     caylaActionsUsed: v.number(),
     emailsReserved: v.optional(v.number()),
     payslipEmailsUsed: v.optional(v.number()),
+    reminderEmailsReserved: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_user", ["userId"])

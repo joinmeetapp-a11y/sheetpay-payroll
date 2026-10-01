@@ -17,3 +17,5 @@ Contacts: tel:+18682923787, https://wa.me/18682923787, mailto:support@sheetpay.a
 Checks: npm run test:mia, npm run test:pricing, npm run test:bulk and npx tsc --noEmit --project tsconfig.pricing.json in backend; production build, lint and Playwright suite in landing repo. Deployment pins backend revision in established landing Firebase workflow.
 
 Official API reference used: https://developers.openai.com/api/docs/guides/text and https://platform.openai.com/docs/api-reference/responses/create.
+
+Reminder allowances are centralized in shared/accountantPlans.ts. Scheduled email reminders reserve the workspace owner’s allowance atomically in notifications.claimDelivery before sending: Monthly 500/month, Yearly 750/month, independently from payslip emails. Both reset on the UTC calendar month boundary; retries keep the same reservation. Push is unlimited on both paid plans. Free reminder access and billing/security notifications retain existing behavior. At a reminder email limit, the notification and schedule are preserved; email delivery shows the reason and can be retried after reset.
