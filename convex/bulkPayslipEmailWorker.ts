@@ -50,6 +50,9 @@ export const processJob = internalAction({
         });
         if (!response.ok) throw new Error("Resend returned " + response.status + ": " + await response.text());
         const sent = await response.json();
+        if (!sent?.id || typeof sent.id !== "string") {
+          throw new Error("Resend did not return a message ID for this payslip.");
+        }
         await ctx.runMutation(internal.bulkPayslipEmail.updateRecipient, {
           recipientId: item._id, status: "sent", resendMessageId: sent.id,
         });
