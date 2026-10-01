@@ -29,9 +29,10 @@ export const processJob = internalAction({
         if (bytes.length > 5 * 1024 * 1024) throw new Error("Payslip PDF exceeds the delivery size limit.");
         const businessName = esc(batch.business?.name || "Sheetpay Client");
         const employeeName = esc(item.employeeName);
+        const employeeFirstName = esc(item.employeeName.trim().split(/\s+/)[0] || item.employeeName);
         const message = esc(batch.job.message || "Your payslip is attached.").replace(/\n/g, "<br>");
         const period = esc(batch.run?.periodLabel || (batch.run ? batch.run.month + " " + batch.run.year : "Payroll period"));
-        const html = `<!doctype html><html><body style="margin:0;background:#f3f8f5;font-family:Arial,sans-serif;color:#24372d"><div style="max-width:560px;margin:28px auto;padding:30px;background:#fff;border:1px solid #e3eee7;border-radius:20px"><div style="font-size:12px;font-weight:700;letter-spacing:.12em;color:#16815f">SHEETPAY</div><h1 style="font-size:23px;margin:16px 0 10px">Your payslip is ready</h1><p>Hello ${employeeName},</p><p>${message}</p><div style="padding:14px;border-radius:12px;background:#f3f8f5"><b>${businessName}</b><br><span>Pay period: ${period}</span></div><p style="font-size:12px;color:#718078;margin-top:24px">This message was sent securely by your employer using Sheetpay Accountant.</p></div></body></html>`;
+        const html = `<!doctype html><html><body style="margin:0;background:#f3f8f5;font-family:Arial,sans-serif;color:#24372d"><div style="max-width:560px;margin:28px auto;padding:30px;background:#fff;border:1px solid #e3eee7;border-radius:20px"><div style="font-size:12px;font-weight:700;letter-spacing:.12em;color:#16815f">SHEETPAY</div><h1 style="font-size:23px;margin:16px 0 10px">Your payslip is ready</h1><p>Hello ${employeeFirstName},</p><p>${message}</p><div style="padding:14px;border-radius:12px;background:#f3f8f5"><b>${businessName}</b><br><span>Pay period: ${period}</span></div><p style="font-size:12px;color:#718078;margin-top:24px">This message was sent securely by your employer using Sheetpay Accountant.</p></div></body></html>`;
         const response = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: {
@@ -50,6 +51,9 @@ export const processJob = internalAction({
         });
         if (!response.ok) throw new Error("Resend returned " + response.status + ": " + await response.text());
         const sent = await response.json();
+        if (!sent?.id || typeof sent.id !== "string") {
+          throw new Error("Resend did not return a message ID for this payslip.");
+        }
         await ctx.runMutation(internal.bulkPayslipEmail.updateRecipient, {
           recipientId: item._id, status: "sent", resendMessageId: sent.id,
         });
