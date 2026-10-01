@@ -4,7 +4,7 @@ import { v } from "convex/values";
 export default defineSchema({
   miaSessions: defineTable({tokenHash:v.string(),expiresAt:v.number()}).index('by_hash',['tokenHash']).index('by_expiry',['expiresAt']),
   miaRates: defineTable({key:v.string(),count:v.number(),expiresAt:v.number()}).index('by_key',['key']).index('by_expiry',['expiresAt']),
-  miaRequests: defineTable({key:v.string(),principal:v.string(),reference:v.string(),name:v.string(),email:v.string(),subject:v.string(),description:v.string(),page:v.string(),transcript:v.string(),consent:v.boolean(),context:v.any(),status:v.string(),ackStatus:v.string(),ackAttempts:v.optional(v.number()),providerId:v.optional(v.string()),createdAt:v.number(),updatedAt:v.number(),expiresAt:v.number()}).index('by_key',['key']).index('by_expiry',['expiresAt']).index('by_ack',['ackStatus']),
+  miaRequests: defineTable({key:v.string(),principal:v.string(),reference:v.string(),name:v.string(),email:v.string(),subject:v.string(),description:v.string(),page:v.string(),transcript:v.string(),consent:v.boolean(),context:v.any(),status:v.string(),ackStatus:v.string(),ackAttempts:v.optional(v.number()),providerId:v.optional(v.string()),createdAt:v.number(),updatedAt:v.number(),expiresAt:v.number()}).index('by_key',['key']).index('by_expiry',['expiresAt']).index('by_ack',['ackStatus']).index('by_delivery_ack',['status','ackStatus']),
   users: defineTable({
     firebaseUid: v.optional(v.string()),
     email: v.string(),

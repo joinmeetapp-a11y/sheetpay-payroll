@@ -76,7 +76,7 @@ export const markDelivery = internalMutation({args:{id:v.id('miaRequests'),statu
 }});
 export const markAck = internalMutation({args:{id:v.id('miaRequests'),status:v.string()},handler:async(ctx,args)=>{const row=await ctx.db.get(args.id);if(!row)return;const attempts=(row.ackAttempts||0)+1;await ctx.db.patch(args.id,{ackStatus:args.status==='pending'&&attempts>=8?'failed':args.status,ackAttempts:attempts});}});
 export const getTicket = internalQuery({args:{id:v.id('miaRequests')},handler:(ctx,args)=>ctx.db.get(args.id)});
-export const pendingAcks = internalQuery({args:{},handler:async ctx=>await ctx.db.query('miaRequests').withIndex('by_ack',(q:any)=>q.eq('ackStatus','pending')).take(50)});
+export const pendingAcks = internalQuery({args:{},handler:async ctx=>await ctx.db.query('miaRequests').withIndex('by_delivery_ack',(q:any)=>q.eq('status','accepted').eq('ackStatus','pending')).take(50)});
 export const purgeExpired = internalMutation({args:{},handler:async ctx=>{
  for(const table of ['miaSessions','miaRates','miaRequests'] as const){
   const rows=await ctx.db.query(table).withIndex('by_expiry',(q:any)=>q.lt('expiresAt',Date.now())).take(300);
