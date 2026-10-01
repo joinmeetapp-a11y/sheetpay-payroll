@@ -38,6 +38,7 @@ jobs:
         run: npm run build:frontend
 
       - name: Deploy production Convex functions
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: npx convex deploy
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
