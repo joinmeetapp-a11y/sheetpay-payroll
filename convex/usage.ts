@@ -2,6 +2,7 @@ import { query, mutation, internalMutation, QueryCtx, MutationCtx } from './_gen
 import { ConvexError, v } from 'convex/values';
 import { Id } from './_generated/dataModel';
 import { isAdminEmail } from './admin';
+import { requireBusinessAccess } from './lib/accountantAccess';
 import { ACCOUNTANT_PLANS, effectiveAccountantPlan, usagePeriod, limitMessage, type AccountantLimitKind } from '../shared/accountantPlans';
 export { ACCOUNTANT_PLANS } from '../shared/accountantPlans';
 export const FREE_LIMITS = ACCOUNTANT_PLANS.free.limits;
@@ -76,7 +77,6 @@ export const getMonthlyUsage = query({ args: { requesterUid: v.optional(v.string
   if (!actor) return null;
   let user = actor;
   if (args.businessId) {
-    const { requireBusinessAccess } = await import('./lib/accountantAccess');
     user = (await requireBusinessAccess(ctx, await ctx.db.get(args.businessId), 'read')).owner;
   }
   const row = await counter(ctx, user._id);
@@ -120,7 +120,6 @@ export const authorizeLegacyEmail = internalMutation({
     if (!args.businessId || !args.recipients.length || args.recipients.length > 2500) throw new ConvexError('Select a client and employee recipients.');
     const businessId = ctx.db.normalizeId('businesses', args.businessId);
     const business = businessId ? await ctx.db.get(businessId) : null;
-    const { requireBusinessAccess } = await import('./lib/accountantAccess');
     const access = await requireBusinessAccess(ctx, business, 'sendPayslips');
     if (access.actor._id !== actor._id) throw new ConvexError('Unauthorized');
     const employees = await ctx.db.query('employees').withIndex('by_business', q => q.eq('businessId', business!._id)).collect();

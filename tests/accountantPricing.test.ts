@@ -70,6 +70,12 @@ describe('Accountant pricing and authoritative limits', () => {
     await owner.mutation(api.bulkPayslipEmail.reserveEmailBatch, { businessId: ids.business, payrollRunId: run, employeeIds: [ids.employees[0]] });
     expect((await owner.query(api.usage.getMonthlyUsage, {})).emailsReserved).toBe(10);
   });
+  it('loads dashboard usage for an authorized selected client', async () => {
+    const { owner, ids } = await fixture('accountant_yearly');
+    const usage = await owner.query(api.usage.getMonthlyUsage, { requesterUid: 'pricing-owner', businessId: ids.business });
+    expect(usage).toMatchObject({ plan: 'accountant_yearly', clientCount: 1, employeeCount: 10, reminderEmailsReserved: 0 });
+    expect(usage.reminderLimits.email).toBe(750);
+  });
   it('denies cross-workspace usage, exports and employee snapshots', async () => {
     const { t, ids, owner, payroll } = await fixture();
     const run = await owner.mutation(api.payrollRuns.create, payroll);
