@@ -1,5 +1,5 @@
 import { action, internalMutation, mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internal as _internal } from "./_generated/api";
 import { requireBusinessAccess, recordAccountantActivity } from "./lib/accountantAccess";
 import { createWorkspaceNotification } from "./notifications";
@@ -14,7 +14,7 @@ async function requireRun(ctx: any, businessId: any, payrollRunId: any, capabili
   const business = await ctx.db.get(businessId);
   const access = await requireBusinessAccess(ctx, business, capability);
   const run = await ctx.db.get(payrollRunId);
-  if (!run || run.businessId !== businessId || run.userId !== access.owner._id) throw new Error("Payroll run is outside the selected client.");
+  if (!run || run.businessId !== businessId || run.userId !== access.owner._id) throw new ConvexError("Payroll run is outside the selected client.");
   return { business, run, ...access };
 }
 
@@ -64,9 +64,9 @@ export const authorizeUpload = internalMutation({
   args: { businessId: v.id("businesses"), payrollRunId: v.id("payrollRuns"), employeeId: v.id("employees"), payrollRunUpdatedAt: v.number() },
   handler: async (ctx, args) => {
     const access = await requireRun(ctx, args.businessId, args.payrollRunId, "sendPayslips");
-    if (access.run.updatedAt !== args.payrollRunUpdatedAt) throw new Error("Payroll run changed. Refresh the preview and generate the attachment again.");
+    if (access.run.updatedAt !== args.payrollRunUpdatedAt) throw new ConvexError("Payroll run changed. Refresh the preview and generate the attachment again.");
     const employee = await ctx.db.get(args.employeeId);
-    if (!employee || employee.businessId !== args.businessId || !ready(snapshotRow(access.run, args.employeeId))) throw new Error("Employee payslip is not ready in this payroll run.");
+    if (!employee || employee.businessId !== args.businessId || !ready(snapshotRow(access.run, args.employeeId))) throw new ConvexError("Employee payslip is not ready in this payroll run.");
     return { ownerId: access.owner._id, actorId: access.actor._id };
   },
 });
@@ -75,9 +75,9 @@ export const registerPrivateUpload = internalMutation({
   args: { businessId: v.id("businesses"), payrollRunId: v.id("payrollRuns"), employeeId: v.id("employees"), storageId: v.id("_storage"), payrollRunUpdatedAt: v.number() },
   handler: async (ctx, args) => {
     const { owner, actor, run } = await requireRun(ctx, args.businessId, args.payrollRunId, "sendPayslips");
-    if (run.updatedAt !== args.payrollRunUpdatedAt) throw new Error("Payroll run changed. Generate the attachment again.");
+    if (run.updatedAt !== args.payrollRunUpdatedAt) throw new ConvexError("Payroll run changed. Generate the attachment again.");
     const employee = await ctx.db.get(args.employeeId);
-    if (employee?.businessId !== args.businessId || !ready(snapshotRow(run, args.employeeId))) throw new Error("Employee is outside this payroll run.");
+    if (employee?.businessId !== args.businessId || !ready(snapshotRow(run, args.employeeId))) throw new ConvexError("Employee is outside this payroll run.");
     const now = Date.now();
     return ctx.db.insert("bulkPayslipUploads", { workspaceOwnerId: owner._id, uploadedByUserId: actor._id,
       ...args, status: "ready", createdAt: now, expiresAt: now + 7 * 24 * 60 * 60 * 1000 });
@@ -89,7 +89,7 @@ export const storePayslip = action({
   handler: async (ctx, { pdf, ...args }): Promise<any> => {
     await ctx.runMutation(internal.bulkPayslipEmail.authorizeUpload, args);
     const bytes = new Uint8Array(pdf);
-    if (bytes.length < 8 || bytes.length > 5 * 1024 * 1024 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") throw new Error("Generate a valid PDF under 5 MB before sending.");
+    if (bytes.length < 8 || bytes.length > 5 * 1024 * 1024 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") throw new ConvexError("Generate a valid PDF under 5 MB before sending.");
     const storageId = await ctx.storage.store(new Blob([pdf], { type: "application/pdf" }));
     try { return await ctx.runMutation(internal.bulkPayslipEmail.registerPrivateUpload, { ...args, storageId }); }
     catch (error) { await ctx.storage.delete(storageId); throw error; }
@@ -104,29 +104,29 @@ export const createBulkEmailJob = mutation({
   },
   handler: async (ctx, args) => {
     const { actor, owner, business, run } = await requireRun(ctx, args.businessId, args.payrollRunId, "sendPayslips");
-    if (!args.employeeIds.length || args.employeeIds.length > 100 || args.uploadIds.length !== args.employeeIds.length) throw new Error("Send 1 to 100 matching payslips per batch.");
+    if (!args.employeeIds.length || args.employeeIds.length > 100 || args.uploadIds.length !== args.employeeIds.length) throw new ConvexError("Send 1 to 100 matching payslips per batch.");
     const subject = args.subject.trim();
     const message = args.message.trim();
     const replyTo = args.replyTo?.trim().toLowerCase();
-    if (!subject || subject.length > 180 || /[\r\n]/.test(subject) || message.length > 2000) throw new Error("Check the email subject and message length.");
-    if (replyTo && !emailPattern.test(replyTo)) throw new Error("Enter a valid reply-to email address.");
-    if (!args.idempotencyKey || args.idempotencyKey.length > 180) throw new Error("Invalid send request.");
+    if (!subject || subject.length > 180 || /[\r\n]/.test(subject) || message.length > 2000) throw new ConvexError("Check the email subject and message length.");
+    if (replyTo && !emailPattern.test(replyTo)) throw new ConvexError("Enter a valid reply-to email address.");
+    if (!args.idempotencyKey || args.idempotencyKey.length > 180) throw new ConvexError("Invalid send request.");
     const key = `${args.businessId}:${args.payrollRunId}:${args.idempotencyKey}`;
     const duplicate = await ctx.db.query("bulkEmailJobs").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", key)).first();
     if (duplicate) return { jobId: duplicate._id, status: duplicate.status, duplicate: true };
-    if (new Set(args.employeeIds).size !== args.employeeIds.length || new Set(args.uploadIds).size !== args.uploadIds.length) throw new Error("Remove duplicate employees or attachments.");
+    if (new Set(args.employeeIds).size !== args.employeeIds.length || new Set(args.uploadIds).size !== args.uploadIds.length) throw new ConvexError("Remove duplicate employees or attachments.");
     const recipients: any[] = [];
     for (let i = 0; i < args.employeeIds.length; i++) {
       const employeeId = args.employeeIds[i];
       const employee = await ctx.db.get(employeeId);
       const snapshot = snapshotRow(run, employeeId);
-      if (!employee || employee.businessId !== args.businessId || !ready(snapshot) || !emailPattern.test(String(employee.email || "").trim())) throw new Error("Every recipient needs a ready payslip and a valid employee email in this payroll run.");
+      if (!employee || employee.businessId !== args.businessId || !ready(snapshot) || !emailPattern.test(String(employee.email || "").trim())) throw new ConvexError("Every recipient needs a ready payslip and a valid employee email in this payroll run.");
       const upload = await ctx.db.get(args.uploadIds[i]);
-      if (!upload || upload.businessId !== args.businessId || upload.payrollRunId !== args.payrollRunId || upload.employeeId !== employeeId || upload.workspaceOwnerId !== owner._id || upload.uploadedByUserId !== actor._id || upload.payrollRunUpdatedAt !== run.updatedAt || upload.expiresAt <= Date.now()) throw new Error("PDF attachment does not match this employee and payroll run. Generate it again.");
+      if (!upload || upload.businessId !== args.businessId || upload.payrollRunId !== args.payrollRunId || upload.employeeId !== employeeId || upload.workspaceOwnerId !== owner._id || upload.uploadedByUserId !== actor._id || upload.payrollRunUpdatedAt !== run.updatedAt || upload.expiresAt <= Date.now()) throw new ConvexError("PDF attachment does not match this employee and payroll run. Generate it again.");
       const previous = await priorRecipients(ctx, run._id, employeeId);
-      if (previous.length) throw new Error(`${employee.name}'s payslip was already queued. Use Retry Failed for failed emails.`);
+      if (previous.length) throw new ConvexError(`${employee.name}'s payslip was already queued. Use Retry Failed for failed emails.`);
       const metadata = await ctx.db.system.get(upload.storageId);
-      if (!metadata || metadata.contentType !== "application/pdf" || metadata.size > 5 * 1024 * 1024) throw new Error("Payslip attachment is no longer available. Generate it again.");
+      if (!metadata || metadata.contentType !== "application/pdf" || metadata.size > 5 * 1024 * 1024) throw new ConvexError("Payslip attachment is no longer available. Generate it again.");
       recipients.push({ employee, upload, snapshot });
     }
     const now = Date.now();
@@ -171,21 +171,21 @@ export const retryFailed = mutation({
   args: { jobId: v.id("bulkEmailJobs"), idempotencyKey: v.string() },
   handler: async (ctx, args) => {
     const prior = await ctx.db.get(args.jobId);
-    if (!prior) throw new Error("Send job not found.");
+    if (!prior) throw new ConvexError("Send job not found.");
     const { actor, owner } = await requireRun(ctx, prior.businessId, prior.payrollRunId, "sendPayslips");
-    if (!args.idempotencyKey || args.idempotencyKey.length > 180) throw new Error("Invalid retry request.");
+    if (!args.idempotencyKey || args.idempotencyKey.length > 180) throw new ConvexError("Invalid retry request.");
     const key = `retry:${prior._id}:${args.idempotencyKey}`;
     const duplicate = await ctx.db.query("bulkEmailJobs").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", key)).first();
     if (duplicate) return { jobId: duplicate._id, duplicate: true };
     const previousRows = await ctx.db.query("bulkEmailRecipients").withIndex("by_job", (q) => q.eq("jobId", prior._id)).collect();
     const failedRows = previousRows.filter((row) => row.status === "failed");
-    if (!failedRows.length) throw new Error("There are no failed payslips to retry.");
+    if (!failedRows.length) throw new ConvexError("There are no failed payslips to retry.");
     const now = Date.now();
     for (const item of failedRows) {
       const other = await priorRecipients(ctx, prior.payrollRunId, item.employeeId);
-      if (other.some((row: any) => row._id !== item._id && [...acceptedStatuses, "queued", "sending"].includes(row.status))) throw new Error("This employee's payslip was already sent or queued for retry.");
-      if (item.outcomeUnknown && now - item.createdAt >= 23 * 60 * 60 * 1000) throw new Error("The provider did not confirm this email. Check Resend delivery logs before resending; its duplicate protection window has expired.");
-      if (!await ctx.db.system.get(item.storageId)) throw new Error("PDF attachment is no longer available.");
+      if (other.some((row: any) => row._id !== item._id && [...acceptedStatuses, "queued", "sending"].includes(row.status))) throw new ConvexError("This employee's payslip was already sent or queued for retry.");
+      if (item.outcomeUnknown && now - item.createdAt >= 23 * 60 * 60 * 1000) throw new ConvexError("The provider did not confirm this email. Check Resend delivery logs before resending; its duplicate protection window has expired.");
+      if (!await ctx.db.system.get(item.storageId)) throw new ConvexError("PDF attachment is no longer available.");
     }
     const jobId = await ctx.db.insert("bulkEmailJobs", { workspaceOwnerId: owner._id, requestedByUserId: actor._id,
       businessId: prior.businessId, payrollRunId: prior.payrollRunId, status: "queued", subject: prior.subject,
@@ -228,7 +228,7 @@ export const updateRecipient = internalMutation({
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.recipientId);
     if (!row || acceptedStatuses.includes(row.status)) return;
-    if (args.status === "sent" && !args.resendMessageId) throw new Error("Provider confirmation is required.");
+    if (args.status === "sent" && !args.resendMessageId) throw new ConvexError("Provider confirmation is required.");
     await ctx.db.patch(row._id, { status: args.status, resendMessageId: args.resendMessageId,
       errorMessage: args.errorMessage, outcomeUnknown: args.outcomeUnknown, sentAt: args.status === "sent" ? Date.now() : row.sentAt });
   },
