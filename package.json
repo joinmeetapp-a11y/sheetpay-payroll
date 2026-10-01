@@ -13,7 +13,8 @@
     "convex:dev": "npx convex dev",
     "convex:deploy": "npx convex deploy",
     "firebase:deploy": "firebase deploy --only hosting",
-    "deploy": "npm run build:frontend && firebase deploy --only hosting"
+    "deploy": "npm run build:frontend && firebase deploy --only hosting",
+    "test:bulk": "vitest run tests/bulkPayslipEmail.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -46,6 +47,8 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "convex-test": "^0.0.60",
+    "vitest": "^5.0.3"
   }
 }

@@ -210,7 +210,7 @@ export const deliverNotification = internalAction({
         category: String(context.notification.category),
         deepLink: context.notification.actionUrl || "/accountant",
       });
-      if (result.ok) messageIds.push(result.messageId);
+      if (result.ok === true) messageIds.push(result.messageId);
       else {
         const code = result.code || "FCM_SEND_FAILED";
         failures.push(code);
@@ -249,3 +249,4 @@ export const dispatchDueReminders = internalAction({
     return { claimed: claimed.length };
   },
 });
+

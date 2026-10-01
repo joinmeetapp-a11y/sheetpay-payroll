@@ -54,7 +54,8 @@ export const updateStatusByResendId = internalMutation({
       });
       if (existing.emailType === "accountantReminder" && existing.relatedEntityId) {
         try {
-          const notification = await ctx.db.get(existing.relatedEntityId as any);
+          const notificationId = ctx.db.normalizeId("notifications", existing.relatedEntityId);
+          const notification = notificationId ? await ctx.db.get(notificationId) : null;
           if (notification) {
             const delivery = await ctx.db.query("notificationDeliveries")
               .withIndex("by_notification_channel", (q) => q.eq("notificationId", notification._id).eq("channel", "email")).first();
@@ -144,3 +145,4 @@ export const getEmailLogs = query({
     return ctx.db.query("emailLogs").order("desc").take(limit);
   },
 });
+

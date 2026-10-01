@@ -744,6 +744,8 @@ export const updateForCurrentUser = mutation({
   args: {
     reminderId: v.id("reminders"),
     patch: v.object({
+      businessId: v.optional(v.id("businesses")),
+      payrollId: v.optional(v.id("payrollRuns")),
       title: v.optional(v.string()),
       description: v.optional(v.string()),
       type: v.optional(v.string()),
@@ -836,3 +838,4 @@ export const snoozeForCurrentUser = mutation({
     return { ok: true };
   },
 });
+

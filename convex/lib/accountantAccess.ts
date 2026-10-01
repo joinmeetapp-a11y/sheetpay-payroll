@@ -56,7 +56,8 @@ export async function requireBusinessAccess(
   const allowed = roles[membership.role];
   const canSend = capability === "sendPayslips" && membership.canSendPayslips;
   if (!canSend && !allowed?.has(capability)) throw new Error("PERMISSION_DENIED");
-  await ctx.db.patch(membership._id, { lastActiveAt: Date.now() });
+  // Queries have a read-only database; update activity only in mutations.
+  if (typeof ctx.db.patch === "function") await ctx.db.patch(membership._id, { lastActiveAt: Date.now() });
   return { actor, owner, membership, role: membership.role };
 }
 

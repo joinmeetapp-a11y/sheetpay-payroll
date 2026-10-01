@@ -292,6 +292,7 @@ export default defineSchema({
   })
     .index("by_workspace", ["workspaceOwnerId"])
     .index("by_business", ["businessId"])
+    .index("by_run", ["payrollRunId"])
     .index("by_idempotency", ["idempotencyKey"]),
 
   bulkEmailRecipients: defineTable({
@@ -312,9 +313,16 @@ export default defineSchema({
     createdAt: v.number(),
     sentAt: v.optional(v.number()),
     deliveredAt: v.optional(v.number()),
+    sendingAt: v.optional(v.number()),
+    outcomeUnknown: v.optional(v.boolean()),
+    businessName: v.optional(v.string()),
+    periodLabel: v.optional(v.string()),
+    fromEmail: v.optional(v.string()),
+    replyToEmail: v.optional(v.string()),
   })
     .index("by_job", ["jobId"])
     .index("by_job_employee", ["jobId", "employeeId"])
+    .index("by_run_employee", ["payrollRunId", "employeeId"])
     .index("by_resend_message", ["resendMessageId"])
     .index("by_idempotency", ["idempotencyKey"])
     .index("by_workspace", ["workspaceOwnerId"]),
@@ -323,6 +331,9 @@ export default defineSchema({
     workspaceOwnerId: v.id("users"),
     businessId: v.id("businesses"),
     employeeId: v.id("employees"),
+    payrollRunId: v.optional(v.id("payrollRuns")),
+    uploadedByUserId: v.optional(v.id("users")),
+    payrollRunUpdatedAt: v.optional(v.number()),
     storageId: v.id("_storage"),
     status: v.string(),
     createdAt: v.number(),

@@ -34,5 +34,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Test private bulk payslip email delivery
+        run: npm run test:bulk
+
       - name: Build the backend project UI
         run: npm run build:frontend
+

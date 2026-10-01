@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { assertWithinLimit, incrementUsageIdempotent } from "./usage";
 import { createWorkspaceNotification } from "./notifications";
+import { requireBusinessAccess } from "./lib/accountantAccess";
 
 async function requirePayrollOwner(ctx: any, userId: any, businessId?: any) {
   const identity = await ctx.auth.getUserIdentity();
@@ -22,8 +23,7 @@ export const getByBusiness = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
     const business = await ctx.db.get(args.businessId);
-    const user = business ? await ctx.db.get(business.userId) : null;
-    if (!user || user.firebaseUid !== identity.subject) return [];
+    try { await requireBusinessAccess(ctx, business, "read"); } catch { return []; }
     return ctx.db
       .query("payrollRuns")
       .withIndex("by_business", (q) => q.eq("businessId", args.businessId))

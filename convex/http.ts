@@ -105,6 +105,8 @@ http.route({
     const secret = process.env.RESEND_WEBHOOK_SECRET;
     const rawBody = await request.text();
 
+    if (!secret) return new Response("Resend webhook signing secret is not configured", { status: 503 });
+
     if (secret) {
       const ok = await verifyResendSignature(
         rawBody,
@@ -159,6 +161,9 @@ http.route({
         status: newStatus,
         errorMessage,
         deliveredAt,
+      });
+      await ctx.runMutation((internal as any).bulkPayslipEmail.updateDeliveryFromWebhook, {
+        resendMessageId: emailId, status: newStatus, errorMessage, deliveredAt,
       });
     }
 
