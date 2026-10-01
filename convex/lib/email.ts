@@ -95,7 +95,8 @@ function isTransientResendError(status: number, body: any): boolean {
  */
 async function postResend(
   apiKey: string,
-  payload: Record<string, any>
+  payload: Record<string, any>,
+  idempotencyKey?: string
 ): Promise<{ ok: boolean; status: number; body: any; attempts: number }> {
   let attempts = 0;
   let lastBody: any = null;
@@ -105,9 +106,11 @@ async function postResend(
     try {
       const res = await fetch(RESEND_ENDPOINT, {
         method: "POST",
+        ...(idempotencyKey ? {signal: AbortSignal.timeout(15000)} : {}),
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
+          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         },
         body: JSON.stringify(payload),
       });
@@ -440,4 +443,14 @@ export async function sendSubscriptionEmail(
     businessId: data.businessId,
     idempotencyKey: data.eventId ? `${kind}:${data.eventId}` : undefined,
   });
+}
+
+
+/** Private support mail uses the existing sender configuration and retry transport.
+ * Only metadata is stored in miaRequests; message bodies are never logged. */
+export async function sendSupportMail(payload: { to: string; subject: string; text: string; replyTo: string; idempotencyKey: string }) {
+ const env = resolveEnv();
+ if (!env.apiKey || !isValidEmail(payload.to) || !isValidEmail(payload.replyTo)) return {ok:false};
+ const result=await postResend(env.apiKey,{from:`${env.fromName} <${env.fromEmail}>`,to:[payload.to],reply_to:payload.replyTo,subject:payload.subject,text:payload.text},payload.idempotencyKey);
+ return {ok:result.ok && typeof result.body?.id==='string',id:result.ok?result.body?.id:undefined};
 }

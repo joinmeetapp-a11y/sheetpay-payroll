@@ -1,0 +1,19 @@
+# Mia support operation
+
+The shared widget in Sheetpay-Payslip- App.tsx mounts once outside route-specific pages, including accountant setup/dashboard. It calls mia.chat and mia.submitRequest on the existing Accountant Convex deployment. It does not touch payroll or billing mutations. The reusable public/mia-support.webp portrait depicts a fictional character generated for this project.
+
+Configuration: existing OPENAI_API_KEY and RESEND_API_KEY are server-only. MIA_SUPPORT_MODEL optionally overrides the default gpt-4o-mini. Existing RESEND_FROM_EMAIL / RESEND_FROM_NAME choose the verified sender, with the existing notifications@sheetpay.app fallback. No new frontend secrets. Firebase bearer tokens establish identity; no browser-supplied user ID is accepted.
+
+Knowledge is maintained in shared/miaKnowledge.ts with repository source references. Prices and features are computed from shared/accountantPlans.ts. Update the knowledge facts when product behavior or policies change; never apply Mobile refund policies to Accountant. Mia has no tools for changing accounts and never loads employee records. Internal links rendered by the frontend must exist in ROUTE_METADATA.
+
+Chat: max 2,000 characters per question, at most 12 history items / 12,000 characters; frontend sends eight bounded entries. Responses API requests use store:false and max_output_tokens:650, 25-second timeout, no tools. Support allowances are separate from Cayla/OCR usage. Authenticated identity limits: 10 questions/minute, 100/day; anonymous capability: 4/minute, 20/day. Global daily ceilings: 1,000 authenticated and 200 anonymous model calls, enforced transactionally before provider requests. Session minting is also bounded globally (50/hour, 200/day); rotating tokens cannot bypass the global ceilings. These intentional budgets may temporarily require human support when exhausted.
+
+Anonymous sessions use high-entropy 24-hour capabilities; only their SHA-256 hashes are stored. Sessions and rate counters expire in 24-48 hours and are purged hourly. Chat content is not stored server-side; bounded sessionStorage history expires 24 hours after activity and signed-in history is removed on account change. In-flight responses are ignored after identity changes/clearing.
+
+Support requests: maximum two/day per anonymous capability or five/day per authenticated identity; global daily ceilings of 20 anonymous /100 authenticated requests. Honeypot, field-size/email validation and rate checks run server-side. Request keys are scoped to authenticated identity or anonymous capability. Atomic send locks and immutable payload comparisons prevent concurrent/changed duplicate sends. The same Resend idempotency keys are reused for ticket and acknowledgement delivery; uncertain sends are never retried beyond the provider's 24-hour idempotency window. A request is successful only after Resend accepts it. Acknowledgement is tracked separately and retried by cron. Request records are internal-only, retained 90 days with hourly purge; email mailbox copies follow provider practices. No message contents are logged by the new paths.
+
+Contacts: tel:+18682923787, https://wa.me/18682923787, mailto:support@sheetpay.app. No live human chat or response-time promises.
+
+Checks: npm run test:mia, npm run test:pricing, npm run test:bulk and npx tsc --noEmit --project tsconfig.pricing.json in backend; production build, lint and Playwright suite in landing repo. Deployment pins backend revision in established landing Firebase workflow.
+
+Official API reference used: https://developers.openai.com/api/docs/guides/text and https://platform.openai.com/docs/api-reference/responses/create.

@@ -15,7 +15,8 @@
     "firebase:deploy": "firebase deploy --only hosting",
     "deploy": "npm run build:frontend && firebase deploy --only hosting",
     "test:bulk": "vitest run tests/bulkPayslipEmail.test.ts",
-    "test:pricing": "vitest run tests/accountantPricing.test.ts"
+    "test:pricing": "vitest run tests/accountantPricing.test.ts",
+    "test:mia": "vitest run tests/mia.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

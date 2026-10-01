@@ -12,4 +12,8 @@ crons.interval(
   {}
 );
 
+crons.interval('mia-retention', { hours: 1 }, (internal as any).miaInternal.purgeExpired, {});
+crons.interval('mia-ack-retry', { minutes: 15 }, (internal as any).mia.retryAcknowledgements, {});
+
 export default crons;
+
