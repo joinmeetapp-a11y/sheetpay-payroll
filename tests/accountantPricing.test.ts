@@ -117,6 +117,13 @@ describe('Accountant pricing and authoritative limits', () => {
     expect(transactions).toHaveLength(2);
     expect(JSON.parse(transactions[1][1].body)).toMatchObject({ items: [{ price_id: ACCOUNTANT_PLANS.accountant_yearly.paddlePriceId, quantity: 1 }], custom_data: { firebaseUid: 'pricing-owner', plan: 'accountant_yearly' } });
   });
+  it('reuses the existing production Paddle notification destination without touching subscriptions', async () => {
+    const { t } = await fixture(); vi.stubEnv('PADDLE_API_KEY','test-only'); vi.stubEnv('CONVEX_SITE_URL','https://test.convex.site');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({data:[{id:'ntfset_test',type:'url',destination:'https://test.convex.site/paddle/webhook',active:true,traffic_source:'platform',subscribed_events:['transaction.completed','transaction.paid','subscription.created','subscription.activated','subscription.updated','subscription.past_due','subscription.paused','subscription.resumed','subscription.canceled'],endpoint_secret_key:'pdl_ntfset_private_test'}]})));
+    vi.stubGlobal('fetch',fetchMock);
+    expect(await t.action(api.paddle.prepareAccountantWebhook,{})).toMatchObject({ok:true,created:false,notificationSettingId:'ntfset_test'});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it('only signed Paddle webhooks can unlock a plan, replay stays idempotent', async () => {
     const { t, owner } = await fixture(); vi.stubEnv('PADDLE_WEBHOOK_SECRET', 'signing-test');
     const body = JSON.stringify({ event_id: 'evt_pricing', event_type: 'subscription.created', occurred_at: new Date().toISOString(), data: { id: 'sub_pricing', status: 'active', custom_data: { firebaseUid: 'pricing-owner', plan: 'accountant_monthly' }, items: [{ price: { id: ACCOUNTANT_PLANS.accountant_yearly.paddlePriceId } }], current_billing_period: { starts_at: '2026-10-01T00:00:00Z', ends_at: '2027-10-01T00:00:00Z' } } });

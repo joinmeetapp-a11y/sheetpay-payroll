@@ -125,3 +125,35 @@ export const cancelSubscription = action({
   },
 });
 
+
+/** Deployment-only setup for the existing Accountant webhook. Never public. */
+export const prepareAccountantWebhook = internalAction({ args: {}, handler: async () => {
+  if (process.env.PADDLE_WEBHOOK_SECRET) return { ok: true, alreadyConfigured: true };
+  const apiKey = process.env.PADDLE_API_KEY;
+  const site = process.env.CONVEX_SITE_URL;
+  if (!apiKey || !site?.startsWith('https://') || !site.endsWith('.convex.site')) return { ok: false, reason: 'Existing Paddle key or Convex site URL is unavailable.' };
+  const destination = `${site}/paddle/webhook`;
+  const events = ['transaction.completed', 'transaction.paid', 'subscription.created', 'subscription.activated', 'subscription.updated', 'subscription.past_due', 'subscription.paused', 'subscription.resumed', 'subscription.canceled'];
+  const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+  const response = await fetch(`${getPaddleBase(apiKey)}/notification-settings?per_page=200`, { headers });
+  if (!response.ok) return { ok: false, destination, reason: `Paddle notification settings cannot be read (${response.status}). The existing API key needs notification_setting.read permission.` };
+  const settings = (await response.json()).data || [];
+  let setting = settings.find((item: any) => item.type === 'url' && item.destination === destination && item.active && ['platform', 'all'].includes(item.traffic_source));
+  let created = false;
+  if (!setting) {
+    const result = await fetch(`${getPaddleBase(apiKey)}/notification-settings`, { method: 'POST', headers, body: JSON.stringify({ description: 'Sheetpay Accountant production billing', type: 'url', destination, subscribed_events: events, traffic_source: 'platform', include_sensitive_fields: false }) });
+    if (!result.ok) return { ok: false, destination, reason: `Paddle webhook could not be created (${result.status}). Configure this existing Convex endpoint in Paddle Notifications and save its signing secret in Convex.` };
+    setting = (await result.json()).data; created = true;
+  } else {
+    const existingEvents = (setting.subscribed_events || []).map((event: any) => typeof event === 'string' ? event : event.name);
+    if (events.some(event => !existingEvents.includes(event))) {
+      const updated = await fetch(`${getPaddleBase(apiKey)}/notification-settings/${setting.id}`, { method: 'PATCH', headers, body: JSON.stringify({ subscribed_events: [...new Set([...existingEvents, ...events])] }) });
+      if (!updated.ok) return { ok: false, destination, reason: `Paddle webhook events could not be updated (${updated.status}). Subscribe this endpoint to the subscription lifecycle and transaction.completed events.` };
+      setting = (await updated.json()).data;
+    }
+  }
+  if (typeof setting?.endpoint_secret_key !== 'string' || !/^pdl_ntfset_[A-Za-z0-9_]+$/.test(setting.endpoint_secret_key)) return { ok: false, destination, reason: 'Paddle did not return a valid notification signing secret.' };
+  // The deployment redirects this internal result to a private temporary file,
+  // installs the secret in Convex, and prints only sanitized status.
+  return { ok: true, destination, notificationSettingId: setting.id, created, endpointSecret: setting.endpoint_secret_key };
+} });
