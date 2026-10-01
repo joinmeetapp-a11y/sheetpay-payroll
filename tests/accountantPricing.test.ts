@@ -124,6 +124,16 @@ describe('Accountant pricing and authoritative limits', () => {
     expect(await t.action(api.paddle.prepareAccountantWebhook,{})).toMatchObject({ok:true,created:false,notificationSettingId:'ntfset_test'});
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it('identifies a legacy yearly subscription by provider price without modifying billing', async () => {
+    const { t, ids, owner } = await fixture();
+    await t.run(ctx=>ctx.db.patch(ids.user,{plan:'accountant',planStatus:'active',paddleSubscriptionId:'sub_legacy',paddleCustomerId:'ctm_legacy'}));
+    vi.stubEnv('PADDLE_API_KEY','test-only');
+    const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({data:{id:'sub_legacy',customer_id:'ctm_legacy',status:'active',items:[{price:{id:ACCOUNTANT_PLANS.accountant_yearly.paddlePriceId}}]}})));
+    vi.stubGlobal('fetch',fetchMock);
+    expect(await t.action(api.paddle.reconcileLegacyAccountantPlans,{})).toMatchObject({updated:1,failed:0});
+    expect((await owner.query(api.usage.getMonthlyUsage,{})).plan).toBe('accountant_yearly');
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty('method');
+  });
   it('only signed Paddle webhooks can unlock a plan, replay stays idempotent', async () => {
     const { t, owner } = await fixture(); vi.stubEnv('PADDLE_WEBHOOK_SECRET', 'signing-test');
     const body = JSON.stringify({ event_id: 'evt_pricing', event_type: 'subscription.created', occurred_at: new Date().toISOString(), data: { id: 'sub_pricing', status: 'active', custom_data: { firebaseUid: 'pricing-owner', plan: 'accountant_monthly' }, items: [{ price: { id: ACCOUNTANT_PLANS.accountant_yearly.paddlePriceId } }], current_billing_period: { starts_at: '2026-10-01T00:00:00Z', ends_at: '2027-10-01T00:00:00Z' } } });

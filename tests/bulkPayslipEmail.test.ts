@@ -35,10 +35,14 @@ async function fixture() {
     await t.run(async (ctx) => { const upload: any = await ctx.db.get(uploadId); await ctx.db.patch(upload.storageId, { contentType: "application/pdf" } as any); });
     return uploadId;
   };
-  const job = async (employeeIds = [ids.john, ids.jane], uploadIds?: any[], key = "initial") => owner.mutation(api.bulkPayslipEmail.createBulkEmailJob, {
-    businessId: ids.business, payrollRunId: ids.run, employeeIds, uploadIds: uploadIds || await Promise.all(employeeIds.map((id) => upload(id))),
+  const job = async (employeeIds = [ids.john, ids.jane], uploadIds?: any[], key = "initial") => {
+    // Keep storage actions sequential, matching the client attachment flow.
+    // convex-test storage does not isolate concurrent action transactions.
+    if (!uploadIds) { uploadIds = []; for (const id of employeeIds) uploadIds.push(await upload(id)); }
+    return owner.mutation(api.bulkPayslipEmail.createBulkEmailJob, {
+    businessId: ids.business, payrollRunId: ids.run, employeeIds, uploadIds,
     subject: "Your Payslip — Trini Builders — September 2026", message: "Your payslip is attached.", idempotencyKey: key,
-  });
+  }); };
   return { t, ids, owner, upload, job };
 }
 

@@ -152,8 +152,32 @@ export const prepareAccountantWebhook = internalAction({ args: {}, handler: asyn
       setting = (await updated.json()).data;
     }
   }
-  if (typeof setting?.endpoint_secret_key !== 'string' || !/^pdl_ntfset_[A-Za-z0-9_]+$/.test(setting.endpoint_secret_key)) return { ok: false, destination, reason: 'Paddle did not return a valid notification signing secret.' };
+  if (typeof setting?.endpoint_secret_key !== 'string' || setting.endpoint_secret_key.length < 16) {
+    const details = await fetch(`${getPaddleBase(apiKey)}/notification-settings/${setting.id}`, { headers });
+    if (details.ok) setting = (await details.json()).data;
+  }
+  if (typeof setting?.endpoint_secret_key !== 'string' || setting.endpoint_secret_key.length < 16 || setting.endpoint_secret_key.length > 500 || /[\r\n\0]/.test(setting.endpoint_secret_key)) return { ok: false, destination, notificationSettingId: setting?.id, created, secretLength: typeof setting?.endpoint_secret_key === 'string' ? setting.endpoint_secret_key.length : 0, reason: 'Paddle did not return a usable notification signing secret. Copy the existing destination signing secret from Paddle Notifications to the Convex PADDLE_WEBHOOK_SECRET setting.' };
   // The deployment redirects this internal result to a private temporary file,
   // installs the secret in Convex, and prints only sanitized status.
   return { ok: true, destination, notificationSettingId: setting.id, created, endpointSecret: setting.endpoint_secret_key };
+} });
+
+/** Read the provider to identify legacy billing cadence; never reprice or cancel. */
+export const reconcileLegacyAccountantPlans = internalAction({ args: {}, handler: async ctx => {
+  const key = process.env.PADDLE_API_KEY;
+  if (!key) return { inspected: 0, updated: 0, skipped: 0, failed: 0 };
+  const users = await ctx.runQuery((internal as any).users.legacyAccountantBilling, {}) as any[];
+  let updated = 0, skipped = 0, failed = 0;
+  for (const user of users) {
+    const response = await fetch(`${getPaddleBase(key)}/subscriptions/${encodeURIComponent(user.subscriptionId)}`, { headers: { Authorization: `Bearer ${key}` } });
+    if (!response.ok) { failed++; continue; }
+    const subscription = (await response.json()).data;
+    const priceId = subscription?.items?.[0]?.price?.id;
+    const plan = priceId === priceFor('accountant_yearly') ? 'accountant_yearly' : priceId === priceFor('accountant_monthly') ? 'accountant_monthly' : null;
+    if (!plan || !['active', 'trialing'].includes(subscription.status) || (user.customerId && user.customerId !== subscription.customer_id)) { skipped++; continue; }
+    const starts = Date.parse(subscription.current_billing_period?.starts_at), ends = Date.parse(subscription.current_billing_period?.ends_at);
+    const result = await ctx.runMutation((internal as any).users.recordVerifiedLegacyPlan, { userId: user.userId, subscriptionId: user.subscriptionId, plan, priceId, ...(Number.isFinite(starts) ? { billingPeriodStart: starts } : {}), ...(Number.isFinite(ends) ? { billingPeriodEnd: ends } : {}) });
+    if (result.updated) updated++; else skipped++;
+  }
+  return { inspected: users.length, updated, skipped, failed };
 } });

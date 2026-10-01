@@ -1,4 +1,4 @@
-import { internalQuery, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 
@@ -120,3 +120,17 @@ export const setOnboardingCompleted = mutation({
   },
 });
 
+
+export const legacyAccountantBilling = internalQuery({ args: {}, handler: async ctx => {
+  const users = await ctx.db.query('users').filter(q => q.and(q.eq(q.field('plan'), 'accountant'), q.eq(q.field('planStatus'), 'active'))).take(500);
+  return users.filter(user => user.paddleSubscriptionId).map(user => ({ userId: user._id, subscriptionId: user.paddleSubscriptionId!, customerId: user.paddleCustomerId }));
+} });
+export const recordVerifiedLegacyPlan = internalMutation({
+  args: { userId: v.id('users'), subscriptionId: v.string(), plan: v.union(v.literal('accountant_monthly'), v.literal('accountant_yearly')), priceId: v.string(), billingPeriodStart: v.optional(v.number()), billingPeriodEnd: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user || user.plan !== 'accountant' || user.planStatus !== 'active' || user.paddleSubscriptionId !== args.subscriptionId) return { updated: false };
+    await ctx.db.patch(user._id, { plan: args.plan, paddlePriceId: args.priceId, ...(args.billingPeriodStart ? { billingPeriodStart: args.billingPeriodStart } : {}), ...(args.billingPeriodEnd ? { billingPeriodEnd: args.billingPeriodEnd } : {}) });
+    return { updated: true };
+  },
+});
