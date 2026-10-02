@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { ACCOUNTANT_PLANS, effectiveAccountantPlan } from "../shared/accountantPlans";
 import { isAdminEmail } from "./admin";
+import { stopForUpgrade } from "./accountantCampaign";
 
 /**
  * Paddle price → internal plan mapping.
@@ -177,6 +178,8 @@ export const applyPaddleEvent = internalMutation({
     });
 
     // Fire the appropriate subscription email based on the state transition.
+    // Same transaction as the verified billing update: queued promotional work stops.
+    await stopForUpgrade(ctx, user._id);
     // internal.emails.notifySubscription is idempotent via eventId (the
     // transaction/subscription id), so replaying webhooks won't double-send.
     const planName =

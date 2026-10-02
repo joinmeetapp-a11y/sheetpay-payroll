@@ -17,5 +17,5 @@ crons.interval('mia-ack-retry', { minutes: 15 }, (internal as any).mia.retryAckn
 
 crons.interval('temporary-payroll-attachments-retention', { hours: 1 }, (internal as any).privacyRetention.purgeExpiredAttachments, {});
 
+crons.interval("accountant-free-onboarding-campaign", { minutes: 1 }, (internal as any).accountantCampaignWorker.dispatch, {});
 export default crons;
-

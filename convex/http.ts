@@ -316,4 +316,19 @@ http.route({
   }),
 });
 
+function marketingPage(body:string) {
+ return new Response('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sheetpay marketing preferences</title></head><body style="font-family:Arial,sans-serif;background:#f3f8f5;color:#183d33;margin:0;padding:30px 20px"><main style="max-width:520px;margin:40px auto;padding:26px;background:white;border-radius:20px"><h1>Sheetpay</h1>'+body+'</main></body></html>',{headers:{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"}});
+}
+for(const method of ["GET","POST"] as const) http.route({
+ path:"/marketing/unsubscribe",method,
+ handler:httpAction(async(ctx,request)=>{
+  const token=new URL(request.url).searchParams.get("token")||"";
+  if(!/^[a-f0-9]{64}$/.test(token))return marketingPage("<h2>Link unavailable</h2><p>Use the unsubscribe link in your Sheetpay email, or contact support@sheetpay.app.</p>");
+  if(request.method==="GET")return marketingPage('<h2>Unsubscribe from marketing emails?</h2><p>This stops promotional emails. Security, billing, requested payslip emails and payroll reminders remain available.</p><form method="post"><button style="padding:14px 20px;border:0;border-radius:12px;background:#087b58;color:white;font-size:16px">Unsubscribe</button></form>');
+  const hash=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token));
+  const tokenHash=Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  const ok=await ctx.runMutation((internal as any).accountantCampaign.unsubscribe,{tokenHash});
+  return marketingPage(ok?"<h2>You're unsubscribed</h2><p>You will no longer receive this marketing campaign. Essential account messages and requested payroll emails are unaffected.</p>":"<h2>Link unavailable</h2><p>Contact support@sheetpay.app for help.</p>");
+ })
+});
 export default http;

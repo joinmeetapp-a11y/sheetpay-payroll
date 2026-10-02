@@ -61,6 +61,25 @@ function resolveEnv() {
   };
 }
 
+/** Campaign uses the same verified sender/key, but owns its durable retry state.
+ * One provider request per attempt; eligibility is rechecked immediately beforehand.
+ */
+export function campaignSender() {
+ const env=resolveEnv();
+ return {from:`${env.fromName} <${env.fromEmail}>`,replyTo:env.replyTo,configured:!!env.apiKey};
+}
+export async function sendCampaignMail(payload:Record<string,unknown>,key:string,guard:()=>Promise<boolean>) {
+ const env=resolveEnv();
+ if(!env.apiKey)return {reason:"email_service_not_configured",retryable:false};
+ if(!await guard())return {reason:"eligibility_changed",retryable:false};
+ try {
+  const response=await fetch(RESEND_ENDPOINT,{method:"POST",signal:AbortSignal.timeout(15000),headers:{Authorization:"Bearer "+env.apiKey,"Content-Type":"application/json","Idempotency-Key":key},body:JSON.stringify(payload)});
+  const body=await response.json().catch(()=>({}));
+  if(response.ok&&typeof body.id==="string")return {messageId:body.id,retryable:false};
+  return {reason:"resend_http_"+response.status,retryable:response.status>=500||response.status===429||response.status===408||(response.status===409&&body.name==="concurrent_idempotent_requests")};
+ }catch{return {reason:"provider_response_uncertain",retryable:true};}
+}
+
 /** Basic RFC-5321 sanity check to catch obvious malformed addresses early. */
 function isValidEmail(addr: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr);

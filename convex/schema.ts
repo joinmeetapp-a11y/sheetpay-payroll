@@ -2,6 +2,21 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  accountantEmailCampaigns: defineTable({
+    userId:v.id("users"),campaignId:v.string(),enrolledAt:v.number(),currentDay:v.number(),
+    nextSendAt:v.number(),lastSentAt:v.optional(v.number()),completedAt:v.optional(v.number()),
+    stoppedAt:v.optional(v.number()),stopReason:v.optional(v.string()),
+    status:v.union(v.literal("active"),v.literal("completed"),v.literal("converted"),v.literal("unsubscribed"),v.literal("paused"),v.literal("failed")),
+    tokenHash:v.string(),unsubscribeToken:v.string(),
+  }).index("by_user_campaign",["userId","campaignId"]).index("by_due",["status","nextSendAt"]).index("by_token",["tokenHash"]),
+  accountantCampaignEvents: defineTable({
+    campaign:v.id("accountantEmailCampaigns"),userId:v.id("users"),campaignId:v.string(),
+    key:v.string(),eventType:v.string(),day:v.optional(v.number()),status:v.string(),
+    scheduledAt:v.number(),sentAt:v.optional(v.number()),resendMessageId:v.optional(v.string()),
+    failureReason:v.optional(v.string()),attempts:v.optional(v.number()),firstAttemptAt:v.optional(v.number()),
+    leaseUntil:v.optional(v.number()),leaseId:v.optional(v.string()),
+    payload:v.optional(v.object({from:v.string(),to:v.array(v.string()),reply_to:v.string(),subject:v.string(),html:v.string(),text:v.string(),headers:v.record(v.string(),v.string())})),
+  }).index("by_key",["key"]).index("by_campaign",["campaign"]).index("by_resend",["resendMessageId"]),
   miaSessions: defineTable({tokenHash:v.string(),expiresAt:v.number()}).index('by_hash',['tokenHash']).index('by_expiry',['expiresAt']),
   miaRates: defineTable({key:v.string(),count:v.number(),expiresAt:v.number()}).index('by_key',['key']).index('by_expiry',['expiresAt']),
   miaRequests: defineTable({key:v.string(),principal:v.string(),reference:v.string(),name:v.string(),email:v.string(),subject:v.string(),description:v.string(),page:v.string(),transcript:v.string(),consent:v.boolean(),context:v.any(),status:v.string(),ackStatus:v.string(),ackAttempts:v.optional(v.number()),providerId:v.optional(v.string()),createdAt:v.number(),updatedAt:v.number(),expiresAt:v.number()}).index('by_key',['key']).index('by_expiry',['expiresAt']).index('by_ack',['ackStatus']).index('by_delivery_ack',['status','ackStatus']),
@@ -9,6 +24,7 @@ export default defineSchema({
     firebaseUid: v.optional(v.string()),
     email: v.string(),
     emailVerified: v.optional(v.boolean()),
+    marketingUnsubscribedAt: v.optional(v.number()),
     displayName: v.optional(v.string()),
     accountType: v.optional(v.union(v.literal("business"), v.literal("accountant"))),
     createdAt: v.optional(v.number()),

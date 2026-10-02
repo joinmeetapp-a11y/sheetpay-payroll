@@ -1,6 +1,7 @@
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { enrollAfterSignup } from "./accountantCampaign";
 
 function requireOwnIdentity(identity: { subject: string } | null, firebaseUid: string) {
   if (!identity || identity.subject !== firebaseUid) throw new Error("Unauthenticated");
@@ -87,6 +88,10 @@ export const createOrUpdate = mutation({
       displayName: args.displayName,
       userId: String(id),
     });
+    if (args.accountType === "accountant") {
+      await enrollAfterSignup(ctx, (await ctx.db.get(id))!);
+      await ctx.scheduler.runAfter(0, (internal as any).accountantCampaignWorker.enrollNewUser, { userId: id });
+    }
     return id;
   },
 });
@@ -135,4 +140,3 @@ export const recordVerifiedLegacyPlan = internalMutation({
     return { updated: true };
   },
 });
-
