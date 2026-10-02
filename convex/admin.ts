@@ -9,7 +9,7 @@ import { paginationOptsValidator } from "convex/server";
  * All non-seed grants happen via the grantRole mutation, which writes to
  * adminRoles and to the immutable adminAuditLogs.
  */
-export const ADMIN_EMAILS = ["antoniokurt23@gmail.com"];
+export const ADMIN_EMAILS = ["antoniokurt23@gmail.com", "antoniokpreudhomme@gmail.com"];
 
 export function isAdminEmail(email?: string | null): boolean {
   if (!email) return false;
@@ -77,6 +77,8 @@ function can(role: AdminRole, cap: keyof typeof ROLE_CAPS): boolean {
 const PLAN_PRICE_USD: Record<string, number> = {
   pro: 29,
   accountant: 99,
+  accountant_monthly: 97,
+  accountant_yearly: 97,
   free: 0,
 };
 
@@ -184,6 +186,41 @@ export const getOverview = query({
       byStatus,
       signupsByDay,
     };
+  },
+});
+
+export const getUsageOverview = query({
+  args: { requesterUid: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const auth = await resolveAdmin(ctx, args.requesterUid);
+    if (!auth || !can(auth.role, "overview")) return { authorized: false as const };
+    const users = await ctx.db.query("users").collect();
+    const counters = await ctx.db.query("usageCounters").collect();
+    const currentPeriod = new Date().toISOString().slice(0, 7);
+    const current = counters.filter((row) => row.period === currentPeriod);
+    const totals = current.reduce((acc, row) => ({
+      payrollRuns: acc.payrollRuns + (row.payrollRunsUsed || 0),
+      payslips: acc.payslips + (row.payslipsUsed || 0),
+      ocrScans: acc.ocrScans + (row.ocrScansUsed || 0),
+      caylaActions: acc.caylaActions + (row.caylaActionsUsed || 0),
+      emails: acc.emails + (row.payslipEmailsUsed || row.emailsReserved || 0),
+      reminderEmails: acc.reminderEmails + (row.reminderEmailsReserved || 0),
+    }), { payrollRuns: 0, payslips: 0, ocrScans: 0, caylaActions: 0, emails: 0, reminderEmails: 0 });
+    const byUser = new Map(users.map((user) => [String(user._id), user]));
+    const topUsage = current.map((row) => {
+      const user = byUser.get(String(row.userId));
+      return {
+        userId: row.userId,
+        email: user?.email || "Unknown",
+        plan: user?.plan || "free",
+        payrollRuns: row.payrollRunsUsed || 0,
+        payslips: row.payslipsUsed || 0,
+        ocrScans: row.ocrScansUsed || 0,
+        caylaActions: row.caylaActionsUsed || 0,
+        emails: row.payslipEmailsUsed || row.emailsReserved || 0,
+      };
+    }).sort((a, b) => (b.payrollRuns + b.payslips + b.ocrScans + b.caylaActions + b.emails) - (a.payrollRuns + a.payslips + a.ocrScans + a.caylaActions + a.emails)).slice(0, 50);
+    return { authorized: true as const, period: currentPeriod, totals, topUsage };
   },
 });
 
