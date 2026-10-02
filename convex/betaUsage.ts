@@ -39,6 +39,8 @@ function globalCap(name: string): number | null {
 export const getForUser = query({
   args: { firebaseUid: v.string() },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || identity.subject !== args.firebaseUid) throw new Error("Unauthenticated");
     const row = await ctx.db
       .query("betaUsage")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.firebaseUid))
@@ -70,6 +72,9 @@ export const reserve = mutation({
     requestId: v.string(),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || identity.subject !== args.firebaseUid) throw new Error("Unauthenticated");
+    if (!args.requestId || args.requestId.length > 180) throw new Error("Invalid request");
     // Kill-switch check
     if (args.kind === "cayla" && !isCaylaEnabled()) {
       return { ok: false as const, reason: "cayla_disabled" as const };
@@ -84,6 +89,7 @@ export const reserve = mutation({
       .withIndex("by_request_id", (q) => q.eq("requestId", args.requestId))
       .first();
     if (existing) {
+      if (existing.firebaseUid !== args.firebaseUid || existing.kind !== args.kind) throw new Error("Forbidden");
       return { ok: true as const, deduped: true };
     }
 
@@ -186,7 +192,7 @@ export const release = internalMutation({
       .query("betaRequests")
       .withIndex("by_request_id", (q) => q.eq("requestId", args.requestId))
       .first();
-    if (!req) return { released: false };
+    if (!req || req.firebaseUid !== args.firebaseUid || req.kind !== args.kind) return { released: false };
     await ctx.db.delete(req._id);
 
     const row = await ctx.db
@@ -275,3 +281,4 @@ export const internalGetForUser = internalQuery({
       .first();
   },
 });
+

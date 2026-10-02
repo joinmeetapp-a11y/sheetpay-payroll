@@ -158,12 +158,12 @@ async function callOpenAI(body: Record<string, unknown>): Promise<Record<string,
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, store: false }),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenAI ${res.status}: ${err.slice(0, 300)}`);
+    throw new Error(`AI service unavailable (${res.status}). Please retry.`);
   }
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const content = json.choices?.[0]?.message?.content ?? "{}";
@@ -200,8 +200,10 @@ export const extractPayslip = action({
     // vision call. Convex handles per-user cap, global cap, and kill
     // switch; on any failure we return a structured beta-limit error the
     // client renders as the "Beta OCR Limit Reached" prompt.
+    if (args.base64Data.length > 21 * 1024 * 1024) throw new Error("Upload an image under 15 MB");
     const identity = await ctx.auth.getUserIdentity();
-    const firebaseUid = identity?.subject;
+    if (!identity?.subject) throw new Error("Unauthenticated");
+    const firebaseUid = identity.subject;
     const requestId = args.requestId || `ocr-${firebaseUid || "anon"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     if (firebaseUid) {
@@ -210,6 +212,7 @@ export const extractPayslip = action({
         kind: "ocr",
         requestId,
       });
+      if (reservation.deduped) return { success: false, error: "This request was already processed. Start a new request if needed." };
       if (!reservation.ok) {
         if (reservation.reason === "ocr_disabled") {
           return { success: false, error: "OCR is temporarily unavailable during beta testing.", betaLimit: "ocr_disabled" };
@@ -248,7 +251,7 @@ export const extractPayslip = action({
 
       return { success: true, data: normalizeMobilePayslip(parsed) };
     } catch (err: unknown) {
-      console.error("[mobileAi.extractPayslip] failed:", err);
+      console.error("Mobile OCR provider operation failed");
       // Refund the reservation so a failed provider call doesn't burn
       // a beta slot.
       if (firebaseUid) {
@@ -259,7 +262,7 @@ export const extractPayslip = action({
             kind: "ocr",
           });
         } catch (releaseErr) {
-          console.warn("[mobileAi.extractPayslip] release failed:", releaseErr);
+          console.warn("Mobile OCR allowance release failed");
         }
       }
       return {
@@ -284,13 +287,15 @@ export const generatePayslip = action({
     | { success: true; data: unknown }
     | { success: false; error: string; betaLimit?: "cayla" | "cayla_disabled" }
   > => {
+    if (args.prompt.length > 8000) throw new Error("Prompt is too long");
     if (!args.prompt.trim()) {
       return { success: false, error: "Prompt is required." };
     }
 
     // Beta enforcement for Cayla / AI-create.
     const identity = await ctx.auth.getUserIdentity();
-    const firebaseUid = identity?.subject;
+    if (!identity?.subject) throw new Error("Unauthenticated");
+    const firebaseUid = identity.subject;
     const requestId = args.requestId || `cayla-${firebaseUid || "anon"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     if (firebaseUid) {
@@ -299,6 +304,7 @@ export const generatePayslip = action({
         kind: "cayla",
         requestId,
       });
+      if (reservation.deduped) return { success: false, error: "This request was already processed. Start a new request if needed." };
       if (!reservation.ok) {
         if (reservation.reason === "cayla_disabled") {
           return { success: false, error: "Cayla is temporarily unavailable during beta testing.", betaLimit: "cayla_disabled" };
@@ -332,7 +338,7 @@ export const generatePayslip = action({
 
       return { success: true, data: normalizeMobilePayslip(parsed) };
     } catch (err: unknown) {
-      console.error("[mobileAi.generatePayslip] failed:", err);
+      console.error("Mobile AI provider operation failed");
       if (firebaseUid) {
         try {
           await ctx.runMutation(internal.betaUsage.release, {
@@ -341,7 +347,7 @@ export const generatePayslip = action({
             kind: "cayla",
           });
         } catch (releaseErr) {
-          console.warn("[mobileAi.generatePayslip] release failed:", releaseErr);
+          console.warn("Mobile AI allowance release failed");
         }
       }
       return {
@@ -351,3 +357,4 @@ export const generatePayslip = action({
     }
   },
 });
+

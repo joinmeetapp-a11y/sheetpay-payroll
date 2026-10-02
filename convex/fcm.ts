@@ -121,7 +121,7 @@ export const deliverOccurrence = internalAction({
     const errors: string[] = [];
 
     for (const t of tokens) {
-      const result = await sendFcmMessage(projectId, accessToken, t.token, args.title, args.body, {
+      const result = await sendFcmMessage(projectId, accessToken, t.token, "Sheetpay reminder", "Open Sheetpay to review your reminder.", {
         deepLink: args.deepLink ?? "/",
         reminderId: String(args.reminderId),
         occurrenceId: args.occurrenceId,
@@ -205,7 +205,7 @@ export const deliverNotification = internalAction({
     const messageIds: string[] = [];
     const failures: string[] = [];
     for (const token of tokens) {
-      const result = await sendFcmMessage(projectId, accessToken, token.token, context.notification.title, context.notification.message, {
+      const result = await sendFcmMessage(projectId, accessToken, token.token, "Sheetpay notification", "Open your workspace to review this update.", {
         notificationId: String(context.notification._id),
         category: String(context.notification.category),
         deepLink: context.notification.actionUrl || "/accountant",
@@ -249,4 +249,5 @@ export const dispatchDueReminders = internalAction({
     return { claimed: claimed.length };
   },
 });
+
 

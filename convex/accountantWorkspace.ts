@@ -198,11 +198,13 @@ export const updateMember = mutation({
   handler: async (ctx, args) => {
     if (!inviteRoles.has(args.role)) throw new Error("Choose a valid workspace role.");
     const business = await ctx.db.get(args.businessId);
-    const { actor, owner } = await requireBusinessAccess(ctx, business, "manageTeam");
+    const { actor, owner, membership } = await requireBusinessAccess(ctx, business, "manageTeam");
     const member = await ctx.db.get(args.memberId);
     if (!member || member.workspaceOwnerId !== owner._id) throw new Error("Team member not found.");
     const available = await ctx.db.query("businesses").withIndex("by_user", (q) => q.eq("userId", owner._id)).collect();
-    const validIds = new Set(available.map((client: any) => String(client._id)));
+    const permitted = available.filter((client: any) => actor._id === owner._id || membership?.allClients || membership?.clientIds.includes(String(client._id)));
+    if (args.allClients && actor._id !== owner._id && !membership?.allClients) throw new Error("CLIENT_ACCESS_DENIED");
+    const validIds = new Set(permitted.map((client: any) => String(client._id)));
     if (args.clientIds.some((id) => !validIds.has(id))) throw new Error("Client access must belong to this workspace.");
     await ctx.db.patch(member._id, {
       role: args.role, clientIds: args.clientIds, allClients: args.allClients,
@@ -239,4 +241,5 @@ export const revokeInvitation = mutation({
     return { ok: true };
   },
 });
+
 

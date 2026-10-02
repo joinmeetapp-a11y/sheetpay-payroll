@@ -94,10 +94,10 @@ export const storePayslip = action({
     const bytes = new Uint8Array(pdf);
     if (bytes.length < 8 || bytes.length > 5 * 1024 * 1024 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") throw new ConvexError("Generate a valid PDF under 5 MB before sending.");
     let attachment: Uint8Array = bytes;
+    let document: PDFDocument;
+    try { document = await PDFDocument.load(bytes); } catch { throw new ConvexError("Generate a readable PDF before sending."); }
+    if (document.getPageCount() !== 1) throw new ConvexError("Each employee attachment must contain only their own payslip page.");
     if (authorization?.watermark) {
-      let document: PDFDocument;
-      try { document = await PDFDocument.load(bytes); } catch { throw new ConvexError("Generate a readable PDF before sending."); }
-      if (document.getPageCount() !== 1) throw new ConvexError("Each employee attachment must contain only their own payslip page.");
       const font = await document.embedFont(StandardFonts.Helvetica);
       const page = document.getPage(0), label = "Created with Sheetpay · Free plan";
       page.drawText(label, { x: Math.max(10, (page.getWidth() - font.widthOfTextAtSize(label, 9)) / 2), y: 12, size: 9, font, color: rgb(.3, .45, .36) });
@@ -315,3 +315,4 @@ export const reserveEmailBatch = mutation({
     return { reserved: args.employeeIds.length };
   },
 });
+

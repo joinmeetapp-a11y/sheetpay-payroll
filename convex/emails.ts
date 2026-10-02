@@ -41,7 +41,7 @@ export const inviteTeamMember = action({
       role: args.role,
     });
     // 2. Send the invitation email.
-    const origin = (args.appOrigin || "https://sheetpay.app").replace(/\/$/, "");
+    const origin = "https://sheetpay.app";
     const inviteLink = `${origin}/invite/${created.token}`;
     const result = await sendTeamInviteEmail(ctx, args.inviteeEmail, {
       inviterName: args.inviterName,
@@ -77,7 +77,7 @@ export const resendInvitation = action({
       invitationId: args.invitationId as any,
     });
     if (!invite) return { ok: false, error: "invitation not found" };
-    const origin = (args.appOrigin || "https://sheetpay.app").replace(/\/$/, "");
+    const origin = "https://sheetpay.app";
     const inviteLink = `${origin}/invite/${prep.token}`;
     const result = await sendTeamInviteEmail(ctx, invite.inviteeEmail, {
       inviterName: args.resendingUserName,
@@ -128,10 +128,9 @@ export const send = action({
     return sendEmail(ctx, {
       to: identityEmail,
       emailType: args.emailType,
-      data: args.data ?? {},
-      userId: args.userId,
-      businessId: args.businessId,
-      idempotencyKey: args.idempotencyKey,
+      data: { displayName: identity.name || "" },
+      userId: identity.subject,
+      idempotencyKey: `welcome:${identity.subject}`,
     });
   },
 });
@@ -146,8 +145,8 @@ export const sendWelcome = action({
       throw new Error("Unauthenticated or recipient does not match the signed-in user");
     }
     return sendWelcomeEmail(ctx, identityEmail, {
-      displayName: args.displayName,
-      userId: args.userId,
+      displayName: identity.name || "",
+      userId: identity.subject,
     });
   },
 });
@@ -181,8 +180,7 @@ export const sendPayslip = action({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity || (args.userId && args.userId !== identity.subject)) throw new Error("Unauthorized");
-    await ctx.runMutation(internal.usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: `payslip:${crypto.randomUUID()}` });
-    return sendPayslipEmail(ctx, args.to, { ...args, userId: identity.subject } as any);
+    throw new Error("Use the reviewed payslip email workflow in your Accountant dashboard.");
   },
 });
 
@@ -281,4 +279,5 @@ export const previewTemplate = action({
     return { ok: true, ...rendered };
   },
 });
+
 

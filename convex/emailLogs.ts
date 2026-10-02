@@ -1,4 +1,5 @@
 import { internalMutation, internalQuery, query } from "./_generated/server";
+import { requireOwnUser } from "./lib/ownUser";
 import { v } from "convex/values";
 
 /** Insert an email log row and return the id (used by lib/email.ts). */
@@ -134,15 +135,12 @@ export const getEmailLogs = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 50;
-    if (args.userId) {
-      return ctx.db
-        .query("emailLogs")
-        .withIndex("by_user", (q) => q.eq("userId", args.userId!))
-        .order("desc")
-        .take(limit);
-    }
-    return ctx.db.query("emailLogs").order("desc").take(limit);
+    const { user, identity } = await requireOwnUser(ctx, args.userId);
+    const limit = Math.min(100, Math.max(1, args.limit ?? 50));
+    const rows = await ctx.db.query("emailLogs").withIndex("by_user", q => q.eq("userId", args.userId || String(user._id))).order("desc").take(limit);
+    return rows.filter(row => row.userId === String(user._id) || row.userId === identity.subject);
+
   },
 });
+
 

@@ -1,4 +1,4 @@
-import { action } from "./_generated/server";
+import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { buildNiaSystemPrompt, looksLikePromptInjection, NIA_SUPPORT_PHONE_DISPLAY } from "./lib/niaPrompt";
@@ -23,7 +23,7 @@ interface ChatMessage {
  * Non-streaming for this first pass — Groq is fast enough that responses
  * arrive in ~1s. Streaming can be layered on later via SSE proxy.
  */
-export const chat = action({
+export const chat = internalAction({
   args: {
     requesterUid: v.optional(v.string()),
     anonSessionId: v.optional(v.string()),
@@ -196,7 +196,7 @@ export const chat = action({
  * transcript by email, and flips the conversation to "waiting_for_human"
  * so subsequent Nia sends stay quiet.
  */
-export const requestHumanHandoff = action({
+export const requestHumanHandoff = internalAction({
   args: {
     conversationId: v.id("niaConversations"),
     requesterUid: v.optional(v.string()),
@@ -232,3 +232,4 @@ export const requestHumanHandoff = action({
     return { ok: true, caseId: result.caseId };
   },
 });
+

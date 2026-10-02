@@ -32,6 +32,7 @@ export const transcribeAudio = action({
     }
 
     const buf = Buffer.from(args.audioBase64, "base64");
+    if (!buf.length || buf.length > 15 * 1024 * 1024) throw new Error("Record audio under 15 MB");
     const ext =
       (args.mimeType.split("/")[1] || "webm").split(";")[0].replace("x-", "") ||
       "webm";
@@ -51,13 +52,13 @@ export const transcribeAudio = action({
       });
       if (!res.ok) {
         const err = await res.text();
-        console.error("[ai.transcribeAudio] OpenAI error:", err);
+        console.error("Audio provider request failed", res.status);
         return { text: "", error: `OpenAI ${res.status}` };
       }
       const json = (await res.json()) as { text?: string };
       return { text: json.text ?? "" };
     } catch (err: any) {
-      console.error("[ai.transcribeAudio] fetch failed:", err);
+      console.error("Audio provider connection failed");
       return { text: "", error: err?.message ?? "network error" };
     }
   },
@@ -214,11 +215,12 @@ Rules:
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, store: false }),
+        signal: AbortSignal.timeout(45000),
       });
       if (!res.ok) {
         const err = await res.text();
-        console.error("[ai.extractPayrollDocument] OpenAI error:", err);
+        console.error("OCR provider request failed", res.status);
         return { ok: false, error: `OpenAI ${res.status}`, employees: [] };
       }
       const json = (await res.json()) as any;
@@ -244,13 +246,14 @@ Rules:
         fileName: args.fileName ?? null,
       };
     } catch (err: any) {
-      console.error("[ai.extractPayrollDocument] fetch failed:", err);
+      console.error("OCR provider connection failed");
       return {
         ok: false,
-        error: err?.message ?? "network error",
+        error: "OCR could not complete. Please retry or import a spreadsheet.",
         employees: [],
       };
     }
   },
 });
+
 

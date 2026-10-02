@@ -45,10 +45,11 @@ export const sendEmail = action({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity || (args.userId && args.userId !== identity.subject)) throw new Error("Unauthorized");
     if (args.emailType === "employeePayslip") {
-      await ctx.runMutation((_internal as any).usage.authorizeLegacyEmail, { firebaseUid: identity.subject, businessId: args.businessId, recipients: [args.to], opId: crypto.randomUUID() });
+      throw new Error("Use the reviewed payslip email workflow in your Accountant dashboard.");
     } else if (args.emailType !== "welcome" || args.to.trim().toLowerCase() !== String(identity.email || "").toLowerCase()) {
       throw new Error("Use the authorized Sheetpay workflow for this email.");
     }
-    return sendEmailImpl(ctx, { ...args, userId: identity.subject, data: args.data ?? {} });
+    return sendEmailImpl(ctx, { to: String(identity.email), emailType: "welcome", userId: identity.subject, data: { displayName: identity.name || "" }, idempotencyKey: `welcome:${identity.subject}` });
   },
 });
+

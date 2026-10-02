@@ -10,7 +10,7 @@ export type UsageKind = 'payslip' | 'payroll' | 'ocr' | 'cayla' | 'email';
 const fields = { payslip: 'payslipsUsed', payroll: 'payrollRunsUsed', ocr: 'ocrScansUsed', cayla: 'caylaActionsUsed', email: 'emailsReserved' } as const;
 const kinds = v.union(v.literal('payslip'), v.literal('payroll'), v.literal('ocr'), v.literal('cayla'), v.literal('email'));
 export function accountantPlanFor(user: any) {
-  return isAdminEmail(user?.email || '') ? 'accountant_monthly' as const : effectiveAccountantPlan(user);
+  return (user?.emailVerified === true && isAdminEmail(user?.email || '')) ? 'accountant_monthly' as const : effectiveAccountantPlan(user);
 }
 export function historyAccessible(user: any, createdAt: number) {
   const days = ACCOUNTANT_PLANS[accountantPlanFor(user)].historyDays;

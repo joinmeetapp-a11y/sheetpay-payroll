@@ -1,3 +1,4 @@
+import { PDFDocument, StandardFonts } from "pdf-lib";
 /// <reference types="vite/client" />
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
@@ -5,7 +6,8 @@ import { anyApi } from "convex/server";
 import schema from "../convex/schema";
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
 const api = anyApi;
-const pdfBytes = new TextEncoder().encode("%PDF-1.4\nsynthetic employee payslip test attachment\n%%EOF").buffer;
+async function employeePdf(label: string, pages = 1) { const doc = await PDFDocument.create(); doc.setSubject(label); const font = await doc.embedFont(StandardFonts.Helvetica); for(let i=0;i<pages;i++)doc.addPage().drawText(label,{font,x:20,y:100}); return (await doc.save()).buffer as ArrayBuffer; }
+const pdfBytes = new TextEncoder().encode("%PDF-1.4\ninvalid PDF\n%%EOF").buffer;
 
 async function fixture() {
   const t = convexTest(schema, modules);
@@ -30,7 +32,7 @@ async function fixture() {
   });
   const owner = t.withIdentity({ subject: "owner" });
   const upload = async (employeeId = ids.john, runId = ids.run) => {
-    const uploadId = await owner.action(api.bulkPayslipEmail.storePayslip, { businessId: ids.business, payrollRunId: runId, employeeId, payrollRunUpdatedAt: ids.runUpdatedAt, pdf: new TextEncoder().encode(`%PDF-1.4\nemployee:${employeeId}\n%%EOF`).buffer });
+    const uploadId = await owner.action(api.bulkPayslipEmail.storePayslip, { businessId: ids.business, payrollRunId: runId, employeeId, payrollRunUpdatedAt: ids.runUpdatedAt, pdf: await employeePdf(`employee:${employeeId}`) });
     // convex-test currently omits Blob.type from stored file metadata.
     await t.run(async (ctx) => { const upload: any = await ctx.db.get(uploadId); await ctx.db.patch(upload.storageId, { contentType: "application/pdf" } as any); });
     return uploadId;
@@ -70,6 +72,7 @@ describe("private bulk payslip delivery", () => {
   it("rejects invalid PDFs, swapped employee attachments and wrong payroll periods", async () => {
     const { owner, ids, upload, job } = await fixture();
     await expect(owner.action(api.bulkPayslipEmail.storePayslip, { businessId: ids.business, payrollRunId: ids.run, employeeId: ids.john, payrollRunUpdatedAt: ids.runUpdatedAt, pdf: new TextEncoder().encode("bad file").buffer })).rejects.toThrow("valid PDF");
+    await expect(owner.action(api.bulkPayslipEmail.storePayslip, { businessId: ids.business, payrollRunId: ids.run, employeeId: ids.john, payrollRunUpdatedAt: ids.runUpdatedAt, pdf: await employeePdf("Combined payroll", 2) })).rejects.toThrow("only their own payslip page");
     const john = await upload(ids.john), jane = await upload(ids.jane), oldJohn = await upload(ids.john, ids.olderRun);
     await expect(job([ids.john, ids.jane], [jane, john])).rejects.toThrow("does not match");
     await expect(job([ids.john], [oldJohn])).rejects.toThrow("does not match");
@@ -84,6 +87,16 @@ describe("private bulk payslip delivery", () => {
     expect(jobs).toHaveLength(1); expect(jobs[0].recipients).toHaveLength(2);
     expect(jobs[0].recipients[0].storageId).toBeUndefined();
   });
+  it("expires temporary attachment blobs while preserving approved payroll history", async () => {
+    const { t, ids, upload } = await fixture();
+    const id = await upload();
+    const row: any = await t.run(ctx => ctx.db.get(id));
+    await t.run(ctx => ctx.db.patch(id, { expiresAt: Date.now() - 1 }));
+    await t.mutation(api.privacyRetention.purgeExpiredAttachments, {});
+    expect(await t.run(ctx => ctx.db.get(id))).toBeNull();
+    expect(await t.run(ctx => ctx.storage.get(row.storageId))).toBeNull();
+    expect(await t.run(ctx => ctx.db.get(ids.run))).toBeTruthy();
+  });
   it("sends exactly one recipient and their own PDF per Resend request", async () => {
     const { t, job, owner, ids } = await fixture();
     const requests: any[] = [];
@@ -96,7 +109,7 @@ describe("private bulk payslip delivery", () => {
       expect(Buffer.from(body.attachments[0].content, "base64").subarray(0, 5).toString()).toBe("%PDF-");
       expect(body.attachments[0].filename).toBe(body.to[0] === "john@example.com" ? "Trini-Builders_John-Smith_September-2026.pdf" : "Trini-Builders_Jane-Doe_September-2026.pdf");
       expect(headers["Idempotency-Key"]).toContain(ids.run);
-      expect(Buffer.from(body.attachments[0].content, "base64").toString()).toContain(body.to[0] === "john@example.com" ? ids.john : ids.jane);
+      expect((await PDFDocument.load(Buffer.from(body.attachments[0].content, "base64"))).getSubject()).toContain(body.to[0] === "john@example.com" ? ids.john : ids.jane);
     }
     const results = await owner.query(api.bulkPayslipEmail.getEmailJobs, { businessId: ids.business });
     expect(results[0].sentCount).toBe(2); expect(results[0].failedCount).toBe(0);
@@ -156,3 +169,4 @@ describe("private bulk payslip delivery", () => {
     const jobs = await owner.query(api.bulkPayslipEmail.getEmailJobs, { businessId: ids.business }); expect(jobs[0].recipients[0].status).toBe("delivered");
   });
 });
+

@@ -1,6 +1,15 @@
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { requireOwnUser } from "./lib/ownUser";
+import { requireBusinessAccess } from "./lib/accountantAccess";
 import { v } from "convex/values";
 
+async function authorizeOrg(ctx: any, organizationId: string, suppliedUserId?: string) {
+ const { user } = await requireOwnUser(ctx, suppliedUserId);
+ const id = ctx.db.normalizeId("businesses", organizationId);
+ const business = id ? await ctx.db.get(id) : null;
+ await requireBusinessAccess(ctx, business, "manageTeam");
+ return user;
+}
 const INVITATION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 const RESEND_COOLDOWN_MS = 1000 * 60 * 5; // 5 minute rate-limit between resends
 const MAX_RESENDS = 5;
@@ -26,7 +35,7 @@ function generateInvitationToken(): string {
  * is responsible for sending the invite email via the Resend service — this
  * keeps mutation code pure and predictable.
  */
-export const create = mutation({
+export const create = internalMutation({
   args: {
     organizationId: v.string(),
     invitedByUserId: v.string(),
@@ -35,6 +44,8 @@ export const create = mutation({
     role: v.string(),
   },
   handler: async (ctx, args) => {
+    await authorizeOrg(ctx, args.organizationId, args.invitedByUserId);
+    if (!["Admin", "Payroll Manager", "Payroll Assistant", "Viewer"].includes(args.role)) throw new Error("Invalid role");
     const emailLower = args.inviteeEmail.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLower)) {
       throw new Error("Invalid invitee email");
@@ -83,11 +94,12 @@ export const create = mutation({
 export const verifyToken = query({
   args: { token: v.string() },
   handler: async (ctx, args) => {
+    const { identity } = await requireOwnUser(ctx);
     const invite = await ctx.db
       .query("invitations")
       .withIndex("by_token", (q) => q.eq("invitationToken", args.token))
       .first();
-    if (!invite) return { state: "invalid" as const };
+    if (!invite || String(identity.email || "").toLowerCase() !== invite.inviteeEmail) return { state: "invalid" as const };
     if (invite.status === "revoked") return { state: "revoked" as const };
     if (invite.status === "accepted")
       return { state: "already_accepted" as const, invite };
@@ -108,11 +120,14 @@ export const accept = mutation({
     acceptingUserEmail: v.string(),
   },
   handler: async (ctx, args) => {
+    const { identity } = await requireOwnUser(ctx);
     const invite = await ctx.db
       .query("invitations")
       .withIndex("by_token", (q) => q.eq("invitationToken", args.token))
       .first();
     if (!invite) throw new Error("Invitation not found");
+    await requireOwnUser(ctx, args.acceptingUserId);
+    if (String(identity.email || "").toLowerCase() !== invite.inviteeEmail) throw new Error("Forbidden");
     if (invite.status === "revoked") throw new Error("Invitation revoked");
     if (invite.status === "accepted") {
       return { ok: true, invitationId: invite._id, alreadyAccepted: true };
@@ -136,7 +151,7 @@ export const accept = mutation({
 });
 
 /** Revoke a pending invitation. Callers must be authorized org members. */
-export const revoke = mutation({
+export const revoke = internalMutation({
   args: {
     invitationId: v.id("invitations"),
     revokingUserId: v.string(),
@@ -144,6 +159,7 @@ export const revoke = mutation({
   handler: async (ctx, args) => {
     const invite = await ctx.db.get(args.invitationId);
     if (!invite) throw new Error("Invitation not found");
+    await authorizeOrg(ctx, invite.organizationId, args.revokingUserId);
     if (invite.status !== "pending") {
       throw new Error("Only pending invitations can be revoked");
     }
@@ -159,7 +175,7 @@ export const revoke = mutation({
  * Reset a pending invitation's expiry + issue a fresh token so a new email
  * can be sent. Rate-limited so callers cannot mass-resend.
  */
-export const prepareResend = mutation({
+export const prepareResend = internalMutation({
   args: {
     invitationId: v.id("invitations"),
     resendingUserId: v.string(),
@@ -167,6 +183,7 @@ export const prepareResend = mutation({
   handler: async (ctx, args) => {
     const invite = await ctx.db.get(args.invitationId);
     if (!invite) throw new Error("Invitation not found");
+    await authorizeOrg(ctx, invite.organizationId, args.resendingUserId);
     if (invite.status !== "pending") throw new Error("Invitation is not pending");
     const now = Date.now();
     if (invite.lastResentAt && now - invite.lastResentAt < RESEND_COOLDOWN_MS) {
@@ -190,6 +207,7 @@ export const prepareResend = mutation({
 export const listForOrg = query({
   args: { organizationId: v.string() },
   handler: async (ctx, args) => {
+    await authorizeOrg(ctx, args.organizationId);
     return ctx.db
       .query("invitations")
       .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
@@ -226,3 +244,4 @@ export const expireStale = internalMutation({
     return { expired };
   },
 });
+

@@ -2,6 +2,7 @@ import { internalMutation, internalQuery, mutation, query, internalAction } from
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
+import { requireOwnUser } from "./lib/ownUser";
 import { isAdminEmail } from "./admin";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -342,6 +343,8 @@ export const getConversationMessages = query({
   handler: async (ctx, args) => {
     const conv = await ctx.db.get(args.conversationId);
     if (!conv) return null;
+    const { user } = await requireOwnUser(ctx);
+    if (!conv.userId || conv.userId !== user._id) throw new Error("Forbidden");
     const messages = await ctx.db
       .query("niaMessages")
       .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
@@ -362,7 +365,8 @@ export const listSupportCasesForAdmin = query({
   args: { requesterUid: v.optional(v.string()) },
   handler: async (ctx, args) => {
     // Reuse admin auth from convex/admin.ts.
-    if (!args.requesterUid) return { authorized: false as const };
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || identity.emailVerified !== true || !args.requesterUid || identity.subject !== args.requesterUid) return { authorized: false as const };
     const requester = await ctx.db
       .query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", args.requesterUid))
@@ -396,3 +400,4 @@ export const listSupportCasesForAdmin = query({
     };
   },
 });
+

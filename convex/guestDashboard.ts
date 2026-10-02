@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, query } from "./_generated/server";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const MAX_CLIENTS = 1;
@@ -28,7 +28,7 @@ function assertPayloadSize(value: unknown) {
  * sessionStorage. All guest funnel state is scoped to this row so nothing
  * leaks between visitors.
  */
-export const getOrCreate = mutation({
+export const getOrCreate = internalMutation({
   args: { anonSessionId: v.string(), utm: v.optional(v.any()) },
   handler: async (ctx, { anonSessionId, utm }) => {
     if (!anonSessionId || anonSessionId.length < 8 || anonSessionId.length > 128) {
@@ -59,12 +59,12 @@ export const getOrCreate = mutation({
 export const get = query({
   args: { anonSessionId: v.string() },
   handler: async (ctx, { anonSessionId }) => {
-    if (!anonSessionId) return null;
+    if (!/^[a-zA-Z0-9_-]{32,128}$/.test(anonSessionId)) return null;
     const row = await ctx.db
       .query("guestSessions")
       .withIndex("by_anon", (q) => q.eq("anonSessionId", anonSessionId))
       .unique();
-    return row ?? null;
+    return row && row.expiresAt > Date.now() && !row.converted ? row : null;
   },
 });
 
@@ -84,7 +84,7 @@ async function loadSession(ctx: any, anonSessionId: string) {
  * "one client" limit — the UI hides the Add-Client button after the first,
  * but any attempt to write a second one from a tampered request rejects here.
  */
-export const upsertClient = mutation({
+export const upsertClient = internalMutation({
   args: { anonSessionId: v.string(), client: v.any() },
   handler: async (ctx, { anonSessionId, client }) => {
     assertPayloadSize(client);
@@ -106,7 +106,7 @@ export const upsertClient = mutation({
  * Replace the guest employees array. The trial does not cap employee records;
  * OCR usage is limited separately before the OCR action runs.
  */
-export const setEmployees = mutation({
+export const setEmployees = internalMutation({
   args: { anonSessionId: v.string(), employees: v.array(v.any()) },
   handler: async (ctx, { anonSessionId, employees }) => {
     assertPayloadSize(employees);
@@ -124,7 +124,7 @@ export const setEmployees = mutation({
  * Record the single allowed payroll run. A second attempt throws so the UI
  * can present the paywall — the stored row keeps the first payroll intact.
  */
-export const savePayrollRun = mutation({
+export const savePayrollRun = internalMutation({
   args: { anonSessionId: v.string(), payrollRun: v.any() },
   handler: async (ctx, { anonSessionId, payrollRun }) => {
     assertPayloadSize(payrollRun);
@@ -147,7 +147,7 @@ export const savePayrollRun = mutation({
   },
 });
 
-export const savePayslipCustomization = mutation({
+export const savePayslipCustomization = internalMutation({
   args: { anonSessionId: v.string(), customization: v.any() },
   handler: async (ctx, { anonSessionId, customization }) => {
     assertPayloadSize(customization);
@@ -160,7 +160,7 @@ export const savePayslipCustomization = mutation({
   },
 });
 
-export const appendCaylaMessages = mutation({
+export const appendCaylaMessages = internalMutation({
   args: { anonSessionId: v.string(), messages: v.array(v.any()) },
   handler: async (ctx, { anonSessionId, messages }) => {
     assertPayloadSize(messages);
@@ -171,7 +171,7 @@ export const appendCaylaMessages = mutation({
   },
 });
 
-export const setPendingAction = mutation({
+export const setPendingAction = internalMutation({
   args: { anonSessionId: v.string(), pendingAction: v.optional(v.string()) },
   handler: async (ctx, { anonSessionId, pendingAction }) => {
     const row = await loadSession(ctx, anonSessionId);
@@ -184,7 +184,7 @@ export const setPendingAction = mutation({
  * OCR quota check — throws before an expensive vision call so guests cannot
  * grind through OpenAI on the marketing page. Increments after success.
  */
-export const assertAndIncrementCayla = mutation({
+export const assertAndIncrementCayla = internalMutation({
   args: { anonSessionId: v.string() },
   handler: async (ctx, { anonSessionId }) => {
     const row = await loadSession(ctx, anonSessionId);
@@ -195,7 +195,7 @@ export const assertAndIncrementCayla = mutation({
   },
 });
 
-export const assertAndIncrementOcr = mutation({
+export const assertAndIncrementOcr = internalMutation({
   args: { anonSessionId: v.string() },
   handler: async (ctx, { anonSessionId }) => {
     const row = await loadSession(ctx, anonSessionId);
@@ -219,3 +219,4 @@ export const guestLimitsPublic = query({
     maxOcrScans: MAX_OCR_SCANS,
   }),
 });
+

@@ -1,4 +1,5 @@
 import { internalQuery, mutation, query } from "./_generated/server";
+import { requireOwnUser } from "./lib/ownUser";
 import { v } from "convex/values";
 
 /**
@@ -21,6 +22,7 @@ const CATEGORIES = [
 export const getMine = query({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireOwnUser(ctx, args.userId);
     if (!args.userId) return null;
     const prefs = await ctx.db
       .query("notificationPreferences")
@@ -55,6 +57,7 @@ export const updateMine = mutation({
     account: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    await requireOwnUser(ctx, args.userId);
     const { userId, ...rest } = args;
     const existing = await ctx.db
       .query("notificationPreferences")
@@ -78,3 +81,4 @@ export const updateMine = mutation({
     });
   },
 });
+

@@ -67,7 +67,7 @@ export const create = mutation({
     if (user.accountType === "accountant" || user.plan?.startsWith("accountant")) await assertCapacity(ctx, user, "clients", 1);
     else {
       const existing = await ctx.db.query("businesses").withIndex("by_user", q => q.eq("userId", args.userId)).collect();
-      if (existing.length && !isAdminEmail(user.email) && !(user.plan !== "free" && user.planStatus === "active")) throw new Error("PLAN_REQUIRED:pro");
+      if (existing.length && !(user.emailVerified === true && isAdminEmail(user.email)) && !(user.plan !== "free" && user.planStatus === "active")) throw new Error("PLAN_REQUIRED:pro");
     }
     if (user.accountType === "accountant" && !ACCOUNTANT_PLANS[accountantPlanFor(user)].fullBranding && ((args.templateId && args.templateId !== "modern") || (args.fontFamily && args.fontFamily !== "sans") || (args.layoutStyle && args.layoutStyle !== "standard"))) throw new ConvexError({ code: "PLAN_LIMIT_REACHED", kind: "branding", message: "Full custom payslip branding requires a paid Accountant plan. Your setup is saved." });
     return ctx.db.insert("businesses", {
@@ -116,4 +116,5 @@ export const update = mutation({
     await ctx.db.patch(businessId, { ...fields, updatedAt: Date.now() });
   },
 });
+
 

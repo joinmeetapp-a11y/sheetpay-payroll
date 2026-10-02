@@ -421,6 +421,7 @@ export const chat = action({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity || identity.subject !== args.userId) throw new Error("Unauthenticated");
 
+    if (!args.message.trim() || args.message.length > 8000) throw new Error("Enter a message under 8,000 characters");
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
@@ -511,8 +512,8 @@ export const chat = action({
 
       if (!response.ok) {
         const err = await response.json() as any;
-        console.error("[Cayla] OpenAI error:", err);
-        return { text: "I ran into an issue connecting to my AI engine. Please try again.", error: err.error?.message };
+        console.error("Cayla provider request failed", response.status);
+        return { text: "I ran into an issue connecting to my AI engine. Please try again.", error: "AI service unavailable" };
       }
 
       const completion = await response.json() as any;
@@ -632,7 +633,8 @@ async function callOpenAI(apiKey: string, body: any) {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, store: false }),
+    signal: AbortSignal.timeout(45000),
   });
 }
 
@@ -682,3 +684,4 @@ async function executeToolCall(
     currencySymbol: context.currencySymbol,
   });
 }
+

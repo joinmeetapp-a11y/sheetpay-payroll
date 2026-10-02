@@ -1,9 +1,12 @@
 import { mutation, query } from "./_generated/server";
+import { requireOwnUser } from "./lib/ownUser";
+import { requireBusinessAccess } from "./lib/accountantAccess";
 import { v } from "convex/values";
 
 export const getByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    await requireOwnUser(ctx, args.userId);
     return ctx.db
       .query("messages")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
@@ -21,6 +24,9 @@ export const create = mutation({
     timestamp: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireOwnUser(ctx, args.userId);
+    if (args.text.length > 16000) throw new Error("Message is too long");
+    if (args.businessId) await requireBusinessAccess(ctx, await ctx.db.get(args.businessId), "read");
     return ctx.db.insert("messages", { ...args, createdAt: Date.now() });
   },
 });
@@ -28,6 +34,7 @@ export const create = mutation({
 export const clearByUser = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    await requireOwnUser(ctx, args.userId);
     const msgs = await ctx.db
       .query("messages")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
@@ -37,3 +44,4 @@ export const clearByUser = mutation({
     }
   },
 });
+

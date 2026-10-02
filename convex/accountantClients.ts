@@ -12,7 +12,7 @@ async function requireAccountant(ctx: any, expectedUserId?: any) {
     .withIndex("by_firebase_uid", (q: any) => q.eq("firebaseUid", identity.subject))
     .first();
   if (!user || (expectedUserId && user._id !== expectedUserId)) throw new Error("Forbidden");
-  const admin = isAdminEmail(user.email);
+  const admin = (user.emailVerified === true && isAdminEmail(user.email));
   if (!admin && effectiveAccountantPlan(user) === "free") {
     throw new Error("ACCOUNTANT_PLAN_REQUIRED");
   }
@@ -32,7 +32,7 @@ export const getByUser = query({
       .withIndex("by_firebase_uid", (q: any) => q.eq("firebaseUid", identity.subject))
       .first();
     if (!user || user._id !== userId) return [];
-    if (!isAdminEmail(user.email) && effectiveAccountantPlan(user) === "free") return [];
+    if (!(user.emailVerified === true && isAdminEmail(user.email)) && effectiveAccountantPlan(user) === "free") return [];
 
     return ctx.db
       .query("accountantClients")
@@ -135,4 +135,5 @@ export const deleteClient = mutation({
     await ctx.db.delete(clientId);
   },
 });
+
 

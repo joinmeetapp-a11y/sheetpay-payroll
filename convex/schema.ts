@@ -8,6 +8,7 @@ export default defineSchema({
   users: defineTable({
     firebaseUid: v.optional(v.string()),
     email: v.string(),
+    emailVerified: v.optional(v.boolean()),
     displayName: v.optional(v.string()),
     accountType: v.optional(v.union(v.literal("business"), v.literal("accountant"))),
     createdAt: v.optional(v.number()),
@@ -346,6 +347,7 @@ export default defineSchema({
     createdAt: v.number(),
     expiresAt: v.number(),
   })
+    .index("by_expiry", ["expiresAt"])
     .index("by_storage", ["storageId"])
     .index("by_business_employee", ["businessId", "employeeId"])
     .index("by_workspace", ["workspaceOwnerId"]),

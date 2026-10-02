@@ -66,7 +66,7 @@ export const createOrUpdate = mutation({
       .first();
 
     if (existing) {
-      const patch: Record<string, unknown> = {};
+      const patch: Record<string, unknown> = { emailVerified: identity.emailVerified === true };
       if (existing.email !== tokenEmail) patch.email = tokenEmail;
       if (args.displayName && args.displayName !== existing.displayName) patch.displayName = args.displayName;
       if (Object.keys(patch).length) await ctx.db.patch(existing._id, patch);
@@ -76,6 +76,7 @@ export const createOrUpdate = mutation({
     const id = await ctx.db.insert("users", {
       firebaseUid: identity.subject,
       email: tokenEmail,
+      emailVerified: identity.emailVerified === true,
       displayName: args.displayName,
       accountType: args.accountType,
       createdAt: Date.now(),
@@ -134,3 +135,4 @@ export const recordVerifiedLegacyPlan = internalMutation({
     return { updated: true };
   },
 });
+
