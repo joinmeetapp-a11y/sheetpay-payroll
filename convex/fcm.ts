@@ -184,9 +184,16 @@ export const deliverNotification = internalAction({
       return { status: "failed" };
     }
 
-    let accessToken: string;
+    let accessToken: string | null;
     try { accessToken = await getGoogleAccessToken(FCM_SCOPE, firebaseAdminJson); }
     catch {
+      await ctx.runMutation(internalApi.notifications.updateDelivery, {
+        deliveryId: delivery._id, status: "failed", errorCode: "FCM_AUTH_FAILED",
+        errorMessage: "Firebase notification service could not authenticate.",
+      });
+      return { status: "failed" };
+    }
+    if (!accessToken) {
       await ctx.runMutation(internalApi.notifications.updateDelivery, {
         deliveryId: delivery._id, status: "failed", errorCode: "FCM_AUTH_FAILED",
         errorMessage: "Firebase notification service could not authenticate.",

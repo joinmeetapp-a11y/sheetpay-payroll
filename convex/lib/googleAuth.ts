@@ -89,7 +89,7 @@ export async function getGoogleAccessToken(scope: string, serviceAccountJson?: s
     }),
   });
   if (!resp.ok) {
-    console.error("google token exchange failed:", await resp.text());
+    console.error("Google service authentication failed.");
     return null;
   }
   const body = (await resp.json()) as { access_token: string; expires_in: number };
