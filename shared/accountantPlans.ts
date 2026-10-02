@@ -4,7 +4,7 @@ export const ACCOUNTANT_PLAN_IDS = ['free', 'accountant_monthly', 'accountant_ye
 export type AccountantPlanId = typeof ACCOUNTANT_PLAN_IDS[number];
 const paidLimits = { clients: 25, employees: 2500, payroll: null, payslip: 2500, cayla: 1000, ocr: 1000, email: 5000, team: 5 };
 export const ACCOUNTANT_PLANS = {
-  free: { id: 'free', name: 'Free', price: 0, interval: null, priceLabel: '$0', monthlyEquivalent: null, savings: 0, freeMonths: 0, paddlePriceId: null, limits: { clients: 1, employees: 10, payroll: 1, payslip: 10, cayla: 10, ocr: 10, email: 10, team: 1 }, reminders: { push: null, email: null }, watermark: true, historyDays: 30, fullBranding: false },
+  free: { id: 'free', name: 'Free', price: 0, interval: null, priceLabel: '$0', monthlyEquivalent: null, savings: 0, freeMonths: 0, paddlePriceId: null, limits: { clients: 1, employees: 10, payroll: 3, payslip: 10, cayla: 10, ocr: 10, email: 10, team: 1 }, reminders: { push: null, email: null }, watermark: true, historyDays: 30, fullBranding: false },
   accountant_monthly: { id: 'accountant_monthly', name: 'Accountant Monthly', price: 197, interval: 'month', priceLabel: '$197/month', monthlyEquivalent: 197, savings: 0, freeMonths: 0, paddlePriceId: 'pri_01m0r19pgkx604y5q3gp1trhqh', limits: paidLimits, reminders: { push: null, email: 500 }, watermark: false, historyDays: null, fullBranding: true },
   accountant_yearly: { id: 'accountant_yearly', name: 'Accountant Yearly', price: 1970, interval: 'year', priceLabel: '$1,970/year', monthlyEquivalent: Math.round(1970 / 12), savings: 197 * 12 - 1970, freeMonths: 2, paddlePriceId: 'pri_01m3mjv9jcjphn3545x04c5gyk', limits: paidLimits, reminders: { push: null, email: 750 }, watermark: false, historyDays: null, fullBranding: true },
 } as const;

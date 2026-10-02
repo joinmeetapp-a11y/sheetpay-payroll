@@ -44,6 +44,16 @@ describe('Accountant pricing and authoritative limits', () => {
     await expect(owner.mutation(api.businesses.create, { userId: ids.user, name: 'Second Client', currency: 'USD', currencySymbol: '$' })).rejects.toThrow('PLAN_LIMIT_REACHED');
     await expect(owner.mutation(api.employees.bulkCreate, { userId: ids.user, businessId: ids.business, employees: [{ ...ids.rows[0], _id: undefined, _creationTime: undefined }] })).rejects.toThrow();
   });
+  it('Free permits three monthly payroll runs and rejects a fourth without consuming usage', async () => {
+    const { owner, payroll } = await fixture();
+    const smallPayroll = { ...payroll, employeesSnapshot: payroll.employeesSnapshot.slice(0, 1) };
+    for (let i = 0; i < 3; i++) await owner.mutation(api.payrollRuns.create, smallPayroll);
+    await expect(owner.mutation(api.payrollRuns.create, smallPayroll)).rejects.toThrow('PLAN_LIMIT_REACHED');
+    expect(await owner.query(api.usage.getMonthlyUsage, {})).toMatchObject({ payrollRunsUsed: 3, payslipsUsed: 3 });
+    vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
+    await owner.mutation(api.payrollRuns.create, smallPayroll);
+    expect(await owner.query(api.usage.getMonthlyUsage, {})).toMatchObject({ payrollRunsUsed: 1 });
+  });
   for (const plan of ['accountant_monthly', 'accountant_yearly'] as const) it(`${plan} resets operations monthly, independent of yearly billing`, async () => {
     const { owner, reserve } = await fixture(plan);
     await reserve('cayla', 1000, 'first-month');
