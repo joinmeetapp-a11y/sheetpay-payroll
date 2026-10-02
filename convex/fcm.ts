@@ -88,7 +88,7 @@ export const deliverOccurrence = internalAction({
     deepLink: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const firebaseAdminJson = process.env.FIREBASE_ADMIN_JSON;
+    const firebaseAdminJson = process.env.ACCOUNTANT_FIREBASE_ADMIN_JSON || process.env.FIREBASE_ADMIN_JSON;
     let adminProjectId: string | undefined;
     if (firebaseAdminJson) {
       try { adminProjectId = JSON.parse(firebaseAdminJson).project_id; } catch {}
@@ -170,7 +170,7 @@ export const deliverNotification = internalAction({
     const claimed: any = await ctx.runMutation(internalApi.notifications.claimDelivery, { deliveryId: delivery._id });
     if (!claimed?.claimed) return { status: "already_claimed" };
 
-    const firebaseAdminJson = process.env.FIREBASE_ADMIN_JSON;
+    const firebaseAdminJson = process.env.ACCOUNTANT_FIREBASE_ADMIN_JSON || process.env.FIREBASE_ADMIN_JSON;
     let adminProjectId: string | undefined;
     if (firebaseAdminJson) {
       try { adminProjectId = JSON.parse(firebaseAdminJson).project_id; } catch {}
@@ -258,3 +258,19 @@ export const dispatchDueReminders = internalAction({
 });
 
 
+
+/** Server-only release check; never returns the credential or OAuth token. */
+export const accountantPushReadiness = internalAction({
+  args: {},
+  handler: async () => {
+    const raw = process.env.ACCOUNTANT_FIREBASE_ADMIN_JSON || process.env.FIREBASE_ADMIN_JSON;
+    let projectId: string | undefined;
+    try { projectId = raw ? JSON.parse(raw).project_id : undefined; } catch {}
+    const expectedProject = process.env.FIREBASE_PROJECT_ID || projectId;
+    if (!raw || !projectId || projectId !== expectedProject) return { ready: false, code: "FCM_PROJECT_MISMATCH" };
+    try {
+      const token = await getGoogleAccessToken(FCM_SCOPE, raw);
+      return { ready: Boolean(token), code: token ? "READY" : "FCM_AUTH_FAILED" };
+    } catch { return { ready: false, code: "FCM_AUTH_FAILED" }; }
+  },
+});
