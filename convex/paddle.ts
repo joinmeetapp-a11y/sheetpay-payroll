@@ -1,6 +1,7 @@
 "use node";
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { billingError, verifiedSubscription } from "./lib/paddleSubscription";
 import { ConvexError, v } from "convex/values";
 import { ACCOUNTANT_PLANS, type AccountantPlanId } from "../shared/accountantPlans";
 
@@ -72,59 +73,54 @@ export const createCheckoutSession = action({
  * Schedules cancellation of the signed-in accountant's Paddle subscription.
  * Paddle remains the billing authority; access stays active through the paid term.
  */
-export const cancelSubscription = action({
-  args: {
-    effectiveFrom: v.optional(v.literal("next_billing_period")),
-  },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity?.subject) throw new Error("Unauthenticated");
-
-    const user = await ctx.runQuery(internal.users.getBillingDetailsInternal, {
-      firebaseUid: identity.subject,
-    });
-    if (!user || !user.plan?.startsWith("accountant") || user.planStatus !== "active") {
-      throw new Error("No active Sheetpay Accountant subscription was found for this account.");
-    }
-    if (!user.paddleSubscriptionId) {
-      throw new Error("Paddle has not linked a subscription to this account yet. Please contact support.");
-    }
-
-    const apiKey = process.env.PADDLE_API_KEY;
-    if (!apiKey) throw new Error("PADDLE_API_KEY not configured in Convex environment variables");
-
-    const paddleBase = getPaddleBase(apiKey);
-    const res = await fetch(
-      `${paddleBase}/subscriptions/${encodeURIComponent(user.paddleSubscriptionId)}/cancel`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ effective_from: args.effectiveFrom ?? "next_billing_period" }),
-      },
-    );
-
-    const responseText = await res.text();
-    let payload: any = {};
-    try { payload = responseText ? JSON.parse(responseText) : {}; } catch { /* Keep Paddle's raw error below. */ }
-    if (!res.ok) {
-      const detail = payload?.error?.detail || payload?.error?.message || responseText;
-      throw new Error(`Paddle API error ${res.status}: ${detail || "Cancellation failed."}`);
-    }
-
-    const effectiveAt = payload?.data?.scheduled_change?.effective_at;
-    return {
-      success: true,
-      effectiveAt,
-      message: effectiveAt
-        ? `Cancellation scheduled for ${effectiveAt}. Your access remains active until then.`
-        : "Cancellation scheduled for the end of your current billing period. Your access remains active until then.",
-    };
-  },
-});
-
+async function ownSubscription(ctx: any) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity?.subject) throw new ConvexError("Please sign in again.");
+  const user = await ctx.runQuery(internal.users.getBillingDetailsInternal, { firebaseUid: identity.subject });
+  if (!user?.plan?.startsWith("accountant") || !user.paddleCustomerId || !user.paddleSubscriptionId) throw billingError();
+  const key = process.env.PADDLE_API_KEY;
+  if (!key) throw billingError();
+  const request = async (path: string, body?: any) => {
+    const result = await fetch(`${getPaddleBase(key)}${path}`, { method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) });
+    if (!result.ok) throw billingError();
+    const data = (await result.json()).data;
+    if (!data) throw billingError();
+    return data;
+  };
+  const data = await request(`/subscriptions/${encodeURIComponent(user.paddleSubscriptionId)}`);
+  const state = verifiedSubscription(data, user, identity.subject);
+  return { user, subject: identity.subject, data, state, request };
+}
+async function saveVerifiedSubscription(ctx: any, own: any, data: any) {
+  const state = verifiedSubscription(data, own.user, own.subject);
+  const result = await ctx.runMutation(internal.subscriptions.applyPaddleEvent, { firebaseUid: own.subject, paddleCustomerId: own.user.paddleCustomerId, paddleSubscriptionId: own.user.paddleSubscriptionId, ...state });
+  if (!result.ok || result.ignored) throw billingError();
+  return { success: true, plan: state.plan, status: state.planStatus, scheduledCancelAt: state.scheduledCancelAt, billingPeriodEnd: state.billingPeriodEnd ?? null };
+}
+export const getSubscriptionDetails = action({ args: {}, handler: async ctx => {
+  try { const own = await ownSubscription(ctx); return await saveVerifiedSubscription(ctx, own, own.data); }
+  catch { throw billingError(); }
+} });
+export const cancelSubscription = action({ args: { effectiveFrom: v.optional(v.literal("next_billing_period")) }, handler: async ctx => {
+  try {
+    const own = await ownSubscription(ctx);
+    if (own.state.scheduledCancelAt || own.state.planStatus === "canceled") return { ...await saveVerifiedSubscription(ctx, own, own.data), alreadyScheduled: true };
+    if (!["active", "trialing", "past_due"].includes(own.state.planStatus)) throw billingError();
+    const data = await own.request(`/subscriptions/${encodeURIComponent(own.user.paddleSubscriptionId)}/cancel`, { effective_from: "next_billing_period" });
+    const state = verifiedSubscription(data, own.user, own.subject);
+    if (!state.scheduledCancelAt && state.planStatus !== "canceled") throw billingError();
+    return { ...await saveVerifiedSubscription(ctx, own, data), alreadyScheduled: false };
+  } catch { throw billingError(); }
+} });
+export const getBillingPortal = action({ args: {}, handler: async ctx => {
+  try {
+    const own = await ownSubscription(ctx);
+    const data = await own.request(`/customers/${encodeURIComponent(own.user.paddleCustomerId)}/portal-sessions`, { subscription_ids: [own.user.paddleSubscriptionId] });
+    const url = new URL(data.urls?.general?.overview);
+    if (url.protocol !== "https:" || !["customer-portal.paddle.com", "sandbox-customer-portal.paddle.com", "buyer-portal.paddle.com", "sandbox-buyer-portal.paddle.com"].includes(url.hostname)) throw billingError();
+    return { url: url.href };
+  } catch { throw billingError(); }
+} });
 
 /** Deployment-only setup for the existing Accountant webhook. Never public. */
 export const prepareAccountantWebhook = internalAction({ args: {}, handler: async () => {

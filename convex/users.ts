@@ -23,9 +23,10 @@ export const getCurrentUser = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    return ctx.db.query("users")
+    const user = await ctx.db.query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
       .first();
+    return user ? { ...user, profilePhotoUrl: user.profilePhotoStorageId ? await ctx.storage.getUrl(user.profilePhotoStorageId) : null } : null;
   },
 });
 
@@ -43,6 +44,8 @@ export const getBillingDetailsInternal = internalQuery({
       planStatus: user.planStatus,
       paddleSubscriptionId: user.paddleSubscriptionId,
       paddleCustomerId: user.paddleCustomerId,
+      scheduledCancelAt: user.scheduledCancelAt,
+      billingPeriodEnd: user.billingPeriodEnd,
     };
   },
 });

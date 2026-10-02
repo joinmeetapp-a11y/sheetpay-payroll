@@ -9,8 +9,9 @@ export const ACCOUNTANT_PLANS = {
   accountant_yearly: { id: 'accountant_yearly', name: 'Accountant Yearly', price: 1970, interval: 'year', priceLabel: '$1,970/year', monthlyEquivalent: Math.round(1970 / 12), savings: 197 * 12 - 1970, freeMonths: 2, paddlePriceId: 'pri_01m3mjv9jcjphn3545x04c5gyk', limits: paidLimits, reminders: { push: null, email: 750 }, watermark: false, historyDays: null, fullBranding: true },
 } as const;
 export const isAccountantPlanId = (value: unknown): value is AccountantPlanId => ACCOUNTANT_PLAN_IDS.includes(value as AccountantPlanId);
-export function effectiveAccountantPlan(user: { plan?: string; planStatus?: string; paddlePriceId?: string } | null | undefined): AccountantPlanId {
+export function effectiveAccountantPlan(user: { plan?: string; planStatus?: string; paddlePriceId?: string; scheduledCancelAt?: number } | null | undefined): AccountantPlanId {
   if (!user || !['active', 'trialing'].includes(user.planStatus || '')) return 'free';
+  if (user.scheduledCancelAt !== undefined && user.scheduledCancelAt <= Date.now()) return 'free';
   if (user.plan === 'accountant_yearly') return 'accountant_yearly';
   if (user.plan === 'accountant_monthly') return 'accountant_monthly';
   // Read legacy subscriptions without rewriting, cancelling or repricing them.

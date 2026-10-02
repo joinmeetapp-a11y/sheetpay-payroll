@@ -26,6 +26,7 @@ export default defineSchema({
     emailVerified: v.optional(v.boolean()),
     marketingUnsubscribedAt: v.optional(v.number()),
     displayName: v.optional(v.string()),
+    profilePhotoStorageId: v.optional(v.id("_storage")),
     accountType: v.optional(v.union(v.literal("business"), v.literal("accountant"))),
     createdAt: v.optional(v.number()),
     onboardingCompleted: v.optional(v.boolean()),
@@ -43,6 +44,8 @@ export default defineSchema({
     billingPeriodStart: v.optional(v.number()),
     billingPeriodEnd: v.optional(v.number()),
     billingEventAt: v.optional(v.number()),
+    scheduledCancelAt: v.optional(v.number()),
+    billingSubscriptionUpdatedAt: v.optional(v.number()),
   })
     .index("by_firebase_uid", ["firebaseUid"])
     .index("by_paddle_customer", ["paddleCustomerId"]),

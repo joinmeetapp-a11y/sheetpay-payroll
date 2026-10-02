@@ -288,6 +288,8 @@ http.route({
         paddleSubscriptionId,
         paddleTransactionId,
         priceId,
+        ...(type.startsWith("subscription.") ? { scheduledCancelAt: data.scheduled_change?.action === "cancel" && Number.isFinite(Date.parse(data.scheduled_change.effective_at)) ? Date.parse(data.scheduled_change.effective_at) : null } : {}),
+        ...(type.startsWith("subscription.") && Number.isFinite(Date.parse(data.updated_at)) ? { subscriptionUpdatedAt: Date.parse(data.updated_at) } : {}),
         ...(Number.isFinite(Date.parse(event.occurred_at)) ? { occurredAt: Date.parse(event.occurred_at) } : {}),
         ...(data.current_billing_period?.starts_at ? { billingPeriodStart: Date.parse(data.current_billing_period.starts_at) } : {}),
         ...(data.current_billing_period?.ends_at ? { billingPeriodEnd: Date.parse(data.current_billing_period.ends_at) } : {}),

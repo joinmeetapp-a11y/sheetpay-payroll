@@ -49,7 +49,7 @@ export const getEntitlement = query({
 
     const plan = user?.plan === "pro" ? "pro" : effectiveAccountantPlan(user);
     const planStatus = user?.planStatus ?? "none";
-    const isActive = planStatus === "active";
+    const isActive = ["active", "trialing"].includes(planStatus);
     return {
       plan,
       planStatus,
@@ -137,6 +137,8 @@ export const applyPaddleEvent = internalMutation({
     billingPeriodStart: v.optional(v.number()),
     billingPeriodEnd: v.optional(v.number()),
     planStatus: v.string(),
+    scheduledCancelAt: v.optional(v.union(v.number(), v.null())),
+    subscriptionUpdatedAt: v.optional(v.number()),
     paddleSubscriptionId: v.optional(v.string()),
     paddleTransactionId: v.optional(v.string()),
     priceId: v.optional(v.string()),
@@ -160,8 +162,9 @@ export const applyPaddleEvent = internalMutation({
 
     if (!user) return { ok: false, reason: "user_not_found" };
 
-    if (args.occurredAt && user.billingEventAt && args.occurredAt < user.billingEventAt) return { ok: true, ignored: "older_event" };
+    if (args.subscriptionUpdatedAt !== undefined ? user.billingSubscriptionUpdatedAt !== undefined && args.subscriptionUpdatedAt < user.billingSubscriptionUpdatedAt : args.occurredAt && user.billingEventAt && args.occurredAt < user.billingEventAt) return { ok: true, ignored: "older_event" };
     if (user.paddleSubscriptionId && args.paddleSubscriptionId && args.paddleSubscriptionId !== user.paddleSubscriptionId && user.planStatus === "active") return { ok: true, ignored: "different_active_subscription" };
+    if (user.paddleCustomerId && args.paddleCustomerId && user.paddleCustomerId !== args.paddleCustomerId) return { ok: false, reason: "customer_mismatch" };
     const previousPlan = user.plan ?? "free";
     const previousStatus = user.planStatus ?? "none";
     await ctx.db.patch(user._id, {
@@ -175,7 +178,11 @@ export const applyPaddleEvent = internalMutation({
       billingPeriodStart: args.billingPeriodStart ?? user.billingPeriodStart,
       billingPeriodEnd: args.billingPeriodEnd ?? user.billingPeriodEnd,
       billingEventAt: args.occurredAt ?? user.billingEventAt,
+      billingSubscriptionUpdatedAt: args.subscriptionUpdatedAt ?? user.billingSubscriptionUpdatedAt,
+      ...(args.scheduledCancelAt !== undefined ? { scheduledCancelAt: args.scheduledCancelAt ?? undefined } : {}),
     });
+
+    if (args.scheduledCancelAt && args.paddleSubscriptionId) await ctx.scheduler.runAt(Math.max(Date.now(), args.scheduledCancelAt), (internal as any).subscriptions.expireScheduledAccess, { userId: user._id, subscriptionId: args.paddleSubscriptionId, effectiveAt: args.scheduledCancelAt });
 
     // Fire the appropriate subscription email based on the state transition.
     // Same transaction as the verified billing update: queued promotional work stops.
@@ -216,3 +223,11 @@ export const applyPaddleEvent = internalMutation({
   },
 });
 
+
+// A Paddle-verified cancellation date bounds access even if its final webhook is delayed.
+// A resumed/replaced subscription clears or changes the date, making old timers harmless.
+export const expireScheduledAccess = internalMutation({ args: { userId: v.id("users"), subscriptionId: v.string(), effectiveAt: v.number() }, handler: async (ctx, args) => {
+  const user = await ctx.db.get(args.userId);
+  if (!user || user.paddleSubscriptionId !== args.subscriptionId || user.scheduledCancelAt !== args.effectiveAt || args.effectiveAt > Date.now() || !["active", "trialing"].includes(user.planStatus || "")) return;
+  await ctx.db.patch(user._id, { planStatus: "expired", planUpdatedAt: Date.now() });
+} });
