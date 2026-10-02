@@ -9,7 +9,7 @@ import { paginationOptsValidator } from "convex/server";
  * All non-seed grants happen via the grantRole mutation, which writes to
  * adminRoles and to the immutable adminAuditLogs.
  */
-export const ADMIN_EMAILS = ["antoniokurt23@gmail.com", "antoniokpreudhomme@gmail.com"];
+export const ADMIN_EMAILS = ["antoniokpreudhomme@gmail.com"];
 
 export function isAdminEmail(email?: string | null): boolean {
   if (!email) return false;
@@ -88,6 +88,33 @@ function isPaidUser(u: { plan?: string; planStatus?: string }): boolean {
   const status = u.planStatus ?? "active";
   return status === "active" || status === "pending";
 }
+
+export const bootstrapAdmin = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const email = typeof identity?.email === "string" ? identity.email.trim().toLowerCase() : "";
+    if (!identity || identity.emailVerified !== true || !isAdminEmail(email)) throw new Error("Forbidden");
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
+      .first();
+    if (existing) {
+      if (existing.email !== email || existing.emailVerified !== true) {
+        await ctx.db.patch(existing._id, { email, emailVerified: true });
+      }
+      return existing._id;
+    }
+    return await ctx.db.insert("users", {
+      firebaseUid: identity.subject,
+      email,
+      emailVerified: true,
+      displayName: "Sheetpay Admin",
+      accountType: "accountant",
+      createdAt: Date.now(),
+    });
+  },
+});
 
 // ─── Overview ───────────────────────────────────────────────────────────────
 
