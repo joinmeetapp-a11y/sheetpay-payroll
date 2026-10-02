@@ -147,6 +147,7 @@ export const cleanVerification=internalMutation({args:{userId:v.id("users")},han
   await ctx.db.delete(business._id);
  }
  if(c){for(const e of await ctx.db.query("accountantCampaignEvents").withIndex("by_campaign",q=>q.eq("campaign",c._id)).collect())await ctx.db.delete(e._id);await ctx.db.delete(c._id);}
+ if(user.profilePhotoStorageId)await ctx.storage.delete(user.profilePhotoStorageId);
  await ctx.db.delete(user._id);
  return {cleaned:true};
 }});
