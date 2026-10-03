@@ -2,6 +2,14 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  accountantAnnouncements: defineTable({
+    title: v.string(), message: v.string(), actionUrl: v.optional(v.string()),
+    active: v.boolean(), createdAt: v.number(), createdBy: v.id("users"),
+    retiredAt: v.optional(v.number()),
+  }).index("by_active_created", ["active", "createdAt"]),
+  accountantAnnouncementDismissals: defineTable({
+    announcementId: v.id("accountantAnnouncements"), userId: v.id("users"), dismissedAt: v.number(),
+  }).index("by_user_announcement", ["userId", "announcementId"]),
   accountantEmailCampaigns: defineTable({
     userId:v.id("users"),campaignId:v.string(),enrolledAt:v.number(),currentDay:v.number(),
     nextSendAt:v.number(),lastSentAt:v.optional(v.number()),completedAt:v.optional(v.number()),

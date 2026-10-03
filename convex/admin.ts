@@ -9,7 +9,7 @@ import { paginationOptsValidator } from "convex/server";
  * All non-seed grants happen via the grantRole mutation, which writes to
  * adminRoles and to the immutable adminAuditLogs.
  */
-export const ADMIN_EMAILS = ["antoniokpreudhomme@gmail.com"];
+export const ADMIN_EMAILS = ["surebookme@gmail.com"];
 
 export function isAdminEmail(email?: string | null): boolean {
   if (!email) return false;
@@ -29,7 +29,7 @@ interface AuthContext {
  * All admin queries/mutations MUST call this before returning data. Do not
  * rely on the client hiding /admin — the browser is not a security boundary.
  */
-async function resolveAdmin(
+export async function resolveAdmin(
   ctx: QueryCtx,
   requesterUid: string | undefined
 ): Promise<AuthContext | null> {
