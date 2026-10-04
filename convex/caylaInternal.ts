@@ -1,6 +1,7 @@
 "use node";
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
+import { anyApi } from "convex/server";
 import { internal as _internal } from "./_generated/api";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const internal = _internal as any;
@@ -19,6 +20,21 @@ export const executeTool = internalAction({
     const sym = currencySymbol;
 
     switch (toolName) {
+      case "get_tax_compliance": {
+        const clients:any[] = args.allClients ? await ctx.runQuery(anyApi.compliance.clients,{}) : businessId ? [{id:businessId}] : [];
+        const results=[];
+        for(const client of clients){
+          if(client.country && !["TT","LC","BB","BZ"].includes(client.country))continue;
+          const data:any=await ctx.runAction(anyApi.compliance.overview,{businessId:client.id,taxYear:args.taxYear,...(args.month?{month:args.month}:{})});
+          results.push({client:data.business.name,country:data.business.country,taxYear:data.year,status:data.status,employeeCount:data.employeeCount,totalsInMinorUnits:data.totals,currency:data.business.currency,reconciled:data.reconciled,reconciliation:data.reconciliation,issues:data.issues,forms:data.forms.map((f:any)=>({id:f.id,name:f.name,status:f.status,issues:f.issues})),missingEmployees:data.employees.filter((e:any)=>!e.taxId||!e.contributionId).map((e:any)=>({name:e.name,missingTaxId:!e.taxId,missingContributionNumber:!e.contributionId}))});
+        }
+        return {clients:results,note:"Amounts are integer cents. Payroll deductions are not evidence of remittance. Official forms require their own validation."};
+      }
+      case "generate_tax_compliance": {
+        if(!businessId)return {error:"Select a client first."};
+        return await ctx.runAction(anyApi.compliance.generate,{businessId,taxYear:args.taxYear,formId:args.formId,...(args.month?{month:args.month}:{})});
+      }
+
       // ── Employee tools ──────────────────────────────────────────────────────
       case "search_employees": {
         const employees: any[] = await ctx.runQuery(internal.caylaQueries.getEmployeesForUser, { userId, businessId });
@@ -629,4 +645,5 @@ function formatPayrollRunDetailed(run: any, sym: string) {
     })),
   };
 }
+
 

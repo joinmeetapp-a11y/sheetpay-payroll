@@ -13,6 +13,9 @@ const MAX_TOKENS_COMPLEX = 2048;
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 const CAYLA_TOOLS = [
+ {type:"function" as const,function:{name:"get_tax_compliance",description:"Get actual annual or monthly compliance totals, missing employee identifiers, readiness and reconciliation for the selected client, or all accessible clients. Never invent figures.",parameters:{type:"object",properties:{taxYear:{type:"number"},month:{type:"string"},allClients:{type:"boolean"}},required:["taxYear"]}}},
+ {type:"function" as const,function:{name:"generate_tax_compliance",description:"Generate validated TD4, IT76, annual pack or payroll preparation reports for the selected client. Requires user confirmation. Never bypass validation or claim a government filing submission.",parameters:{type:"object",properties:{taxYear:{type:"number"},month:{type:"string"},formId:{type:"string",enum:["td4","td5","it76","annual_pack","paye_summary","contribution_summary","employee_statement","tamis_paye"]}},required:["taxYear","formId"]}}},
+
   {
     type: "function" as const,
     function: {
@@ -375,6 +378,7 @@ const CAYLA_TOOLS = [
 // Sensitive tools that require user confirmation before execution
 const SENSITIVE_TOOLS = new Set([
   "run_payroll",
+  "generate_tax_compliance",
   "send_all_payslips",
   "delete_reminder",
 ]);
@@ -396,6 +400,7 @@ Your personality:
 - You always format numbers with 2 decimal places for payroll figures.
 
 Capabilities:
+- For tax/compliance requests use get_tax_compliance first. Readiness and tax totals come only from that tool. Explain missing data and differences exactly. generate_tax_compliance requires confirmation and server validation; no tool files returns with government. Direct users to Tax & Compliance to preview/download saved generations.
 - You can look up employee records, payroll runs, tax breakdowns, and attendance data using the provided tools.
 - For SENSITIVE ACTIONS (run_payroll, send_all_payslips), call the tool and it will return a pendingConfirmation object — do NOT execute until the user confirms.
 - When the user confirms a pending action, proceed with execution immediately.
@@ -641,6 +646,8 @@ async function callOpenAI(apiKey: string, body: any) {
 // ─── Confirmation builder ─────────────────────────────────────────────────────
 function buildConfirmationRequest(toolName: string, args: any) {
   switch (toolName) {
+    case "generate_tax_compliance":
+      return {title:"Generate Tax & Compliance reports",description:`Generate ${args.formId} for ${args.taxYear} ${args.month || ""} using validated payroll history. Missing data or reconciliation issues will block generation. Review before filing.`,confirmAction:`generate_tax_compliance:${JSON.stringify(args)}`,cancelAction:"cancel",payload:args};
     case "run_payroll":
       return {
         title: "Process Payroll",
@@ -684,4 +691,5 @@ async function executeToolCall(
     currencySymbol: context.currencySymbol,
   });
 }
+
 
