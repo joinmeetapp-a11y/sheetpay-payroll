@@ -35,7 +35,7 @@ export const getEntitlement = query({
       .first();
 
     // Admin accounts get full access to every feature, regardless of billing.
-    if (user && isAdminEmail(user.email)) {
+    if (user && user.emailVerified === true && isAdminEmail(user.email)) {
       return {
         plan: "accountant" as const,
         planStatus: "active",
@@ -231,3 +231,4 @@ export const expireScheduledAccess = internalMutation({ args: { userId: v.id("us
   if (!user || user.paddleSubscriptionId !== args.subscriptionId || user.scheduledCancelAt !== args.effectiveAt || args.effectiveAt > Date.now() || !["active", "trialing"].includes(user.planStatus || "")) return;
   await ctx.db.patch(user._id, { planStatus: "expired", planUpdatedAt: Date.now() });
 } });
+

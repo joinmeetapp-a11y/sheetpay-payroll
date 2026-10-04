@@ -9,8 +9,18 @@ export const FREE_LIMITS = ACCOUNTANT_PLANS.free.limits;
 export type UsageKind = 'payslip' | 'payroll' | 'ocr' | 'cayla' | 'email';
 const fields = { payslip: 'payslipsUsed', payroll: 'payrollRunsUsed', ocr: 'ocrScansUsed', cayla: 'caylaActionsUsed', email: 'emailsReserved' } as const;
 const kinds = v.union(v.literal('payslip'), v.literal('payroll'), v.literal('ocr'), v.literal('cayla'), v.literal('email'));
+export function hasUnlimitedAccountantAccess(user: any) {
+  return user?.emailVerified === true && isAdminEmail(user?.email || "");
+}
+export function accountantLimitsFor(user: any): Record<AccountantLimitKind, number | null> {
+  const limits = ACCOUNTANT_PLANS[accountantPlanFor(user)].limits;
+  return hasUnlimitedAccountantAccess(user) ? Object.fromEntries(Object.keys(limits).map(key => [key, null])) as Record<AccountantLimitKind, null> : limits;
+}
+export function accountantRemindersFor(user: any) {
+  return hasUnlimitedAccountantAccess(user) ? { ...ACCOUNTANT_PLANS[accountantPlanFor(user)].reminders, email: null } : ACCOUNTANT_PLANS[accountantPlanFor(user)].reminders;
+}
 export function accountantPlanFor(user: any) {
-  return (user?.emailVerified === true && isAdminEmail(user?.email || '')) ? 'accountant_monthly' as const : effectiveAccountantPlan(user);
+  return hasUnlimitedAccountantAccess(user) ? 'accountant_monthly' as const : effectiveAccountantPlan(user);
 }
 export function historyAccessible(user: any, createdAt: number) {
   const days = ACCOUNTANT_PLANS[accountantPlanFor(user)].historyDays;
@@ -37,7 +47,7 @@ export async function assertWithinLimit(ctx: MutationCtx, user: any, kind: Usage
   if (!Number.isSafeInteger(amount) || amount < 0) throw new ConvexError('Invalid usage amount.');
   // Keep existing non-accountant Pro users entitled; accountant plans have finite allowances.
   if (user.accountType !== 'accountant' && user.plan === 'pro' && user.planStatus === 'active') return;
-  const limit = ACCOUNTANT_PLANS[accountantPlanFor(user)].limits[kind];
+  const limit = accountantLimitsFor(user)[kind];
   const row = await counter(ctx, user._id);
   const used = row?.[fields[kind]] || 0;
   if (limit !== null && used + amount > limit) throwLimit(user, kind, used, limit);
@@ -69,8 +79,8 @@ export async function assertCapacity(ctx: MutationCtx, user: any, kind: 'clients
     for (const invite of invites) if (['pending', 'failed'].includes(invite.status) && invite.expiresAt > Date.now()) emails.add(invite.email.toLowerCase());
     used = 1 + emails.size;
   }
-  const limit = ACCOUNTANT_PLANS[accountantPlanFor(user)].limits[kind];
-  if (used + amount > limit) throwLimit(user, kind, used, limit);
+  const limit = accountantLimitsFor(user)[kind];
+  if (limit !== null && used + amount > limit) throwLimit(user, kind, used, limit);
 }
 export const getMonthlyUsage = query({ args: { requesterUid: v.optional(v.string()), businessId: v.optional(v.id('businesses')) }, handler: async (ctx, args) => {
   const actor = await resolveCallerUser(ctx, args.requesterUid);
@@ -87,9 +97,9 @@ export const getMonthlyUsage = query({ args: { requesterUid: v.optional(v.string
     ctx.db.query('accountantClients').withIndex('by_accountant_user', q => q.eq('accountantUserId', user._id)).collect(),
   ]);
   const plan = accountantPlanFor(user);
-  return { plan, planStatus: user.planStatus || 'none', period: usagePeriod(), resetsAt: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1), billingPeriodStart: user.billingPeriodStart, billingPeriodEnd: user.billingPeriodEnd,
+  return { plan, unlimitedAccess: hasUnlimitedAccountantAccess(user), planStatus: user.planStatus || 'none', period: usagePeriod(), resetsAt: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1), billingPeriodStart: user.billingPeriodStart, billingPeriodEnd: user.billingPeriodEnd,
     clientCount: clients.length + legacyClients.length, employeeCount: employees.length, teamMemberCount: 1 + members.filter(m => m.status === 'active').length,
-    payslipsUsed: row?.payslipsUsed || 0, payrollRunsUsed: row?.payrollRunsUsed || 0, ocrScansUsed: row?.ocrScansUsed || 0, caylaActionsUsed: row?.caylaActionsUsed || 0, emailsReserved: row?.emailsReserved || 0, payslipEmailsUsed: row?.payslipEmailsUsed || 0, reminderEmailsReserved: row?.reminderEmailsReserved || 0, reminderLimits: ACCOUNTANT_PLANS[plan].reminders, limits: ACCOUNTANT_PLANS[plan].limits };
+    payslipsUsed: row?.payslipsUsed || 0, payrollRunsUsed: row?.payrollRunsUsed || 0, ocrScansUsed: row?.ocrScansUsed || 0, caylaActionsUsed: row?.caylaActionsUsed || 0, emailsReserved: row?.emailsReserved || 0, payslipEmailsUsed: row?.payslipEmailsUsed || 0, reminderEmailsReserved: row?.reminderEmailsReserved || 0, reminderLimits: accountantRemindersFor(user), limits: accountantLimitsFor(user) };
 } });
 async function byUid(ctx: MutationCtx, firebaseUid: string) {
   const user = await ctx.db.query('users').withIndex('by_firebase_uid', q => q.eq('firebaseUid', firebaseUid)).first();
@@ -144,7 +154,7 @@ export async function reserveReminderEmail(ctx: MutationCtx, userId: Id<'users'>
   const existing = await ctx.db.query('usageIncrements').withIndex('by_op', q => q.eq('opId', opId)).first();
   if (existing) return { counted: false };
   const plan = accountantPlanFor(user);
-  const limit = ACCOUNTANT_PLANS[plan].reminders.email;
+  const limit = accountantRemindersFor(user).email;
   const row = await writableCounter(ctx, userId);
   const used = row.reminderEmailsReserved || 0;
   if (limit !== null && used >= limit) throw new ConvexError({code:'PLAN_LIMIT_REACHED',kind:'reminderEmail',used,limit,message:`You've reached your ${ACCOUNTANT_PLANS[plan].name} allowance of ${limit} email reminders this month. Your reminders are saved. Push and in-app reminders remain available.`});
@@ -152,3 +162,4 @@ export async function reserveReminderEmail(ctx: MutationCtx, userId: Id<'users'>
   await ctx.db.patch(row._id, { reminderEmailsReserved: used + 1, updatedAt: Date.now() });
   return { counted: true, used: used + 1 };
 }
+

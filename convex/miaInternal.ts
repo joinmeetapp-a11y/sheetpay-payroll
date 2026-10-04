@@ -1,6 +1,6 @@
 import { internalMutation, internalQuery, mutation } from './_generated/server';
 import { ConvexError, v } from 'convex/values';
-import { ACCOUNTANT_PLANS, effectiveAccountantPlan } from '../shared/accountantPlans';
+import { accountantPlanFor, accountantLimitsFor, accountantRemindersFor, hasUnlimitedAccountantAccess } from './usage';
 import { usagePeriod } from '../shared/accountantPlans';
 const DAY = 86400000;
 export async function tokenHash(token: string) {
@@ -35,9 +35,9 @@ export async function accountContext(ctx:any) {
  if (!identity) return { signedIn:false };
  const user = await ctx.db.query('users').withIndex('by_firebase_uid',(q:any)=>q.eq('firebaseUid',identity.subject)).first();
  if (!user) return {signedIn:true, accountReady:false};
- const plan = effectiveAccountantPlan(user);
+ const plan = accountantPlanFor(user);
  const row = await ctx.db.query('usageCounters').withIndex('by_user_period',(q:any)=>q.eq('userId',user._id).eq('period',usagePeriod())).first();
- return {signedIn:true,plan,subscriptionStatus:user.planStatus || 'none', limits:ACCOUNTANT_PLANS[plan].limits, reminderLimits:ACCOUNTANT_PLANS[plan].reminders, usage:{payslips:row?.payslipsUsed || 0,cayla:row?.caylaActionsUsed || 0,ocr:row?.ocrScansUsed || 0,emails:row?.emailsReserved || 0,reminderEmails:row?.reminderEmailsReserved || 0}};
+ return {signedIn:true,plan,subscriptionStatus:user.planStatus || 'none', unlimitedAccess:hasUnlimitedAccountantAccess(user), limits:accountantLimitsFor(user), reminderLimits:accountantRemindersFor(user), usage:{payslips:row?.payslipsUsed || 0,cayla:row?.caylaActionsUsed || 0,ocr:row?.ocrScansUsed || 0,emails:row?.emailsReserved || 0,reminderEmails:row?.reminderEmailsReserved || 0}};
 }
 export const reserveChat = internalMutation({args:{token:v.optional(v.string())},handler:async(ctx,args)=>{
  const actor = await principal(ctx,args.token);
@@ -83,3 +83,4 @@ export const purgeExpired = internalMutation({args:{},handler:async ctx=>{
   for(const row of rows)await ctx.db.delete(row._id);
  }
 }});
+
