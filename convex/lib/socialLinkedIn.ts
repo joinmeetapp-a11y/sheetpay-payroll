@@ -1,3 +1,5 @@
+"use node";
+
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 function encryptionKey(){

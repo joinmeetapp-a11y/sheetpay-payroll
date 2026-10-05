@@ -41,7 +41,7 @@ jobs:
         run: npm run test:pricing && npx tsc --noEmit --project tsconfig.pricing.json
 
       - name: Verify private LinkedIn generation and publishing safeguards
-        run: npm run test:social
+        run: npm run test:social && npm run check:social-bundle
 
       - name: Build the backend project UI
         run: npm run build:frontend

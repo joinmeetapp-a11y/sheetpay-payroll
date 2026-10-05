@@ -1,3 +1,5 @@
+"use node";
+
 import React from "react";
 import satori from "satori";
 import { Resvg, initWasm } from "@resvg/resvg-wasm";
