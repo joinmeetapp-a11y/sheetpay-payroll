@@ -8,6 +8,11 @@
    * @module
    */
 
+  import type * as socialRender from "../socialRender.js";
+  import type * as social from "../social.js";
+  import type * as socialInternal from "../socialInternal.js";
+  import type * as socialWorker from "../socialWorker.js";
+  import type * as socialImages from "../socialImages.js";
   import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
   import type * as accountantClients from "../accountantClients.js";
 import type * as accountantInvitations from "../accountantInvitations.js";
@@ -68,6 +73,11 @@ import type * as users from "../users.js";
    * ```
    */
   declare const fullApi: ApiFromModules<{
+    socialRender: typeof socialRender;
+    social: typeof social;
+    socialInternal: typeof socialInternal;
+    socialWorker: typeof socialWorker;
+    socialImages: typeof socialImages;
     "accountantClients": typeof accountantClients,
 "accountantInvitations": typeof accountantInvitations,
 "accountantWorkspace": typeof accountantWorkspace,

@@ -1,7 +1,9 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { socialTables } from "./socialSchema";
 
 export default defineSchema({
+  ...socialTables,
   complianceReviews: defineTable({businessId:v.id("businesses"),employeeId:v.string(),taxYear:v.number(),month:v.string(),values:v.any(),confirmed:v.boolean(),fingerprint:v.string(),reviewedBy:v.id("users"),updatedAt:v.number()}).index("by_business_year",["businessId","taxYear"]),
   complianceGenerations: defineTable({businessId:v.id("businesses"),workspaceOwnerId:v.id("users"),actorId:v.id("users"),taxYear:v.number(),month:v.string(),formId:v.string(),version:v.string(),config:v.any(),summary:v.any(),sourceRuns:v.any(),employeeIds:v.array(v.string()),status:v.string(),createdAt:v.number(),completedAt:v.optional(v.number())}).index("by_business_year",["businessId","taxYear"]),
   complianceGeneratedRows: defineTable({generationId:v.id("complianceGenerations"),ordinal:v.number(),record:v.any()}).index("by_generation",["generationId","ordinal"]),

@@ -2,8 +2,11 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { planForPriceId } from "./subscriptions";
+import { image as socialImage, preflight as socialImagePreflight } from "./socialImages";
 
 const http = httpRouter();
+http.route({path:"/social/image",method:"GET",handler:socialImage});
+http.route({path:"/social/image",method:"OPTIONS",handler:socialImagePreflight});
 
 /**
  * Verify a Paddle webhook signature.

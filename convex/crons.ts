@@ -19,3 +19,4 @@ crons.interval('temporary-payroll-attachments-retention', { hours: 1 }, (interna
 
 crons.interval("accountant-free-onboarding-campaign", { minutes: 1 }, (internal as any).accountantCampaignWorker.dispatch, {});
 export default crons;
+crons.interval("private-linkedin-social-dispatch", { minutes: 1 }, internal.social.tick, {});
