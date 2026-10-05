@@ -1,3 +1,10 @@
 {
-  "project": "sheetpay-agent"
+  "project": "sheetpay-agent",
+  "node": {
+    "externalPackages": [
+      "satori",
+      "fontkit",
+      "@resvg/resvg-wasm"
+    ]
+  }
 }
