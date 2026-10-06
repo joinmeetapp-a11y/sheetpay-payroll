@@ -129,6 +129,24 @@ describe("private bulk payslip delivery", () => {
     const jane = requests.filter((r) => r.to === "jane@example.com"); expect(jane).toHaveLength(2); expect(jane[0].key).toBe(jane[1].key);
     jobs = await owner.query(api.bulkPayslipEmail.getEmailJobs, { businessId: ids.business }); expect(jobs[0].sentCount).toBe(1);
   });
+  it("Cayla email review validates its run and records actual partial provider results", async () => {
+    const { t, ids, owner, upload } = await fixture();
+    const commandId = await t.run(async ctx => {
+      const now = Date.now();
+      const id = await ctx.db.insert('caylaCommands', { actorId: ids.owner, workspaceOwnerId: ids.owner, contextBusinessId: ids.business, requestKey: 'cayla-email-test', timezone: 'UTC', source: 'text', command: 'Prepare payslip emails', clientIds: [ids.business], status: 'review', approvalStatus: 'pending', summary: 'Review recipients', steps: [], createdAt: now, updatedAt: now, expiresAt: now + 86400000 });
+      await ctx.db.insert('caylaPreparedClients', { commandId: id, businessId: ids.business, name: 'Trini Builders', currency: 'TTD', sourceFingerprint: 'test', periodStart: '2026-09-01', periodEnd: '2026-09-30', payDate: '2026-09-30', employeeIds: [ids.john, ids.jane], processed: 0, ready: 2, review: 0, blocking: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, status: 'review', runId: ids.run, expiresAt: now + 86400000 });
+      return id;
+    });
+    const uploadIds = [await upload(ids.john), await upload(ids.jane)];
+    const args = { businessId: ids.business, payrollRunId: ids.run, employeeIds: [ids.john, ids.jane], uploadIds, subject: 'Payslips', message: 'Attached.', idempotencyKey: 'cayla-send', caylaCommandId: commandId };
+    await expect(owner.mutation(api.bulkPayslipEmail.createBulkEmailJob, { ...args, payrollRunId: ids.olderRun })).rejects.toThrow('does not belong');
+    vi.stubGlobal('fetch', vi.fn(async (_url, init: any) => { const fail = JSON.parse(init.body).to[0] === 'jane@example.com'; return new Response(JSON.stringify(fail ? { message: 'Unavailable' } : { id: 'accepted-john' }), { status: fail ? 400 : 200 }); }));
+    await owner.mutation(api.bulkPayslipEmail.createBulkEmailJob, args); await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const events = await t.run(ctx => ctx.db.query('caylaEvents').collect());
+    expect(events.find(e => e.name === 'cayla_payslips_sent')?.count).toBe(1);
+    expect(events.find(e => e.name === 'cayla_command_failed')?.count).toBe(1);
+    expect((await owner.query(api.bulkPayslipEmail.getEmailJobs, { businessId: ids.business }))[0]).toMatchObject({ sentCount: 1, failedCount: 1 });
+  });
   it("never reports success without a provider message ID", async () => {
     const { t, job, owner, ids } = await fixture();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
@@ -169,4 +187,5 @@ describe("private bulk payslip delivery", () => {
     const jobs = await owner.query(api.bulkPayslipEmail.getEmailJobs, { businessId: ids.business }); expect(jobs[0].recipients[0].status).toBe("delivered");
   });
 });
+
 

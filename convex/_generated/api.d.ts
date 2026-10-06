@@ -8,7 +8,9 @@
    * @module
    */
 
-  import type * as socialRender from "../socialRender.js";
+  import type * as caylaAgent from "../caylaAgent.js";
+import type * as caylaAgentActions from "../caylaAgentActions.js";
+import type * as socialRender from "../socialRender.js";
   import type * as social from "../social.js";
   import type * as socialInternal from "../socialInternal.js";
   import type * as socialWorker from "../socialWorker.js";
@@ -73,6 +75,8 @@ import type * as users from "../users.js";
    * ```
    */
   declare const fullApi: ApiFromModules<{
+  caylaAgent: typeof caylaAgent;
+  caylaAgentActions: typeof caylaAgentActions;
     socialRender: typeof socialRender;
     social: typeof social;
     socialInternal: typeof socialInternal;

@@ -14,7 +14,7 @@ import { createNotificationForUser } from "./notifications";
  * Uses Intl.DateTimeFormat to derive the timezone's offset at that instant.
  * Correct across DST transitions.
  */
-function zonedTimeToUtc(
+export function zonedTimeToUtc(
   year: number,
   month: number, // 1-12
   day: number,
@@ -659,9 +659,7 @@ function validateReminderOptions(frequency: string, channels: string[], timezone
   catch { throw new Error("Choose a valid IANA timezone."); }
 }
 
-export const listForCurrentUser = query({
-  args: {},
-  handler: async (ctx) => {
+export async function listDashboardReminders(ctx: any) {
     const { actor } = await getActor(ctx);
     const rows = await ctx.db.query("reminders")
       .withIndex("by_user", (q) => q.eq("userId", actor._id)).collect();
@@ -676,12 +674,17 @@ export const listForCurrentUser = query({
       visible.push({ ...reminder, businessName: business?.name || "Workspace", payrollFrequency: business?.defaultPayrollFrequency });
     }
     return visible.sort((a, b) => a.nextRunAt - b.nextRunAt);
-  },
-});
+}
+
+export const listForCurrentUser = query({ args: {}, handler: async ctx => listDashboardReminders(ctx) });
 
 export const createForCurrentUser = mutation({
   args: dashboardReminderFields,
-  handler: async (ctx, args) => {
+  handler: createDashboardReminder,
+});
+
+/** The same authorization, schedule validation and idempotency for UI and Cayla. */
+export async function createDashboardReminder(ctx: any, args: any) {
     const { actor } = await getActor(ctx);
     validateReminderOptions(args.frequency, args.channels, args.timezone);
     if (args.idempotencyKey) {
@@ -737,8 +740,7 @@ export const createForCurrentUser = mutation({
       updatedAt: now,
     });
     return { id };
-  },
-});
+}
 
 export const updateForCurrentUser = mutation({
   args: {

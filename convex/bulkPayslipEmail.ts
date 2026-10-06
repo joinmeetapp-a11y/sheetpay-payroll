@@ -113,10 +113,16 @@ export const createBulkEmailJob = mutation({
   args: {
     businessId: v.id("businesses"), payrollRunId: v.id("payrollRuns"), employeeIds: v.array(v.id("employees")),
     uploadIds: v.array(v.id("bulkPayslipUploads")), subject: v.string(), message: v.string(),
-    replyTo: v.optional(v.string()), idempotencyKey: v.string(),
+    replyTo: v.optional(v.string()), idempotencyKey: v.string(), caylaCommandId: v.optional(v.id("caylaCommands")),
   },
   handler: async (ctx, args) => {
     const { actor, owner, business, run } = await requireRun(ctx, args.businessId, args.payrollRunId, "sendPayslips");
+    if (args.caylaCommandId) {
+      const command = await ctx.db.get(args.caylaCommandId);
+      if (!command || command.actorId !== actor._id || command.workspaceOwnerId !== owner._id || !command.clientIds.includes(args.businessId)) throw new ConvexError("Cayla command is outside this payroll workspace.");
+      const plans = await ctx.db.query('caylaPreparedClients').withIndex('by_command', q => q.eq('commandId', args.caylaCommandId!)).collect();
+      if (!plans.some(p => p.businessId === args.businessId && p.runId === run._id)) throw new ConvexError('Payroll run does not belong to this Cayla review.');
+    }
     if (!args.employeeIds.length || args.employeeIds.length > 100 || args.uploadIds.length !== args.employeeIds.length) throw new ConvexError("Send 1 to 100 matching payslips per batch.");
     const subject = args.subject.trim();
     const message = args.message.trim();
@@ -145,7 +151,7 @@ export const createBulkEmailJob = mutation({
     for (const { employee } of recipients) await reserveUsage(ctx, owner._id, "email", `bulk:${run._id}:${employee._id}`);
     const now = Date.now();
     const jobId = await ctx.db.insert("bulkEmailJobs", { workspaceOwnerId: owner._id, requestedByUserId: actor._id,
-      businessId: args.businessId, payrollRunId: args.payrollRunId, status: "queued", subject, message, replyTo,
+      businessId: args.businessId, payrollRunId: args.payrollRunId, status: "queued", subject, message, replyTo, caylaCommandId: args.caylaCommandId,
       employeeCount: recipients.length, sentCount: 0, failedCount: 0, idempotencyKey: key, createdAt: now, updatedAt: now });
     for (const { employee, upload, snapshot } of recipients) {
       await ctx.db.insert("bulkEmailRecipients", { jobId, workspaceOwnerId: owner._id, businessId: args.businessId,
@@ -159,6 +165,10 @@ export const createBulkEmailJob = mutation({
       await ctx.db.patch(upload._id, { status: "queued" });
     }
     await recordAccountantActivity(ctx, owner._id, actor._id, "payslips.queued", args.businessId, { payrollRunId: String(run._id), count: recipients.length });
+    if (args.caylaCommandId) {
+      await ctx.db.insert('caylaEvents', { actorId: actor._id, workspaceOwnerId: owner._id, commandId: args.caylaCommandId, name: 'cayla_payslips_queued', count: recipients.length, createdAt: now });
+      await ctx.db.patch(args.caylaCommandId, { approvalStatus: 'email_delivery_approved', updatedAt: now });
+    }
     await ctx.scheduler.runAfter(0, internal.bulkPayslipEmailWorker.processJob, { jobId });
     return { jobId, status: "queued", duplicate: false };
   },
@@ -203,7 +213,7 @@ export const retryFailed = mutation({
     }
     for (const item of failedRows) await reserveUsage(ctx, owner._id, "email", `bulk:${item.payrollRunId}:${item.employeeId}`);
     const jobId = await ctx.db.insert("bulkEmailJobs", { workspaceOwnerId: owner._id, requestedByUserId: actor._id,
-      businessId: prior.businessId, payrollRunId: prior.payrollRunId, status: "queued", subject: prior.subject,
+      businessId: prior.businessId, payrollRunId: prior.payrollRunId, status: "queued", subject: prior.subject, caylaCommandId: prior.caylaCommandId,
       message: prior.message, replyTo: prior.replyTo, employeeCount: failedRows.length, sentCount: 0, failedCount: 0,
       idempotencyKey: key, createdAt: now, updatedAt: now });
     for (const item of failedRows) {
@@ -271,6 +281,11 @@ export const finishBatch = internalMutation({
     const failedCount = rows.filter((row) => row.status === "failed").length;
     const pending = rows.some((row) => ["queued", "sending"].includes(row.status));
     await ctx.db.patch(job._id, { status: pending ? "sending" : failedCount ? "sent_with_errors" : "sent", sentCount, failedCount, updatedAt: Date.now(), finishedAt: pending ? undefined : Date.now() });
+    if (!pending && job.caylaCommandId) {
+      await ctx.db.insert('caylaEvents', { actorId: job.requestedByUserId, workspaceOwnerId: job.workspaceOwnerId, commandId: job.caylaCommandId, name: 'cayla_payslips_sent', count: sentCount, createdAt: Date.now() });
+      if (failedCount) await ctx.db.insert('caylaEvents', { actorId: job.requestedByUserId, workspaceOwnerId: job.workspaceOwnerId, commandId: job.caylaCommandId, name: 'cayla_command_failed', count: failedCount, createdAt: Date.now() });
+      await recordAccountantActivity(ctx, job.workspaceOwnerId, job.requestedByUserId, 'cayla.email_batch_finished', job.businessId, { commandId: job.caylaCommandId, jobId: job._id, sentCount, failedCount });
+    }
     if (pending) await ctx.scheduler.runAfter(700, internal.bulkPayslipEmailWorker.processJob, { jobId: job._id });
     else await createWorkspaceNotification(ctx, { businessId: job.businessId, category: failedCount ? "failedPayslip" : "payslip",
       type: failedCount ? "payslips_failed" : "payslips_sent", title: failedCount ? "Payslip sending needs review" : "Payslips sent",
@@ -315,4 +330,5 @@ export const reserveEmailBatch = mutation({
     return { reserved: args.employeeIds.length };
   },
 });
+
 

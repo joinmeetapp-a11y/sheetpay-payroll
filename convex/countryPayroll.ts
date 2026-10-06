@@ -288,6 +288,12 @@ export const calculateStatutoryPayroll = query({
     const user = await currentUser(ctx);
     const business = await ctx.db.query("businesses").withIndex("by_user", (q: any) => q.eq("userId", user._id)).first();
     if (!business) throw new Error("Business profile required");
+    return calculateStatutoryForBusiness(ctx, business, args);
+  },
+});
+
+/** Shared by the existing query and Cayla; caller must authorize this business. */
+export async function calculateStatutoryForBusiness(ctx: any, business: any, args: any) {
     const code = (business.countryCode || "").toUpperCase();
     if (!code) throw new Error("Business country is required before statutory calculation");
     if (args.countryCode && args.countryCode.toUpperCase() !== code) throw new Error("Payslip country does not match authenticated business country");
@@ -301,7 +307,7 @@ export const calculateStatutoryPayroll = query({
 
     const resolved = await resolveRule(ctx, business, code, taxYear, args.payDate);
     if (!resolved) {
-      console.error("[statutory] no effective rule", { countryCode: code, frequency, taxYear, payDate: args.payDate, grossPay: args.grossIncome });
+      console.error("[statutory] no effective rule", { countryCode: code, frequency, taxYear, payDate: args.payDate });
       return { supported: false, countryCode: code, taxYear, reason: "Automatic statutory calculations are unavailable for this country or tax year." };
     }
 
@@ -343,10 +349,9 @@ export const calculateStatutoryPayroll = query({
     const netPay = Number(result.grossIncome) - totalDeductions;
 
     if (!Array.isArray(statutoryDeductions)) {
-      console.error("[statutory] invalid calculation result", { countryCode: code, frequency, taxYear, ruleVersion, grossPay: args.grossIncome });
+      console.error("[statutory] invalid calculation result", { countryCode: code, frequency, taxYear, ruleVersion });
       throw new Error("Statutory calculation returned an invalid result");
     }
-    console.debug("[statutory]", { countryCode: code, frequency, taxYear, ruleVersion, grossPay: args.grossIncome, statutoryDeductions, totalDeductions, netPay });
 
     return {
       supported: true,
@@ -376,8 +381,7 @@ export const calculateStatutoryPayroll = query({
       source: resolved.kind === "custom" ? "Custom Business Rule" : (record.source || base.source),
       ruleStatus: resolved.kind === "custom" ? "custom" : "verified",
     };
-  },
-});
+}
 
 
 export const getPayrollStatutorySettings = query({
@@ -476,3 +480,4 @@ export const setBusinessPayrollDefaults = mutation({
     };
   },
 });
+

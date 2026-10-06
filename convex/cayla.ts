@@ -375,6 +375,9 @@ const CAYLA_TOOLS = [
   },
 ];
 
+// Accountant payroll operations must use server-owned plans, never model-generated confirmations.
+const ACCOUNTANT_READ_TOOLS = new Set(['get_tax_compliance', 'search_employees', 'get_employee', 'get_payroll_summary', 'get_payroll_run', 'calculate_payroll', 'get_tax_breakdown', 'get_statutory_deductions', 'find_payroll_anomalies', 'compare_payroll_periods', 'get_attendance_summary', 'get_business_info', 'get_employee_count', 'get_payroll_history', 'list_reminders']);
+
 // Sensitive tools that require user confirmation before execution
 const SENSITIVE_TOOLS = new Set([
   "run_payroll",
@@ -425,6 +428,9 @@ export const chat = action({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity || identity.subject !== args.userId) throw new Error("Unauthenticated");
+
+    const accountantReadOnly = await ctx.runQuery(internal.caylaAgent.isAccountant, {});
+    if (accountantReadOnly && args.confirmingAction) return { text: 'Open the Cayla payroll command center to prepare and approve this operation. Chat confirmation cannot finalize payroll or send emails.', toolsCalled: [] };
 
     if (!args.message.trim() || args.message.length > 8000) throw new Error("Enter a message under 8,000 characters");
     const apiKey = process.env.OPENAI_API_KEY;
@@ -509,7 +515,7 @@ export const chat = action({
       const response = await callOpenAI(apiKey, {
         model,
         messages,
-        tools: CAYLA_TOOLS,
+        tools: accountantReadOnly ? CAYLA_TOOLS.filter(tool => ACCOUNTANT_READ_TOOLS.has(tool.function.name)) : CAYLA_TOOLS,
         tool_choice: "auto",
         max_tokens: needsComplexModel ? MAX_TOKENS_COMPLEX : MAX_TOKENS_NORMAL,
         temperature: 0.3,
@@ -580,6 +586,8 @@ export const chat = action({
         } catch {
           args_parsed = {};
         }
+
+        if (accountantReadOnly && !ACCOUNTANT_READ_TOOLS.has(fnName)) return { text: 'This payroll operation needs a plan and explicit approval in the Cayla command center. Nothing was changed or sent.', toolsCalled: [] };
 
         // Sensitive action — request confirmation instead of executing
         if (SENSITIVE_TOOLS.has(fnName) && !args.confirmingAction?.includes(fnName)) {
@@ -691,5 +699,6 @@ async function executeToolCall(
     currencySymbol: context.currencySymbol,
   });
 }
+
 
 

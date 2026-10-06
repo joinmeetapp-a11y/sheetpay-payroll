@@ -152,3 +152,26 @@ export async function validatePayrollSnapshot(ctx: any, businessId: any, rows: a
     seen.add(String(id));
   }
 }
+
+
+/** Server-owned Cayla snapshots pass the same tenant, snapshot and centralized usage checks. */
+export async function savePreparedCaylaPayroll(ctx: any, businessId: any, rows: any[], period: { start: string; end: string; payDate: string }) {
+  const business = await ctx.db.get(businessId);
+  const { owner } = await requireBusinessAccess(ctx, business, 'runPayroll');
+  await validatePayrollSnapshot(ctx, businessId, rows);
+  await assertWithinLimit(ctx, owner, 'payroll');
+  await assertWithinLimit(ctx, owner, 'payslip', rows.length);
+  const sum = (field: string) => Number(rows.reduce((total, row) => total + Number(row[field] || 0), 0).toFixed(2));
+  const totalPaye = sum('paye'), totalNis = sum('nis'), totalHealthSurcharge = sum('healthSurcharge');
+  const now = Date.now();
+  const runId = await ctx.db.insert('payrollRuns', {
+    businessId, userId: owner._id, month: new Date(period.end + 'T12:00:00Z').toLocaleString('en', { month: 'long', timeZone: 'UTC' }),
+    year: Number(period.end.slice(0, 4)), periodLabel: `${period.start} to ${period.end}`, status: 'approved',
+    employeesSnapshot: rows, totalGross: sum('grossPay'), totalPaye, totalNis, totalHealthSurcharge,
+    totalDeductions: Number(rows.reduce((total, row) => total + Number(row.grossPay) - Number(row.netPay), 0).toFixed(2)), totalNet: sum('netPay'),
+    countryCode: business.countryCode, currencyCode: business.currency, createdAt: now, updatedAt: now,
+  });
+  await reserveUsage(ctx, owner._id, 'payroll', `payroll:${runId}`);
+  await reserveUsage(ctx, owner._id, 'payslip', `payslips:${runId}`, rows.length);
+  return runId;
+}

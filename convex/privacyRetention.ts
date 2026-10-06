@@ -14,5 +14,10 @@ export const purgeExpiredAttachments = internalMutation({ args: {}, handler: asy
  // Old guest funnel is retired. Retention dates still apply to previously stored drafts.
  const guests = await ctx.db.query('guestSessions').withIndex('by_expires_at', q => q.lt('expiresAt', Date.now())).take(100);
  for (const row of guests) await ctx.db.delete(row._id);
- return { attachmentsDeleted: rows.length, guestDraftsDeleted: guests.length };
+ const prepared = await ctx.db.query('caylaPreparedEmployees').withIndex('by_expiry', q => q.lt('expiresAt', Date.now())).take(100);
+ for (const row of prepared) await ctx.db.delete(row._id);
+ const plans = await ctx.db.query('caylaPreparedClients').withIndex('by_expiry', q => q.lt('expiresAt', Date.now())).take(100);
+ for (const row of plans) await ctx.db.delete(row._id);
+ return { caylaPreparedRowsDeleted: prepared.length, caylaClientPlansDeleted: plans.length, attachmentsDeleted: rows.length, guestDraftsDeleted: guests.length };
 } });
+

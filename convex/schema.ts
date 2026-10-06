@@ -1,9 +1,11 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { caylaAgentTables } from "./caylaAgentSchema";
 import { socialTables } from "./socialSchema";
 
 export default defineSchema({
   ...socialTables,
+  ...caylaAgentTables,
   complianceReviews: defineTable({businessId:v.id("businesses"),employeeId:v.string(),taxYear:v.number(),month:v.string(),values:v.any(),confirmed:v.boolean(),fingerprint:v.string(),reviewedBy:v.id("users"),updatedAt:v.number()}).index("by_business_year",["businessId","taxYear"]),
   complianceGenerations: defineTable({businessId:v.id("businesses"),workspaceOwnerId:v.id("users"),actorId:v.id("users"),taxYear:v.number(),month:v.string(),formId:v.string(),version:v.string(),config:v.any(),summary:v.any(),sourceRuns:v.any(),employeeIds:v.array(v.string()),status:v.string(),createdAt:v.number(),completedAt:v.optional(v.number())}).index("by_business_year",["businessId","taxYear"]),
   complianceGeneratedRows: defineTable({generationId:v.id("complianceGenerations"),ordinal:v.number(),record:v.any()}).index("by_generation",["generationId","ordinal"]),
@@ -118,6 +120,9 @@ export default defineSchema({
     taxRuleVersion: v.optional(v.string()),
     taxRuleEffectiveFrom: v.optional(v.string()),
     taxRuleLastUpdated: v.optional(v.string()),
+    plannedPayDate: v.optional(v.string()),
+    plannedPeriodStart: v.optional(v.string()),
+    plannedPeriodEnd: v.optional(v.string()),
     defaultPayrollFrequency: v.optional(v.string()),
     // Persisted branding / media (base64 or public URL strings)
     logo: v.optional(v.string()),
@@ -318,6 +323,7 @@ export default defineSchema({
     .index("by_status", ["status"]),
 
   bulkEmailJobs: defineTable({
+    caylaCommandId: v.optional(v.id("caylaCommands")),
     workspaceOwnerId: v.id("users"),
     requestedByUserId: v.id("users"),
     businessId: v.id("businesses"),
