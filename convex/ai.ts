@@ -5,7 +5,8 @@ import { PDFDocument } from "pdf-lib";
 import { internal } from "./_generated/api";
 
 const OPENAI_URL = "https://api.openai.com/v1";
-const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+const TRANSCRIBE_MODEL = "gpt-transcribe";
+import { diagnostics, failureCode, publicFailure } from "./lib/caylaReasoning";
 const VISION_MODEL = "gpt-4o";
 
 /**
@@ -13,55 +14,37 @@ const VISION_MODEL = "gpt-4o";
  * Used by the onboarding voice tutorial and the Cayla transcript fallback path.
  */
 export const transcribeAudio = action({
-  args: {
-    audioBase64: v.string(),
-    mimeType: v.string(),
-    language: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-    await ctx.runMutation(internal.usage.internalReserveByUid, {
-      firebaseUid: identity.subject,
-      kind: "cayla",
-      opId: `cayla-audio:${identity.subject}:${crypto.randomUUID()}`,
-    });
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return { text: "", error: "OPENAI_API_KEY not configured" };
-    }
-
-    const buf = Buffer.from(args.audioBase64, "base64");
-    if (!buf.length || buf.length > 15 * 1024 * 1024) throw new Error("Record audio under 15 MB");
-    const ext =
-      (args.mimeType.split("/")[1] || "webm").split(";")[0].replace("x-", "") ||
-      "webm";
-    const blob = new Blob([buf], { type: args.mimeType });
-
-    const form = new FormData();
-    form.append("file", blob, `audio.${ext}`);
-    form.append("model", TRANSCRIBE_MODEL);
-    if (args.language) form.append("language", args.language);
-    form.append("response_format", "json");
-
+  args: { audioBase64:v.string(), mimeType:v.string(), language:v.optional(v.string()), businessId:v.optional(v.id('businesses')), requestId:v.optional(v.string()) },
+  handler:async(ctx,args):Promise<any>=>{
+    const trace=args.requestId||crypto.randomUUID();
+    diagnostics(trace,'TRANSCRIPTION',{status:'started',inputType:'voice'});
     try {
-      const res = await fetch(`${OPENAI_URL}/audio/transcriptions`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        console.error("Audio provider request failed", res.status);
-        return { text: "", error: `OpenAI ${res.status}` };
-      }
-      const json = (await res.json()) as { text?: string };
-      return { text: json.text ?? "" };
-    } catch (err: any) {
-      console.error("Audio provider connection failed");
-      return { text: "", error: err?.message ?? "network error" };
-    }
-  },
+      const identity=await ctx.auth.getUserIdentity();if(!identity)throw new Error('Unauthenticated');
+      if(!/^[a-zA-Z0-9_-]{8,100}$/.test(trace))throw new Error('INVALID_AUDIO');
+      // Keep encoded audio below Convex's argument limit. Never send an oversized payload.
+      if(args.audioBase64.length>900000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(args.audioBase64))throw new Error('INVALID_AUDIO');
+      const mime=args.mimeType.split(';')[0];
+      const formats:Record<string,string>={'audio/webm':'webm','audio/mp4':'mp4','audio/mpeg':'mp3','audio/wav':'wav','audio/ogg':'ogg'};
+      if(!formats[mime])throw new Error('INVALID_AUDIO');
+      const bytes=Buffer.from(args.audioBase64,'base64');if(!bytes.length)throw new Error('INVALID_AUDIO');
+      const context=args.businessId?await ctx.runQuery((internal as any).caylaAgent.voiceContext,{businessId:args.businessId}):null;
+      await ctx.runMutation(internal.usage.internalReserveByUid,{firebaseUid:identity.subject,kind:'cayla',opId:`cayla-audio:${identity.subject}:${trace}`});
+      const key=process.env.OPENAI_API_KEY;if(!key)throw new Error('MODEL_CONFIGURATION');
+      const form=new FormData();form.append('file',new Blob([bytes],{type:mime}),`instruction.${formats[mime]}`);
+      form.append('model',process.env.CAYLA_TRANSCRIPTION_MODEL||TRANSCRIBE_MODEL);
+      form.append('response_format','json');
+      // Current gpt-transcribe API uses languages, not the singular language field.
+      form.append('languages[]',args.language||'en');
+      form.append('prompt',`Payroll instruction in ${context?.country||'a Sheetpay workspace'}, currency ${context?.currency||''}. Client and employee names are spelling hints only; do not insert unspoken words.`);
+      const words=['PAYE','NIS','NHT','BIR','gross pay','net pay','basic pay','overtime','double time','allowances','bonuses','commissions','deductions','statutory deductions','fortnightly','biweekly','weekly','monthly','pay period','payslip','timesheet',...(context?.names||[])];
+      for(const word of words.slice(0,70)) { const safe=String(word).replace(/[<>\r\n]/g,' ').slice(0,100).trim();if(safe)form.append('keywords[]',safe); }
+      const response=await fetch(`${OPENAI_URL}/audio/transcriptions`,{method:'POST',headers:{Authorization:`Bearer ${key}`},body:form,signal:AbortSignal.timeout(30000)});
+      if(!response.ok){diagnostics(trace,'ERROR',{failedStage:'TRANSCRIPTION',status:response.status,providerRequestId:response.headers.get('x-request-id')});throw new Error('MODEL_HTTP');}
+      const output=await response.json();if(typeof output.text!=='string'||!output.text.trim())return {text:'',error:'No speech was detected. Please record again or type your instruction.',requestId:trace};
+      diagnostics(trace,'TRANSCRIPTION',{status:'complete'});
+      return {text:output.text,requestId:trace};
+    }catch(error){diagnostics(trace,'ERROR',{failedStage:'TRANSCRIPTION',code:failureCode(error)});return {text:'',error:publicFailure(error).message,code:publicFailure(error).code,requestId:trace};}
+  }
 });
 
 /**

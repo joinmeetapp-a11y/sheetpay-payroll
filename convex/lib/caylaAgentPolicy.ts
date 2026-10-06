@@ -1,5 +1,5 @@
-export const ACTIONS = new Set(['upcoming', 'exceptions', 'prepare', 'payslips', 'emails', 'reminder', 'reminders', 'history', 'report', 'tax', 'help']);
-export const DEFAULT_PREFERENCES = { voiceEnabled: true, autoTranscription: true, showExecutionPlan: true, requirePayslipApproval: true, requireEmailApproval: true, notifications: true };
+export const ACTIONS = new Set(['upcoming', 'exceptions', 'prepare', 'payslips', 'emails', 'reminder', 'reminders', 'history', 'report', 'tax', 'exports', 'help']);
+export const DEFAULT_PREFERENCES = { voicePlayback: true, voiceEnabled: true, autoTranscription: true, showExecutionPlan: true, requirePayslipApproval: true, requireEmailApproval: true, notifications: true };
 export const DAY = 86400000;
 export function validDate(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -17,7 +17,7 @@ export function localDate(now: number, timezone: string) {
 }
 export function validateIntent(value: any, permitted: string[]) {
   if (!value || !ACTIONS.has(value.action) || !['current', 'all', 'due'].includes(value.scope) || !Array.isArray(value.clientIds)) throw new Error('Cayla could not understand a supported payroll action. Try a more specific instruction.');
-  const keys = new Set(['action', 'scope', 'clientIds', 'dueFrom', 'dueTo', 'periodStart', 'periodEnd', 'payDate', 'daysBefore', 'clarification', 'target', 'exceptionFilter']);
+  const keys = new Set(['action', 'scope', 'clientIds', 'dueFrom', 'dueTo', 'periodStart', 'periodEnd', 'payDate', 'daysBefore', 'clarification', 'target', 'exceptionFilter', 'excludedEmployeeIds', 'adjustments', 'acknowledgedEmployeeIds', 'overtimeThreshold', 'reminderDate', 'reminderTime']);
   if (Object.keys(value).some(key => !keys.has(key))) throw new Error('Unsupported action arguments.');
   if (value.exceptionFilter != null && value.exceptionFilter !== 'missing_hours') throw new Error('Invalid exception filter.');
   if (value.target != null && !['client', 'employee', 'run'].includes(value.target)) throw new Error('Invalid contextual target.');
@@ -26,6 +26,12 @@ export function validateIntent(value: any, permitted: string[]) {
   if (value.daysBefore != null && (!Number.isInteger(value.daysBefore) || value.daysBefore < 0 || value.daysBefore > 30)) throw new Error('Choose a reminder 0 to 30 days before payday.');
   if (value.scope === 'due' && (!validDate(value.dueFrom) || !validDate(value.dueTo) || value.dueFrom > value.dueTo)) throw new Error('Specify when payroll is due.');
   if (value.clarification != null && (typeof value.clarification !== 'string' || value.clarification.length > 500)) throw new Error('Invalid clarification.');
+  for (const key of ['excludedEmployeeIds', 'acknowledgedEmployeeIds']) if (value[key] != null && (!Array.isArray(value[key]) || value[key].length > 200 || value[key].some((id: any) => typeof id !== 'string'))) throw new Error('Invalid employee selection.');
+  if (value.adjustments != null && (!Array.isArray(value.adjustments) || value.adjustments.length > 100 || value.adjustments.some((a: any) => !a || Object.keys(a).some(k => !['employeeId','field','value'].includes(k)) || typeof a.employeeId !== 'string' || !['regularHours','overtimeHours','bonus','allowances','otherDeductions'].includes(a.field) || !Number.isFinite(a.value) || a.value < 0 || a.value > (a.field.includes('Hours') ? 744 : 10000000)))) throw new Error('Invalid payroll adjustment.');
+  if (value.overtimeThreshold != null && (!Number.isFinite(value.overtimeThreshold) || value.overtimeThreshold < 0 || value.overtimeThreshold > 744)) throw new Error('Invalid overtime threshold.');
+  if (value.reminderDate != null && !validDate(value.reminderDate)) throw new Error('Invalid reminder date.');
+  if (value.reminderTime != null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.reminderTime)) throw new Error('Invalid reminder time.');
+  if (!!value.reminderDate !== !!value.reminderTime) throw new Error('Specify both reminder date and time.');
   return value;
 }
 export function safeError(error: unknown) {

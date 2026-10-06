@@ -18,6 +18,10 @@ export const purgeExpiredAttachments = internalMutation({ args: {}, handler: asy
  for (const row of prepared) await ctx.db.delete(row._id);
  const plans = await ctx.db.query('caylaPreparedClients').withIndex('by_expiry', q => q.lt('expiresAt', Date.now())).take(100);
  for (const row of plans) await ctx.db.delete(row._id);
+ const voices=await ctx.db.query('caylaCommands').withIndex('by_voice_expiry',q=>q.gt('voiceExpiresAt',0).lt('voiceExpiresAt',Date.now())).take(100);
+ for(const command of voices){if(command.voiceStorageId)await ctx.storage.delete(command.voiceStorageId);await ctx.db.patch(command._id,{voiceStorageId:undefined,voiceKey:undefined,voiceLeaseUntil:undefined,voiceExpiresAt:undefined});}
+ const replies=await ctx.db.query('caylaCommands').withIndex('by_reply_expiry',q=>q.gt('replyExpiresAt',0).lt('replyExpiresAt',Date.now())).take(100);
+ for(const command of replies)await ctx.db.patch(command._id,{reply:undefined,replyExpiresAt:undefined});
  return { caylaPreparedRowsDeleted: prepared.length, caylaClientPlansDeleted: plans.length, attachmentsDeleted: rows.length, guestDraftsDeleted: guests.length };
 } });
 

@@ -7,7 +7,8 @@ import { savePreparedCaylaPayroll } from './payrollRuns';
 import { createDashboardReminder, listDashboardReminders, zonedTimeToUtc } from './reminders';
 import { intentValidator, preferenceValidator, contextValidator } from './caylaAgentSchema';
 import { createWorkspaceNotification } from './notifications';
-import { DAY, DEFAULT_PREFERENCES, employeeExceptions, fingerprint, localDate, validateIntent, validatePeriod } from './lib/caylaAgentPolicy';
+import { DAY, DEFAULT_PREFERENCES, employeeExceptions, fingerprint, localDate, validDate, validateIntent, validatePeriod } from './lib/caylaAgentPolicy';
+import {diagnostics} from './lib/caylaReasoning';
 import { accountantGrossEarnings } from '../shared/accountantEarnings';
 
 async function workspace(ctx: any, businessId: any, capability: any = 'read') {
@@ -25,12 +26,14 @@ async function ownedCommand(ctx: any, commandId: any) {
   return { ...access, command };
 }
 async function event(ctx: any, access: any, name: string, count?: number) {
+  const stage:Record<string,string>={cayla_command_started:'CONTEXT_LOADING',cayla_payroll_prepared:'REVIEW_CREATED',cayla_payroll_approved:'ACTION_EXECUTED',cayla_review_cancelled:'ACTION_EXECUTED',cayla_command_failed:'ERROR'};
+  if(stage[name])diagnostics(access.command?.requestKey||String(access.command?._id||''),stage[name],{actorId:access.actor._id,workspaceId:access.owner._id,event:name,count});
   await ctx.db.insert('caylaEvents', { actorId: access.actor._id, workspaceOwnerId: access.owner._id, commandId: access.command?._id, name, count, createdAt: Date.now() });
 }
 async function roster(ctx: any, businessId: any) {
   const all = await ctx.db.query('employees').withIndex('by_business', (q: any) => q.eq('businessId', businessId)).collect();
   const real = all.filter((e: any) => !e.isDemo);
-  return (real.length ? real : all).filter((e: any) => !['inactive', 'deleted'].includes(e.status.toLowerCase()));
+  return (real.length ? real : all).filter((e: any) => !['inactive', 'deleted'].includes(String(e.status || '').toLowerCase()));
 }
 async function source(ctx: any, business: any) {
   const employees = await roster(ctx, business._id);
@@ -124,48 +127,52 @@ export const savePlan = internalMutation({
       if (intent.scope !== 'current' || intent.clientIds.some((id: any) => id !== command.contextBusinessId)) throw new Error('Context belongs to the selected client.');
       clients = [access.business];
     }
-    const writeAction = ['prepare', 'payslips', 'emails', 'reminder'].includes(intent.action);
-    if (writeAction) for (const b of clients) await requireBusinessAccess(ctx, b, intent.action === 'emails' ? 'sendPayslips' : 'runPayroll');
+    const writeAction = ['prepare', 'payslips', 'emails', 'reminder', 'exports'].includes(intent.action);
+    if (writeAction) for (const b of clients) await requireBusinessAccess(ctx, b, intent.action === 'exports' ? 'read' : intent.action === 'emails' ? 'sendPayslips' : 'runPayroll');
+    for (const employeeId of [...(intent.excludedEmployeeIds || []), ...(intent.acknowledgedEmployeeIds || []), ...(intent.adjustments || []).map((a:any)=>a.employeeId)]) {
+      const employee:any=await ctx.db.get(employeeId);
+      if (!employee || !clientIds.includes(employee.businessId)) throw new Error('CLIENT_ACCESS_DENIED');
+    }
     const counts = [];
     for (const b of clients) {
-      const src = await source(ctx, b), employees = src.employees;
+      const src = await source(ctx, b), employees = src.employees.filter((e:any)=>!intent.excludedEmployeeIds?.includes(e._id));
       const periodStart = intent.periodStart || b.plannedPeriodStart || '', periodEnd = intent.periodEnd || b.plannedPeriodEnd || '';
       const periodChanged = (intent.periodStart && intent.periodStart !== b.plannedPeriodStart) || (intent.periodEnd && intent.periodEnd !== b.plannedPeriodEnd);
       const payDate = intent.payDate || (!periodChanged ? b.plannedPayDate : '') || '';
       let status = 'planned';
       try { validatePeriod(periodStart, periodEnd, payDate); } catch { status = 'waiting'; }
-      if (intent.action === 'reminder') status = payDate ? 'planned' : 'waiting';
+      if (intent.action === 'reminder') status = intent.reminderDate && intent.reminderTime || payDate ? 'planned' : 'waiting';
       const record: any = { commandId: command._id, businessId: b._id, name: b.name, currency: b.currency,
         sourceFingerprint: src.fingerprint, periodStart, periodEnd, payDate, employeeIds: employees.map((e: any) => e._id),
         processed: 0, ready: 0, review: 0, blocking: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, status, expiresAt: command.expiresAt };
-      if (intent.action === 'emails') {
+      if (['emails','exports','payslips'].includes(intent.action)) {
         const runs = await ctx.db.query('payrollRuns').withIndex('by_business', (q: any) => q.eq('businessId', b._id)).order('desc').collect();
         const run = runs.find((r: any) => historyAccessible(access.owner, r.createdAt) && (intent.target !== 'run' || r._id === command.context?.payrollRunId) && (!intent.periodStart && !intent.periodEnd || r.employeesSnapshot.some((e: any) => e.payPeriodStart === intent.periodStart && e.payPeriodEnd === intent.periodEnd) ||
           intent.periodStart?.slice(0, 7) === intent.periodEnd?.slice(0, 7) && r.year === Number(intent.periodStart.slice(0, 4)) && r.month?.toLowerCase() === new Date(intent.periodStart + 'T12:00:00Z').toLocaleString('en', { month: 'long', timeZone: 'UTC' }).toLowerCase()));
         if (!run || !historyAccessible(access.owner, run.createdAt)) record.status = status;
-        else { record.runId = run._id; record.status = 'review'; record.ready = run.employeesSnapshot.filter((e: any) => e.email && e.grossPay > 0).length; }
+        else { record.runId = run._id; record.status = intent.action==='emails'?'review':'approved'; record.ready = run.employeesSnapshot.filter((e: any) => e.email && e.grossPay > 0).length; }
       }
       if (writeAction) await ctx.db.insert('caylaPreparedClients', record);
       counts.push(employees.length);
     }
     const total = counts.reduce((a, b) => a + b, 0);
-    const labels: Record<string, string> = { upcoming: 'View upcoming payroll', exceptions: 'Review payroll exceptions', prepare: 'Prepare payroll', payslips: 'Prepare ready payslips', emails: 'Prepare payslip email batches', reminder: 'Prepare payroll reminders', reminders: 'View payroll reminders', history: 'View payroll history', report: 'View payroll reports', tax: 'View yearly tax forms', help: 'Payroll guidance' };
+    const labels: Record<string, string> = { upcoming: 'View upcoming payroll', exceptions: 'Review payroll exceptions', prepare: 'Prepare payroll', payslips: 'Prepare ready payslips', emails: 'Prepare payslip email batches', reminder: 'Prepare payroll reminders', reminders: 'View payroll reminders', history: 'View payroll history', report: 'View payroll reports', tax: 'View yearly tax forms', exports:'Payslips ready', help: 'Payroll guidance' };
     const records = await ctx.db.query('caylaPreparedClients').withIndex('by_command', (q: any) => q.eq('commandId', command._id)).collect();
     const waiting = records.some((r: any) => r.status === 'waiting');
-    const status = intent.clarification ? 'waiting' : !writeAction ? 'complete' : !clientIds.length ? 'complete' : intent.action === 'emails' && !waiting && records.every((r: any) => r.runId) ? 'review' : waiting ? 'waiting' : 'planned';
-    const summary = intent.clarification ? 'Please make the request more specific or use one of the suggested commands.' : !clientIds.length ? 'No clients match this request. Clients without a saved payday are not included in due-date commands.' : waiting ? 'Choose the missing payroll dates or review the client’s saved payroll before continuing.' : `${clientIds.length} clients · ${total} employees. ${writeAction ? 'Review the plan before continuing.' : 'Results come from your saved records.'}`;
+    const status = intent.action==='exports' ? 'complete' : intent.clarification ? 'waiting' : !writeAction ? 'complete' : !clientIds.length ? 'complete' : ['emails','exports','payslips'].includes(intent.action) && !waiting && records.every((r: any) => r.runId) ? (intent.action==='emails'?'review':'complete') : waiting ? 'waiting' : 'planned';
+    const summary = intent.action==='exports' && records.every((r:any)=>!r.runId) ? 'No finalized payslips match this period. Prepare and approve payroll first.' : intent.clarification ? intent.clarification : !clientIds.length ? 'No clients match this request. Clients without a saved payday are not included in due-date commands.' : waiting ? 'Choose the missing payroll dates or review the client’s saved payroll before continuing.' : `${clientIds.length} clients · ${total} employees. ${writeAction ? 'Review the plan before continuing.' : 'Results come from your saved records.'}`;
     await ctx.db.patch(command._id, { intent, command: labels[intent.action], clientIds, status, summary,
       steps: writeAction ? planSteps(intent.action).map((label, i) => ({ label, status: i === 0 ? 'complete' : 'pending', ...(i === 0 ? { count: clientIds.length } : {}) })) : [], updatedAt: Date.now() });
     if (status === 'complete') await event(ctx, access, 'cayla_command_completed', total);
     await recordAccountantActivity(ctx, access.owner._id, access.actor._id, 'cayla.plan_created', access.business._id, { commandId: command._id, actionType: intent.action, clientCount: clientIds.length, employeeCount: total });
-    return command._id;
+    return {commandId:command._id,status};
   },
 });
 export const requestFailure = internalMutation({
   args: { commandId: v.id('caylaCommands') }, handler: async (ctx, args) => {
     const access = await ownedCommand(ctx, args.commandId);
     if (access.command.status !== 'understanding') return;
-    await ctx.db.patch(args.commandId, { status: 'error', summary: 'Cayla could not understand this request. Try again with a specific payroll instruction.', updatedAt: Date.now() });
+    await ctx.db.patch(args.commandId, { status: 'error', summary: "Cayla couldn't complete that request. No payroll changes were finalized. Please try again.", updatedAt: Date.now() });
     await event(ctx, access, 'cayla_command_failed');
   },
 });
@@ -228,10 +235,13 @@ export const prepareBatch = internalMutation({
     let earningsCalculated = client.earningsCalculated || 0, statutoryCalculated = client.statutoryCalculated || 0;
     let ready = client.ready, review = client.review, blocking = client.blocking, gross = client.totalGross, deductions = client.totalDeductions, net = client.totalNet;
     for (const id of chunk) {
-      const e = src.employees.find((row: any) => row._id === id);
+      const original = src.employees.find((row: any) => row._id === id);
+      const e = original ? { ...original } : null;
+      for (const adjustment of c.intent.adjustments || []) if (adjustment.employeeId === id && e) e[adjustment.field] = adjustment.value;
       if (!e || e.businessId !== b._id) throw new Error('Employee is outside this client.');
       const previous = historyAccessible(access.owner, src.previous?.createdAt || 0) ? src.previous?.employeesSnapshot.find((row: any) => row._id === id) : undefined;
-      const exceptions = employeeExceptions(e, src.employees, previous);
+      const exceptions = employeeExceptions(e, src.employees, previous).filter(issue=>issue.code!=='high_overtime' || !c.intent.acknowledgedEmployeeIds?.includes(id));
+      if (c.intent.overtimeThreshold != null && e.overtimeHours > c.intent.overtimeThreshold && !c.intent.acknowledgedEmployeeIds?.includes(id) && !exceptions.some(i=>i.code==='high_overtime')) exceptions.push({code:'high_overtime',severity:'REVIEW',message:`Overtime exceeds your ${c.intent.overtimeThreshold} hour review threshold.`});
       let snapshot: any;
       let stage = 'earnings';
       if (!exceptions.some(i => i.severity === 'BLOCKING')) {
@@ -261,6 +271,7 @@ export const prepareBatch = internalMutation({
       else if (status === 'review') review++; else blocking++;
       await ctx.db.insert('caylaPreparedEmployees', { commandId: c._id, businessId: b._id, employeeId: e._id, ...(snapshot ? { snapshot } : {}), exceptions, status, expiresAt: c.expiresAt });
     }
+    diagnostics(c.requestKey,'PAYROLL_CALCULATION',{actorId:access.actor._id,workspaceId:access.owner._id,earningsCalculated,statutoryCalculated});
     const processed = client.processed + chunk.length;
     await ctx.db.patch(client._id, { processed, earningsCalculated, statutoryCalculated, ready, review, blocking, totalGross: Number(gross.toFixed(2)), totalDeductions: Number(deductions.toFixed(2)), totalNet: Number(net.toFixed(2)), status: processed === client.employeeIds.length ? 'review' : 'working' });
     const total = clients.reduce((n: number, b: any) => n + (b._id === client._id ? processed : b.processed), 0);
@@ -291,12 +302,14 @@ export const approveClient = mutation({
     if (c.intent.action === 'reminder') {
       const days = c.intent.daysBefore ?? 3;
       // Scheduled in-app/push notification, using the existing reminder validator and worker.
-      const reminderDate = new Date(Date.parse(client.payDate + 'T00:00:00Z') - days * DAY).toISOString().slice(0, 10);
+      const reminderDate = c.intent.reminderDate || new Date(Date.parse(client.payDate + 'T00:00:00Z') - days * DAY).toISOString().slice(0, 10);
       const [year, month, day] = reminderDate.split('-').map(Number);
-      const fireAt = zonedTimeToUtc(year, month, day, 9, 0, c.timezone);
+      const scheduledTime = c.intent.reminderTime || '09:00';
+      const [hour,minute]=scheduledTime.split(':').map(Number);
+      const fireAt = zonedTimeToUtc(year, month, day, hour, minute, c.timezone);
       const result = await createDashboardReminder(ctx, { businessId: b._id, type: 'payroll', title: `${b.name} payroll`,
-        frequency: 'once', scheduledAt: fireAt, scheduledTime: '09:00', timezone: c.timezone,
-        channels: ['in_app', 'push'], idempotencyKey: `cayla:${c._id}:${b._id}`, description: `${days} days before payday ${client.payDate}` });
+        frequency: 'once', scheduledAt: fireAt, scheduledTime, timezone: c.timezone,
+        channels: ['in_app', 'push'], idempotencyKey: `cayla:${c._id}:${b._id}`, description: c.intent.reminderDate ? `Payroll reminder ${reminderDate} ${scheduledTime}` : `${days} days before payday ${client.payDate}` });
       reminderId = result.id;
     } else {
       const prepared = await ctx.db.query('caylaPreparedEmployees').withIndex('by_command_business', (q: any) => q.eq('commandId', c._id).eq('businessId', b._id)).collect();
@@ -324,7 +337,11 @@ export const getCommand = query({
     for (const client of clients) {
       const issues = await ctx.db.query('caylaPreparedEmployees').withIndex('by_command_business', (q: any) => q.eq('commandId', c._id).eq('businessId', client.businessId)).collect();
       const run = client.runId ? await ctx.db.get(client.runId) : null;
-      result.push({ ...client, issues: issues.filter((e: any) => e.exceptions.length).map((e: any) => ({ employeeId: e.employeeId, status: e.status, name: e.snapshot?.name || '', exceptions: e.exceptions })),
+      const rosterRows=await roster(ctx,client.businessId);
+      const changes=(c.intent?.adjustments||[]).filter((a:any)=>rosterRows.some((e:any)=>e._id===a.employeeId)).map((a:any)=>({name:rosterRows.find((e:any)=>e._id===a.employeeId)?.name,field:a.field,before:rosterRows.find((e:any)=>e._id===a.employeeId)?.[a.field]||0,after:a.value}));
+      const excluded=rosterRows.filter((e:any)=>c.intent?.excludedEmployeeIds?.includes(e._id)).map((e:any)=>e.name);
+      const readyRows=issues.filter((e:any)=>e.status==='ready');
+      result.push({ ...client, changes,excluded,totalPaye:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.paye||0),0),totalNis:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.nis||0),0), issues: issues.filter((e: any) => e.exceptions.length).map((e: any) => ({ employeeId: e.employeeId, status: e.status, name: e.snapshot?.name || '', exceptions: e.exceptions })),
         run: run && historyAccessible(access.owner, run.createdAt) ? run : null, business: await ctx.db.get(client.businessId) });
     }
     const readonly = [];
@@ -385,3 +402,118 @@ export const saveSchedule = mutation({ args: { businessId: v.id('businesses'), p
 
 /** Legacy Accountant chat keeps read-only advice, while operations use the command pipeline. */
 export const isAccountant = internalQuery({ args: {}, handler: async ctx => { const { actor } = await getActor(ctx); return actor.accountType === 'accountant' || String(actor.plan || '').startsWith('accountant'); } });
+
+// Structured, bounded session memory: no raw conversation or uploaded documents.
+export const agentTool = internalQuery({
+  args: { commandId: v.id('caylaCommands'), tool: v.string(), clientId: v.optional(v.string()), search: v.optional(v.string()), scope:v.optional(v.union(v.literal('current'),v.literal('all'))),periodStart:v.optional(v.string()),periodEnd:v.optional(v.string()) },
+  handler: async (ctx, args): Promise<any> => {
+    const access = await ownedCommand(ctx, args.commandId);
+    const session = await ctx.db.query('caylaSessions').withIndex('by_actor_workspace', (q:any)=>q.eq('actorId',access.actor._id).eq('workspaceOwnerId',access.owner._id)).first();
+    let active:any = null;
+    if(session && Date.now()-session.updatedAt < DAY) {
+      try { const old=await ownedCommand(ctx,session.activeCommandId); if(old.command.expiresAt>Date.now())active=old.command; } catch { /* Revoked access invalidates memory. */ }
+    }
+    if(args.tool==='get_workspace_context') return {
+      actorId:access.actor._id,workspaceId:access.owner._id,currentClientId:access.business._id,country:access.business.countryCode,currency:access.business.currency,
+      today:localDate(Date.now(),access.command.timezone),timezone:access.command.timezone,page:access.command.context?.view||'Dashboard',
+      clients:access.clients.slice(0,100).map((b:any)=>({id:b._id,name:b.name,country:b.countryCode,currency:b.currency,payDate:b.plannedPayDate||null})),
+      active:active ? {commandId:active._id,status:active.status,intent:active.intent,clientIds:active.clientIds} : null,
+    };
+    if(args.tool==='get_pending_payroll') {
+      if(!active)return {active:false};
+      const clients=await ctx.db.query('caylaPreparedClients').withIndex('by_command',(q:any)=>q.eq('commandId',active._id)).collect();
+      const result=[];
+      for(const client of clients){const rows=await ctx.db.query('caylaPreparedEmployees').withIndex('by_command_business',(q:any)=>q.eq('commandId',active._id).eq('businessId',client.businessId)).collect();result.push({clientId:client.businessId,name:client.name,periodStart:client.periodStart,periodEnd:client.periodEnd,currency:client.currency,gross:client.totalGross,net:client.totalNet,deductions:client.totalDeductions,ready:client.ready,review:client.review,blocked:client.blocking,issues:rows.filter((e:any)=>e.status!=='ready').slice(0,50).map((e:any)=>({employeeId:e.employeeId,name:e.snapshot?.name,overtimeHours:e.snapshot?.overtimeHours,exceptions:e.exceptions}))});}
+      return {status:active.status,approvalStatus:active.approvalStatus,clients:result};
+    }
+    const query=(args.search||'').trim().toLowerCase();
+    if(['list_clients','search_clients'].includes(args.tool))return access.clients.filter((b:any)=>!query||b.name.toLowerCase().includes(query)).slice(0,50).map((b:any)=>({id:b._id,name:b.name}));
+    if(args.periodStart||args.periodEnd){if(!validDate(args.periodStart)||!validDate(args.periodEnd)||args.periodStart>args.periodEnd||Date.parse(args.periodEnd)-Date.parse(args.periodStart)>366*DAY)throw new Error('Invalid payroll date');}
+    const ids=args.clientId ? [args.clientId] : args.scope==='all'?access.clients.map((b:any)=>b._id):active?.clientIds?.length ? active.clientIds : [access.business._id];
+    if(ids.some((id:any)=>!access.clients.some((b:any)=>b._id===id)))throw new Error('CLIENT_ACCESS_DENIED');
+    const output=[];
+    for(const id of ids.slice(0,20)) {
+      const business=access.clients.find((b:any)=>b._id===id);
+      await requireBusinessAccess(ctx,business,'read');
+      const employees=await roster(ctx,id);
+      if(['list_employees','search_employees'].includes(args.tool)) { output.push({clientId:id,employees:employees.filter((e:any)=>!query||e.name.toLowerCase().includes(query)).slice(0,50).map((e:any)=>({id:e._id,name:e.name,payFrequency:e.payFrequency}))});continue; }
+      if(args.tool==='list_payroll_attention_items'){output.push({clientId:id,name:business.name,issues:employees.flatMap((e:any)=>employeeExceptions(e,employees).map(issue=>({employeeId:e._id,name:e.name,...issue}))).slice(0,50)});continue;}
+      if(!['get_payroll_summary','get_statutory_summary','compare_payroll_periods'].includes(args.tool))throw new Error('Unsupported read tool');
+      const saved=(await ctx.db.query('payrollRuns').withIndex('by_business',(q:any)=>q.eq('businessId',id)).order('desc').take(101)).filter((r:any)=>historyAccessible(access.owner,r.createdAt));
+      const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
+      const matching=saved.filter((r:any)=>!args.periodStart||`${r.year}-${String(months.indexOf(r.month.toLowerCase())+1).padStart(2,'0')}`>=args.periodStart.slice(0,7)&&`${r.year}-${String(months.indexOf(r.month.toLowerCase())+1).padStart(2,'0')}`<=args.periodEnd!.slice(0,7));
+      const runs=matching.slice(0,args.periodStart?100:args.tool==='compare_payroll_periods'?2:1);
+      output.push({clientId:id,name:business.name,currency:business.currency,periodStart:args.periodStart,periodEnd:args.periodEnd,truncated:saved.length>100||ids.length>20,
+        totals:{payrollRuns:runs.length,payslips:runs.reduce((n:number,r:any)=>n+r.employeesSnapshot.length,0),gross:runs.reduce((n:number,r:any)=>n+r.totalGross,0),net:runs.reduce((n:number,r:any)=>n+r.totalNet,0),paye:runs.reduce((n:number,r:any)=>n+r.totalPaye,0),nis:runs.reduce((n:number,r:any)=>n+r.totalNis,0)},
+        runs:runs.slice(0,12).map((r:any)=>({id:r._id,period:r.periodLabel,employees:r.employeesSnapshot.length,gross:r.totalGross,net:r.totalNet,deductions:r.totalDeductions,paye:r.totalPaye,nis:r.totalNis,breakdowns:query?r.employeesSnapshot.filter((e:any)=>e.name.toLowerCase().includes(query)).slice(0,2).map((e:any)=>({name:e.name,gross:e.grossPay,net:e.netPay,statutory:e.statutoryData})):[]}))});
+    }
+    return output;
+  },
+});
+export const resolveProposal = internalQuery({
+  args: {commandId:v.id('caylaCommands'), proposal:v.any(), action:v.string(), followup:v.boolean()},
+  handler:async(ctx,args):Promise<any>=>{
+    const access=await ownedCommand(ctx,args.commandId);
+    const session=await ctx.db.query('caylaSessions').withIndex('by_actor_workspace',(q:any)=>q.eq('actorId',access.actor._id).eq('workspaceOwnerId',access.owner._id)).first();
+    let prior:any=null;
+    if(args.followup&&session&&Date.now()-session.updatedAt<DAY){const old=await ownedCommand(ctx,session.activeCommandId);if(old.command.expiresAt>Date.now())prior=old.command;}
+    if(args.followup&&!prior)return {clarification:'There is no active payroll proposal. Which client and payroll period do you mean?'};
+    if(args.action==='review')return {commandId:prior._id};
+    const p=args.proposal;
+    const intent:any={...(prior?.intent||{}),action:args.action,scope:p.scope||prior?.intent?.scope||'current',clientIds:p.clientIds?.length?p.clientIds:prior?.clientIds||[]};
+    for(const key of ['dueFrom','dueTo','periodStart','periodEnd','payDate','daysBefore','overtimeThreshold','reminderDate','reminderTime'])if(p[key]!=null)intent[key]=p[key];
+    for(const key of ['target','exceptionFilter'])if(p[key]!=null)intent[key]=p[key];
+    delete intent.clarification;
+    validateIntent(intent,access.clients.map((b:any)=>String(b._id)));
+    const clients=intent.clientIds.length?access.clients.filter((b:any)=>intent.clientIds.includes(b._id)):intent.scope==='current'?[access.business]:access.clients;
+    const rows=[];for(const b of clients)rows.push(...await roster(ctx,b._id));
+    const resolve=(name:string)=>{const exact=rows.filter((e:any)=>e.name.toLowerCase()===name.trim().toLowerCase());const matches=exact.length?exact:rows.filter((e:any)=>e.name.toLowerCase().split(/\s+/).includes(name.trim().toLowerCase()));return matches.length===1?matches[0]:null;};
+    for(const [field,names] of [['excludedEmployeeIds',p.excludedEmployeeNames],['acknowledgedEmployeeIds',p.acknowledgedEmployeeNames]] as any){
+      if(names?.length){const resolved=names.map(resolve);if(resolved.some((e:any)=>!e))return {clarification:'I could not uniquely identify that employee. Please give their full name and client.'};intent[field]=[...new Set([...(intent[field]||[]),...resolved.map((e:any)=>e._id)])];}
+    }
+    for(const a of p.adjustments||[]){const e=resolve(a.employeeName);if(!e)return {clarification:'I found an ambiguous or missing employee. Please give their full name and client.'};intent.adjustments=[...(intent.adjustments||[]).filter((old:any)=>old.employeeId!==e._id||old.field!==a.field),{employeeId:e._id,field:a.field,value:a.value}];}
+    validateIntent(intent,access.clients.map((b:any)=>String(b._id)));
+    return {intent};
+  }
+});
+export const rememberSession = internalMutation({
+  args:{commandId:v.id('caylaCommands'),reply:v.optional(v.string())},handler:async(ctx,args)=>{
+    const access=await ownedCommand(ctx,args.commandId);
+    if(args.reply)await ctx.db.patch(args.commandId,{reply:args.reply.slice(0,2000),replyExpiresAt:access.command.expiresAt});
+    const key={actorId:access.actor._id,workspaceOwnerId:access.owner._id};
+    const row=await ctx.db.query('caylaSessions').withIndex('by_actor_workspace',(q:any)=>q.eq('actorId',key.actorId).eq('workspaceOwnerId',key.workspaceOwnerId)).first();
+    if(row && ['prepare','payslips','emails','reminder'].includes(access.command.intent?.action||'') && row.activeCommandId!==args.commandId){const previous:any=await ctx.db.get(row.activeCommandId);if(previous && ['planned','waiting','review','error'].includes(previous.status))await ctx.db.patch(previous._id,{status:'superseded',summary:'A newer payroll proposal replaced this review. Open the current Cayla work.',updatedAt:Date.now()});}
+    if(row && !['prepare','payslips','emails','reminder'].includes(access.command.intent?.action||'')) return;
+    if(row)await ctx.db.patch(row._id,{activeCommandId:args.commandId,updatedAt:Date.now()});else await ctx.db.insert('caylaSessions',{...key,activeCommandId:args.commandId,updatedAt:Date.now()});
+  }
+});
+export const voiceContext = internalQuery({args:{businessId:v.id('businesses')},handler:async(ctx,args)=>{
+  const access=await workspace(ctx,args.businessId);
+  const employees=await roster(ctx,access.business._id);
+  return {country:access.business.countryCode,currency:access.business.currency,names:[...access.clients.slice(0,20).map((b:any)=>b.name),...employees.slice(0,30).map((e:any)=>e.name)]};
+}});
+export const startVoice = internalMutation({args:{commandId:v.id('caylaCommands')},handler:async(ctx,args):Promise<any>=>{
+  const access=await ownedCommand(ctx,args.commandId),c=access.command;
+  if(c.expiresAt<Date.now()||['understanding','working'].includes(c.status))throw new Error('Voice result is not ready');
+  const prefs=await ctx.db.query('caylaPreferences').withIndex('by_actor_workspace',(q:any)=>q.eq('actorId',access.actor._id).eq('workspaceOwnerId',access.owner._id)).first();
+  if(prefs?.settings.voicePlayback===false)return {disabled:true};
+  const text=(c.reply||c.summary).slice(0,800),key=await fingerprint({text,status:c.status});
+  if(c.voiceKey===key&&c.voiceStorageId)return {storageId:c.voiceStorageId,key};
+  if(c.voiceLeaseUntil>Date.now())return {busy:true};
+  await reserveUsage(ctx,access.owner._id,'cayla',`cayla-voice:${c._id}:${key}`);
+  if(c.voiceStorageId)await ctx.storage.delete(c.voiceStorageId);
+  await ctx.db.patch(c._id,{voiceKey:key,voiceLeaseUntil:Date.now()+35000,voiceStorageId:undefined,voiceExpiresAt:c.expiresAt});
+  return {text,key};
+}});
+export const finishVoice = internalMutation({args:{commandId:v.id('caylaCommands'),key:v.string(),storageId:v.optional(v.id('_storage'))},handler:async(ctx,args)=>{
+  const {command}=await ownedCommand(ctx,args.commandId);
+  if(command.voiceKey!==args.key){if(args.storageId)await ctx.storage.delete(args.storageId);return;}
+  if(args.storageId&&command.voiceStorageId)await ctx.storage.delete(command.voiceStorageId);
+  await ctx.db.patch(command._id,{voiceLeaseUntil:0,...(args.storageId?{voiceStorageId:args.storageId}:{})});
+}});
+export const cancel = mutation({args:{commandId:v.id('caylaCommands')},handler:async(ctx,args)=>{
+  const access=await ownedCommand(ctx,args.commandId);
+  if(!['planned','waiting','review','error'].includes(access.command.status))throw new Error('This review cannot be cancelled.');
+  await ctx.db.patch(args.commandId,{status:'cancelled',approvalStatus:'cancelled',summary:'Review cancelled. No additional payroll changes were finalized.',updatedAt:Date.now()});
+  await event(ctx,access,'cayla_review_cancelled');
+}});

@@ -6,10 +6,20 @@ import schema from '../convex/schema';
 import { calculateTrinidadPayroll } from '../convex/lib/countryTaxRules/trinidad_and_tobago';
 import * as statutory from '../convex/countryPayroll';
 import * as earnings from '../shared/accountantEarnings';
-import { commonIntent } from '../convex/caylaAgentActions';
+import { commonIntent } from './fixtures/caylaLegacyIntent';
+import {CAYLA_TOOLS} from '../convex/lib/caylaReasoning';
+function modelCall(name:string,values:any={}){const schema=CAYLA_TOOLS.find(t=>t.name===name)!.parameters;const defaults:any={};for(const [key,rule]of Object.entries(schema.properties) as any){defaults[key]=Array.isArray(rule.type)&&rule.type.includes('null')?null:rule.type==='array'?[]:rule.type==='boolean'?false:key==='scope'?'current':'';}return new Response(JSON.stringify({output:[{type:'function_call',call_id:'test-call',name,arguments:JSON.stringify({...defaults,...values})}]}));}
 const api = anyApi, modules = import.meta.glob('../convex/**/*.{ts,js}');
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 async function fixture(options: { count?: number; plan?: 'free' | 'accountant_monthly'; missing?: boolean; badCountry?: boolean; second?: boolean } = {}) {
+  vi.stubEnv('OPENAI_API_KEY','test');
+  vi.stubGlobal('fetch',vi.fn(async (_url,init:any)=>{
+    const input=JSON.parse(JSON.parse(init.body).input[0].content);
+    const intent=commonIntent(input.instruction,{...input.context,context:{view:input.context.page}})||{action:'help',scope:'current',clientIds:[],clarification:'Please clarify.'};
+    const names:Record<string,string>={prepare:'prepare_payroll',payslips:'generate_bulk_payslips',emails:'email_payslips',reminder:'set_payroll_reminder',reminders:'list_payroll_reminders',exceptions:'find_payroll_exceptions',upcoming:'list_clients_waiting_for_payroll',report:'get_reports',history:'get_payroll_history',tax:'generate_yearly_tax_form'};
+    const {action,...parameters}=intent;
+    return modelCall(names[action]||'ask_clarification',action==='help'?{question:intent.clarification}:parameters);
+  }));
   const t = convexTest(schema, modules);
   const ids = await t.run(async ctx => {
     const user = await ctx.db.insert('users', { firebaseUid: 'agent-owner', email: 'owner@example.com', accountType: 'accountant', plan: options.plan || 'accountant_monthly', planStatus: 'active' });
@@ -34,7 +44,7 @@ async function fixture(options: { count?: number; plan?: 'free' | 'accountant_mo
 describe('Cayla validated orchestration', () => {
   it('rejects unauthenticated commands before model or data access', async () => {
     const { t, ids } = await fixture(); const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
-    await expect(t.action(api.caylaAgentActions.request, { businessId: ids.business, message: 'Run payroll', requestKey: crypto.randomUUID(), source: 'text', timezone: 'UTC' })).rejects.toThrow('Unauthenticated');
+    await expect(t.action(api.caylaAgentActions.request, { businessId: ids.business, message: 'Run payroll', requestKey: crypto.randomUUID(), source: 'text', timezone: 'UTC' })).rejects.toThrow('CAYLA_UNAVAILABLE');
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it('rejects legacy Accountant confirmation payloads and unexpected model write tools', async () => {
@@ -71,7 +81,7 @@ describe('Cayla validated orchestration', () => {
     const foreignEmployee = await t.run(async ctx => { const e: any = (await ctx.db.get(ids.employees[0]))!; const { _id, _creationTime, ...row } = e; return ctx.db.insert('employees', { ...row, businessId: ids.foreign, userId: ids.other }); });
     const args = { businessId: ids.business, message: 'Review this employee', requestKey: crypto.randomUUID(), source: 'text', timezone: 'UTC' };
     await expect(owner.action(api.caylaAgentActions.request, { ...args, context: { view: 'Payslips', employeeId: 'bad-employee-id' } })).rejects.toThrow();
-    await expect(owner.action(api.caylaAgentActions.request, { ...args, context: { view: 'Payslips', employeeId: foreignEmployee } })).rejects.toThrow('Employee context access denied');
+    await expect(owner.action(api.caylaAgentActions.request, { ...args, context: { view: 'Payslips', employeeId: foreignEmployee } })).rejects.toThrow('CAYLA_UNAVAILABLE');
     const result = await owner.action(api.caylaAgentActions.request, { ...args, context: { view: 'Payslips', employeeId: ids.employees[0] } });
     const command = await owner.query(api.caylaAgent.getCommand, { commandId: result.commandId });
     expect(command.intent.target).toBe('employee');
@@ -172,7 +182,7 @@ describe('Cayla validated orchestration', () => {
   it('does not infer a payday from reminder time and requires missing dates', async () => {
     const { t, ids, owner, request } = await fixture(); await t.run(ctx => ctx.db.patch(ids.business, { plannedPayDate: undefined, plannedPeriodStart: undefined, plannedPeriodEnd: undefined }));
     const { commandId } = await request(); expect((await owner.query(api.caylaAgent.getCommand, { commandId })).status).toBe('waiting');
-    await expect(owner.action(api.caylaAgentActions.prepare, { commandId })).rejects.toThrow('dates');
+    await expect(owner.action(api.caylaAgentActions.prepare, { commandId })).rejects.toThrow('CAYLA_UNAVAILABLE');
     await owner.mutation(api.caylaAgent.setDates, { commandId, businessId: ids.business, periodStart: '2026-10-01', periodEnd: '2026-10-30', payDate: '2026-10-30' });
     await owner.action(api.caylaAgentActions.prepare, { commandId }); expect((await owner.query(api.caylaAgent.getCommand, { commandId })).status).toBe('review');
   });
@@ -258,10 +268,99 @@ describe('Cayla validated orchestration', () => {
   it('retains interpreted explicit period and payday in the review plan', async () => {
     const { owner, request } = await fixture();
     vi.stubEnv('OPENAI_API_KEY', 'test');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: 'prepare', scope: 'current', clientIds: [], periodStart: '2026-09-15', periodEnd: '2026-09-30', payDate: '2026-10-02' }) } }] }))));
+    vi.stubGlobal('fetch', vi.fn(async () => modelCall('prepare_payroll',{scope:'current',clientIds:[],periodStart:'2026-09-15',periodEnd:'2026-09-30',payDate:'2026-10-02'})));
     const { commandId } = await request('Run payroll for this client from 2026-09-15 to 2026-09-30, payday 2026-10-02');
     const command = await owner.query(api.caylaAgent.getCommand, { commandId });
     expect(command.clients[0]).toMatchObject({ periodStart: '2026-09-15', periodEnd: '2026-09-30', payDate: '2026-10-02' });
     expect(command.status).toBe('planned');
+  });
+});
+
+describe('Cayla tools, memory and secure audio',()=>{
+  it('uses Responses strict tools and never exposes finalization tools',async()=>{
+    const {request}=await fixture();await request();
+    const call:any=(fetch as any).mock.calls[0];expect(call[0]).toContain('/v1/responses');
+    const body=JSON.parse(call[1].body);expect(body.store).toBe(false);expect(body.parallel_tool_calls).toBe(false);
+    expect(body.tools.every((t:any)=>t.strict&&t.parameters.additionalProperties===false)).toBe(true);
+    expect(body.tools.map((t:any)=>t.name)).not.toContain('approveClient');
+  });
+  it('asks for employee clarification rather than choosing one of two Johns',async()=>{
+    const {t,ids,owner,request}=await fixture();await t.run(async ctx=>{await ctx.db.patch(ids.employees[0],{name:'John Smith'});await ctx.db.patch(ids.employees[1],{name:'John James'});});
+    vi.stubGlobal('fetch',vi.fn(async()=>modelCall('prepare_payroll',{adjustments:[{employeeName:'John',field:'bonus',value:500}]})));
+    const result=await owner.query(api.caylaAgent.getCommand,{commandId:(await request('Give John a bonus of 500')).commandId});
+    expect(result.status).toBe('waiting');expect(result.summary).toContain('full name');expect(await t.run(ctx=>ctx.db.query('payrollRuns').collect())).toHaveLength(0);
+  });
+  it('persists active payroll, amends only proposed hours and supersedes the old approval',async()=>{
+    const {t,ids,owner,prepare,request}=await fixture();const original=await prepare();
+    vi.stubGlobal('fetch',vi.fn(async()=>modelCall('amend_pending_payroll',{adjustments:[{employeeName:'Employee 0',field:'bonus',value:500}],excludedEmployeeNames:['Employee 1']})));
+    const amended=(await request('Give Employee 0 a 500 bonus and exclude Employee 1')).commandId;
+    await owner.action(api.caylaAgentActions.prepare,{commandId:amended});
+    const review=await owner.query(api.caylaAgent.getCommand,{commandId:amended});expect(review.clients[0].ready).toBe(1);expect(review.clients[0].totalGross).toBe(10500);
+    expect((await t.run(ctx=>ctx.db.get(ids.employees[0])) as any).bonus).toBe(0);
+    await expect(owner.mutation(api.caylaAgent.approveClient,{commandId:original,businessId:ids.business})).rejects.toThrow('Prepare');
+    const saved=await owner.mutation(api.caylaAgent.approveClient,{commandId:amended,businessId:ids.business});const run:any=await t.run(ctx=>ctx.db.get(saved.runId));expect(run.employeesSnapshot[0].bonus).toBe(500);
+  });
+  it('run it opens the pending review without running payroll',async()=>{
+    const {owner,prepare,request,t}=await fixture();const commandId=await prepare();
+    vi.stubGlobal('fetch',vi.fn(async()=>modelCall('review_pending_payroll')));
+    expect((await request('Run it')).commandId).toBe(commandId);expect(await t.run(ctx=>ctx.db.query('payrollRuns').collect())).toHaveLength(0);
+  });
+  it('uses requested overtime threshold and records explicit acknowledgement in the proposal',async()=>{
+    const {t,ids,owner,request}=await fixture();await t.run(ctx=>ctx.db.patch(ids.employees[0],{overtimeHours:14,overtimeRate:20}));
+    vi.stubGlobal('fetch',vi.fn(async()=>modelCall('prepare_payroll',{overtimeThreshold:10})));
+    const first=(await request('Show anyone over 10 overtime hours first')).commandId;await owner.action(api.caylaAgentActions.prepare,{commandId:first});
+    expect((await owner.query(api.caylaAgent.getCommand,{commandId:first})).clients[0].review).toBe(1);
+    vi.stubGlobal('fetch',vi.fn(async()=>modelCall('amend_pending_payroll',{acknowledgedEmployeeNames:['Employee 0']})));
+    const next=(await request('Employee 0 is correct')).commandId;await owner.action(api.caylaAgentActions.prepare,{commandId:next});
+    expect((await owner.query(api.caylaAgent.getCommand,{commandId:next})).clients[0].ready).toBe(2);
+  });
+  it('prepares an exact local-time reminder and requires approval before scheduling',async()=>{
+    const {owner,ids,t,request}=await fixture();vi.useFakeTimers();vi.setSystemTime(Date.parse('2026-10-05T12:00:00Z'));
+    vi.stubGlobal('fetch',vi.fn(async()=>modelCall('set_payroll_reminder',{reminderDate:'2026-10-06',reminderTime:'19:00'})));
+    const commandId=(await request('Remind me tomorrow at 7 PM')).commandId;await owner.action(api.caylaAgentActions.prepare,{commandId});
+    expect(await t.run(ctx=>ctx.db.query('reminders').collect())).toHaveLength(0);await owner.mutation(api.caylaAgent.approveClient,{commandId,businessId:ids.business});
+    const reminders=await t.run(ctx=>ctx.db.query('reminders').collect());expect(reminders[0].nextRunAt).toBe(Date.parse('2026-10-06T23:00:00Z'));
+  });
+  it('retrieves statutory summaries with tenant checks and real saved totals',async()=>{
+    const {owner,ids,prepare,outsider}=await fixture();const commandId=await prepare();await owner.mutation(api.caylaAgent.approveClient,{commandId,businessId:ids.business});
+    const summary=await owner.query(api.caylaAgent.agentTool,{commandId,tool:'get_statutory_summary',clientId:ids.business});expect(summary[0].runs[0].paye).toBeGreaterThan(0);
+    await expect(outsider.query(api.caylaAgent.agentTool,{commandId,tool:'get_statutory_summary'})).rejects.toThrow();
+    await expect(owner.query(api.caylaAgent.agentTool,{commandId,tool:'search_employees',clientId:ids.foreign})).rejects.toThrow('CLIENT_ACCESS_DENIED');
+  });
+  it('existing finalized payslips open bulk actions without creating another payroll',async()=>{
+    const {t,owner,ids,prepare,request}=await fixture();const commandId=await prepare();const saved=await owner.mutation(api.caylaAgent.approveClient,{commandId,businessId:ids.business});
+    vi.stubGlobal('fetch',vi.fn(async()=>modelCall('download_payslips',{useActivePayroll:true})));
+    const exported=await owner.query(api.caylaAgent.getCommand,{commandId:(await request('Download these payslips')).commandId});expect(exported.clients[0].runId).toBe(saved.runId);expect(exported.status).toBe('complete');expect(await t.run(ctx=>ctx.db.query('payrollRuns').collect())).toHaveLength(1);
+  });
+  it('provider timeout and malformed tool response leave payroll unchanged and return a trace',async()=>{
+    const {request,t}=await fixture();vi.stubGlobal('fetch',vi.fn(async()=>{throw new Error('private provider failure');}));await expect(request('Prepare payroll')).rejects.toThrow('CAYLA_UNAVAILABLE');
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({output:[{type:'function_call',name:'prepare_payroll',call_id:'x',arguments:'{"approval":true}'}]}))));await expect(request('Try again')).rejects.toThrow('CAYLA_UNAVAILABLE');expect(await t.run(ctx=>ctx.db.query('payrollRuns').collect())).toHaveLength(0);
+  });
+  it('failed context loading is contained, diagnosed and never calls the provider',async()=>{
+    const {owner,ids}=await fixture();const mock=vi.fn();vi.stubGlobal('fetch',mock);
+    await expect(owner.action(api.caylaAgentActions.request,{businessId:ids.business,message:'Run payroll',source:'text',requestKey:crypto.randomUUID(),timezone:'Invalid/Zone'})).rejects.toThrow('CAYLA_UNAVAILABLE');expect(mock).not.toHaveBeenCalled();
+  });
+  it('transcription uses backend names and terminology, with no silent rewriting',async()=>{
+    const {owner,ids}=await fixture();let form:any;
+    vi.stubGlobal('fetch',vi.fn(async(_url,init:any)=>{form=init.body;return new Response(JSON.stringify({text:'Prepare payroll for ABC Construction.'}));}));
+    const transcript=await owner.action(api.ai.transcribeAudio,{businessId:ids.business,audioBase64:'aGVsbG8=',mimeType:'audio/webm',requestId:'voice-request-123'});
+    expect(transcript.text).toBe('Prepare payroll for ABC Construction.');expect(form.get('model')).toBe('gpt-transcribe');expect(form.getAll('keywords[]')).toEqual(expect.arrayContaining(['PAYE','NIS','ABC Construction','Employee 0']));expect(form.get('languages[]')).toBe('en');
+  });
+  it('invalid, empty and unauthorized recordings never reach OpenAI',async()=>{
+    const {owner,outsider,ids}=await fixture();const mock=vi.fn();vi.stubGlobal('fetch',mock);
+    for(const args of [{audioBase64:'',mimeType:'audio/webm'},{audioBase64:'aGVsbG8=',mimeType:'text/html'}])expect((await owner.action(api.ai.transcribeAudio,{...args,businessId:ids.business})).error).toBeTruthy();
+    expect((await outsider.action(api.ai.transcribeAudio,{businessId:ids.business,audioBase64:'aGVsbG8=',mimeType:'audio/webm'})).error).toBeTruthy();expect(mock).not.toHaveBeenCalled();
+  });
+  it('speech is tenant-private, caches a response and respects the playback setting',async()=>{
+    const {owner,outsider,ids,prepare}=await fixture();const commandId=await prepare();
+    const mock=vi.fn(async()=>new Response(new Uint8Array([1,2,3]),{headers:{'Content-Type':'audio/mpeg'}}));vi.stubGlobal('fetch',mock);
+    expect((await outsider.action(api.caylaAgentActions.speak,{commandId})).available).toBe(false);
+    expect((await owner.action(api.caylaAgentActions.speak,{commandId})).available).toBe(true);
+    expect((await owner.action(api.caylaAgentActions.speak,{commandId})).available).toBe(true);expect(mock).toHaveBeenCalledTimes(1);
+    await owner.mutation(api.caylaAgent.savePreferences,{businessId:ids.business,settings:{voicePlayback:false,voiceEnabled:true,autoTranscription:true,showExecutionPlan:true,requirePayslipApproval:true,requireEmailApproval:true,notifications:true}});
+    expect((await owner.action(api.caylaAgentActions.speak,{commandId})).available).toBe(false);
+  });
+  it('cancelled review cannot finalize and does not delete existing records',async()=>{
+    const {owner,ids,t,prepare}=await fixture();const commandId=await prepare();await owner.mutation(api.caylaAgent.cancel,{commandId});await expect(owner.mutation(api.caylaAgent.approveClient,{commandId,businessId:ids.business})).rejects.toThrow('Prepare');expect(await t.run(ctx=>ctx.db.get(ids.employees[0]))).toBeTruthy();
   });
 });
