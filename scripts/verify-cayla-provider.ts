@@ -22,12 +22,13 @@ try {
   if(normalize(transcript.text||'')!==normalize(instruction))throw Error('TRANSCRIPTION_MISMATCH');
   console.log(JSON.stringify({stage:'TRANSCRIPTION_AND_VOICE',ready:true,syntheticTest:true}));
   const context={today:'2026-10-05',timezone:'America/Port_of_Spain',currentClientId:'synthetic-client',clients:[{id:'synthetic-client',name:'Trini Builders'}],active:null,page:'Dashboard'};
-  const reason=await reasonWithTools(context,instruction,async(name,args)=>{
+  const reason=await reasonWithTools(context,`${instruction} Use period October 1 to October 7, 2026 and pay date October 9, 2026. Prepare a review only.`,async(name,args)=>{
     if(name==='search_clients'||name==='list_clients')return {data:context.clients};
     if(name==='get_workspace_context')return context;
     if(name==='prepare_payroll')return {final:true,action:TOOL_ACTIONS[name],args};
+    if(name==='ask_clarification')return {final:true,action:'clarification',args};
     throw Error('UNEXPECTED_SYNTHETIC_TOOL');
   },'cayla-ci-provider-check');
-  if(reason.action!=='prepare'||!reason.args.clientIds.includes('synthetic-client'))throw Error('REASONING_MISMATCH');
+  if(reason.action!=='prepare'||!reason.args.clientIds.includes('synthetic-client')||reason.args.periodStart!=='2026-10-01'||reason.args.periodEnd!=='2026-10-07'||reason.args.payDate!=='2026-10-09')throw Error('REASONING_MISMATCH');
   console.log(JSON.stringify({stage:'REASONING',ready:true,syntheticTest:true}));
 }catch(error:any){console.log(JSON.stringify({stage:'PROVIDER_CHECK',ready:false,code:['TRANSCRIPTION_MISMATCH','REASONING_MISMATCH','UNEXPECTED_SYNTHETIC_TOOL','PROVIDER_UNAVAILABLE'].includes(error.message)?error.message:'PROVIDER_FAILURE'}));process.exit(1);}
