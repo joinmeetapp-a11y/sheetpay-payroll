@@ -13,7 +13,7 @@ function safeError(error:unknown) {
   return error instanceof Error && /^(Social|LinkedIn|OpenAI|Caption|Image|Portrait|Duplicate|Generation|Configure|Live|Approval|Post|Unsupported|Invalid caption|The hook|Use 6|Write in first|Use short|Finish with|Unexpected URL)/.test(error.message)
     ? error.message.slice(0,500) : "Social operation failed. Check configuration and retry.";
 }
-async function jsonModel(system:string,input:unknown):Promise<Record<string,unknown>>{
+export async function jsonModel(system:string,input:unknown):Promise<Record<string,unknown>>{
   if(!process.env.OPENAI_API_KEY)throw new Error("Configure the existing OPENAI_API_KEY");
   const response=await fetch("https://api.openai.com/v1/chat/completions",{
     method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+process.env.OPENAI_API_KEY},
@@ -219,3 +219,4 @@ export const testConnection = action({args:{},handler:async(ctx):Promise<{connec
   await ctx.runMutation(internal.socialInternal.updateConnection,{id:c._id,verifiedAt:Date.now(),status:"connected"});
   return {connected:true};
 }});
+

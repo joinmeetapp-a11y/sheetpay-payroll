@@ -2,8 +2,10 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { caylaAgentTables } from "./caylaAgentSchema";
 import { socialTables } from "./socialSchema";
+import { ugcTables } from "./ugcSchema";
 
 export default defineSchema({
+  ...ugcTables,
   ...socialTables,
   ...caylaAgentTables,
   complianceReviews: defineTable({businessId:v.id("businesses"),employeeId:v.string(),taxYear:v.number(),month:v.string(),values:v.any(),confirmed:v.boolean(),fingerprint:v.string(),reviewedBy:v.id("users"),updatedAt:v.number()}).index("by_business_year",["businessId","taxYear"]),
@@ -895,4 +897,5 @@ export default defineSchema({
     .index("by_request_id", ["requestId"])
     .index("by_kind_time", ["kind", "createdAt"]),
 });
+
 

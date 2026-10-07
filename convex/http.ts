@@ -3,8 +3,11 @@ import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { planForPriceId } from "./subscriptions";
 import { image as socialImage, preflight as socialImagePreflight } from "./socialImages";
+import { media as ugcMedia, preflight as ugcPreflight } from "./ugcMedia";
 
 const http = httpRouter();
+http.route({path:"/ugc/media",method:"GET",handler:ugcMedia});
+http.route({path:"/ugc/media",method:"OPTIONS",handler:ugcPreflight});
 http.route({path:"/social/image",method:"GET",handler:socialImage});
 http.route({path:"/social/image",method:"OPTIONS",handler:socialImagePreflight});
 
@@ -337,3 +340,4 @@ for(const method of ["GET","POST"] as const) http.route({
  })
 });
 export default http;
+
