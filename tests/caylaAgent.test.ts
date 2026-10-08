@@ -98,6 +98,12 @@ describe('Cayla validated orchestration', () => {
     expect(command.clients[0]).toMatchObject({ ready: 2, processed: 2, earningsCalculated: 2, statutoryCalculated: 2, review: 0, blocking: 0 });
     const calculated = calculateTrinidadPayroll({ grossIncome: 10000, frequency: 'monthly', taxYear: 2026, allowances: 0, otherDeductions: 0 });
     expect(command.clients[0].totalNet).toBeCloseTo(calculated.netTakeHomePay * 2, 2);
+    expect(command.clients[0].preparedRows).toHaveLength(2);
+    expect(command.clients[0].preparedRows.map((row: any) => row._id)).toEqual(expect.arrayContaining(ids.employees));
+    for (const row of command.clients[0].preparedRows) {
+      expect(row.netPay).toBeCloseTo(calculated.netTakeHomePay, 2);
+      expect(row.reviewStatus).toBe('ready');
+    }
     expect((await t.run(ctx => ctx.db.get(ids.employees[0])) as any)?.paye).toBe(0);
     expect(await t.run(ctx => ctx.db.query('payrollRuns').collect())).toHaveLength(0);
   });
@@ -105,6 +111,8 @@ describe('Cayla validated orchestration', () => {
     const { t, ids, owner, prepare } = await fixture({ missing: true }); const commandId = await prepare();
     const prepared = await owner.query(api.caylaAgent.getCommand, { commandId });
     expect(prepared.steps.find((step: any) => step.label === 'Calculate statutory deductions').count).toBe(1);
+    expect(prepared.clients[0].preparedRows).toHaveLength(2);
+    expect(prepared.clients[0].preparedRows.some((row: any) => row.reviewStatus === 'blocking')).toBe(true);
     const args = { commandId, businessId: ids.business };
     const first = await owner.mutation(api.caylaAgent.approveClient, args);
     const retry = await owner.mutation(api.caylaAgent.approveClient, args);
@@ -364,3 +372,4 @@ describe('Cayla tools, memory and secure audio',()=>{
     const {owner,ids,t,prepare}=await fixture();const commandId=await prepare();await owner.mutation(api.caylaAgent.cancel,{commandId});await expect(owner.mutation(api.caylaAgent.approveClient,{commandId,businessId:ids.business})).rejects.toThrow('Prepare');expect(await t.run(ctx=>ctx.db.get(ids.employees[0]))).toBeTruthy();
   });
 });
+

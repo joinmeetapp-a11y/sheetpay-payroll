@@ -341,7 +341,7 @@ export const getCommand = query({
       const changes=(c.intent?.adjustments||[]).filter((a:any)=>rosterRows.some((e:any)=>e._id===a.employeeId)).map((a:any)=>({name:rosterRows.find((e:any)=>e._id===a.employeeId)?.name,field:a.field,before:rosterRows.find((e:any)=>e._id===a.employeeId)?.[a.field]||0,after:a.value}));
       const excluded=rosterRows.filter((e:any)=>c.intent?.excludedEmployeeIds?.includes(e._id)).map((e:any)=>e.name);
       const readyRows=issues.filter((e:any)=>e.status==='ready');
-      result.push({ ...client, changes,excluded,totalPaye:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.paye||0),0),totalNis:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.nis||0),0), issues: issues.filter((e: any) => e.exceptions.length).map((e: any) => ({ employeeId: e.employeeId, status: e.status, name: e.snapshot?.name || '', exceptions: e.exceptions })),
+      result.push({ ...client, preparedRows: issues.map((e: any) => ({ ...(e.snapshot || { name: rosterRows.find((row: any) => row._id === e.employeeId)?.name, employeeId: rosterRows.find((row: any) => row._id === e.employeeId)?.employeeId }), _id: e.employeeId, reviewStatus: e.status })), changes,excluded,totalPaye:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.paye||0),0),totalNis:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.nis||0),0), issues: issues.filter((e: any) => e.exceptions.length).map((e: any) => ({ employeeId: e.employeeId, status: e.status, name: e.snapshot?.name || '', exceptions: e.exceptions })),
         run: run && historyAccessible(access.owner, run.createdAt) ? run : null, business: await ctx.db.get(client.businessId) });
     }
     const readonly = [];
@@ -517,3 +517,4 @@ export const cancel = mutation({args:{commandId:v.id('caylaCommands')},handler:a
   await ctx.db.patch(args.commandId,{status:'cancelled',approvalStatus:'cancelled',summary:'Review cancelled. No additional payroll changes were finalized.',updatedAt:Date.now()});
   await event(ctx,access,'cayla_review_cancelled');
 }});
+
