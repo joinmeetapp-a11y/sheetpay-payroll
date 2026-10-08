@@ -135,11 +135,14 @@ export const bulkUpdate = mutation({
     if (!business) throw new Error("Client not found");
     const { actor, owner } = await requireBusinessAccess(ctx, business, "editPayroll");
     if (args.updates.length > 250) throw new Error("Update at most 250 employees per save.");
-    const allowed = new Set(["basicPay", "frequencySalary", "regularHours", "overtimeHours", "overtimeRate", "bonus", "commission", "allowances", "paye", "nis", "healthSurcharge", "otherDeductions", "grossPay", "netPay", "status", "position", "department", "payFrequency", "payType", "hourlyRate", "dailyRate", "weeklyWage", "fortnightlyWage", "monthlySalary", "annualSalary", "payrollIdentifiers", "statutoryData"]);
+    const allowed = new Set(["basicPay", "frequencySalary", "regularHours", "overtimeHours", "overtimeRate", "bonus", "commission", "allowances", "paye", "nis", "healthSurcharge", "otherDeductions", "grossPay", "netPay", "status", "position", "department", "name", "employeeId", "email", "phone", "address", "payFrequency", "payType", "hourlyRate", "dailyRate", "weeklyWage", "fortnightlyWage", "monthlySalary", "annualSalary", "payrollIdentifiers", "statutoryData"]);
     for (const update of args.updates) {
       const employee = await ctx.db.get(update.employeeId);
       if (!employee || employee.businessId !== args.businessId) throw new Error("Employee is outside the selected client.");
       const fields = update.fields as Record<string, unknown>;
+      if (["name", "employeeId", "email", "phone", "address"].some(key => key in fields)) {
+        await requireBusinessAccess(ctx, business, "manageEmployees");
+      }
       const safe: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(fields)) {
         if (!allowed.has(key)) throw new Error("Unsupported employee field.");
@@ -147,9 +150,11 @@ export const bulkUpdate = mutation({
           const numeric = Number(value);
           if (!Number.isFinite(numeric) || numeric < 0) throw new Error("Payroll values must be valid non-negative numbers.");
           safe[key] = numeric;
-        } else if (["status", "position", "department", "payFrequency", "payType"].includes(key)) {
-          if (typeof value !== "string" || value.length > 120) throw new Error("Invalid employee field.");
-          safe[key] = value;
+        } else if (["status", "position", "department", "payFrequency", "payType", "name", "employeeId", "email", "phone", "address"].includes(key)) {
+          const maxLength = key === "address" ? 1000 : key === "email" ? 254 : 120;
+          if (typeof value !== "string" || value.length > maxLength || (key === "name" && !value.trim())) throw new Error("Invalid employee field.");
+          if (key === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw new Error("Invalid employee email.");
+          safe[key] = value.trim();
         } else safe[key] = value;
       }
       await ctx.db.patch(update.employeeId, safe);
@@ -216,4 +221,5 @@ export const bulkCreate = mutation({
     return ids;
   },
 });
+
 
