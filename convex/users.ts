@@ -1,6 +1,7 @@
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { accountantEmailAccess } from "./lib/accountantEmailAccess";
 import { enrollAfterSignup } from "./accountantCampaign";
 
 function requireOwnIdentity(identity: { subject: string } | null, firebaseUid: string) {
@@ -26,7 +27,7 @@ export const getCurrentUser = query({
     const user = await ctx.db.query("users")
       .withIndex("by_firebase_uid", (q) => q.eq("firebaseUid", identity.subject))
       .first();
-    return user ? { ...user, profilePhotoUrl: user.profilePhotoStorageId ? await ctx.storage.getUrl(user.profilePhotoStorageId) : null } : null;
+    return user ? { ...user, accountantEmailAccess: accountantEmailAccess(user, identity), profilePhotoUrl: user.profilePhotoStorageId ? await ctx.storage.getUrl(user.profilePhotoStorageId) : null } : null;
   },
 });
 
@@ -70,7 +71,7 @@ export const createOrUpdate = mutation({
       .first();
 
     if (existing) {
-      const patch: Record<string, unknown> = { emailVerified: identity.emailVerified === true };
+      const patch: Record<string, unknown> = { emailVerified: identity.emailVerified === true || existing.verifiedEmail === tokenEmail };
       if (existing.email !== tokenEmail) patch.email = tokenEmail;
       if (args.displayName && args.displayName !== existing.displayName) patch.displayName = args.displayName;
       if (Object.keys(patch).length) await ctx.db.patch(existing._id, patch);
@@ -81,10 +82,16 @@ export const createOrUpdate = mutation({
       firebaseUid: identity.subject,
       email: tokenEmail,
       emailVerified: identity.emailVerified === true,
+      emailVerificationRequired: args.accountType === "accountant",
       displayName: args.displayName,
       accountType: args.accountType,
       createdAt: Date.now(),
     });
+
+    if (args.accountType === "accountant" && identity.emailVerified !== true) {
+      await ctx.scheduler.runAfter(0, (internal as any).accountantVerificationEmails.sendForUser, { userId: id });
+      return id;
+    }
 
     await ctx.scheduler.runAfter(0, internal.emails.sendWelcomeInternal, {
       to: tokenEmail,

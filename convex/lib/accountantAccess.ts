@@ -1,3 +1,4 @@
+import { requireVerifiedAccountantEmail } from "./accountantEmailAccess";
 import { isAdminEmail } from "../admin";
 
 export type AccountantCapability =
@@ -26,6 +27,7 @@ export async function getActor(ctx: any) {
     .withIndex("by_firebase_uid", (q: any) => q.eq("firebaseUid", identity.subject))
     .first();
   if (!actor) throw new Error("Account not found");
+  requireVerifiedAccountantEmail(actor, identity);
   return { identity, actor };
 }
 

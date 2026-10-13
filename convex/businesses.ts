@@ -1,3 +1,4 @@
+import { requireVerifiedAccountantEmail } from "./lib/accountantEmailAccess";
 import { mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { isAdminEmail } from "./admin";
@@ -9,6 +10,7 @@ async function requireBusinessUser(ctx: any, userId: any) {
   if (!identity) throw new Error("Unauthenticated");
   const user = await ctx.db.get(userId);
   if (!user || user.firebaseUid !== identity.subject) throw new Error("Forbidden");
+  requireVerifiedAccountantEmail(user, identity);
   return user;
 }
 
@@ -19,6 +21,7 @@ export const getByUser = query({
     if (!identity) return null;
     const user = await ctx.db.get(args.userId);
     if (!user || user.firebaseUid !== identity.subject) return null;
+    requireVerifiedAccountantEmail(user, identity);
     return ctx.db
       .query("businesses")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))

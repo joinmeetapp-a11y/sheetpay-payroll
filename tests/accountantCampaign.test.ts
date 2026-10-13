@@ -27,7 +27,7 @@ describe("Accountant seven-day marketing campaign",()=>{
  });
  it.each(["accountant_monthly","accountant_yearly"] as const)("does not enroll paid %s",async(plan)=>{expect((await fixture(plan)).campaign).toBeNull();});
  it("only new authenticated Accountant creation schedules enrollment",async()=>{
-  const t=convexTest(schema,modules),actor=t.withIdentity({subject:"new-user",email:"new@example.com"});
+  const t=convexTest(schema,modules),actor=t.withIdentity({subject:"new-user",email:"new@example.com",emailVerified:true});
   const args={firebaseUid:"new-user",email:"new@example.com",accountType:"accountant" as const};
   const id=await actor.mutation(api.users.createOrUpdate,args);
   expect((await state(t,id)).state.status).toBe("active");

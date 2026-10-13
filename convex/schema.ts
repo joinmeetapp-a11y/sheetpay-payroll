@@ -6,6 +6,11 @@ import { socialTables } from "./socialSchema";
 export default defineSchema({
   ...socialTables,
   ...caylaAgentTables,
+  accountantEmailVerifications: defineTable({
+    userId: v.id("users"), email: v.string(), tokenHash: v.string(),
+    createdAt: v.number(), expiresAt: v.number(), consumedAt: v.optional(v.number()),
+    windowStart: v.number(), attempts: v.number(),
+  }).index("by_user", ["userId"]).index("by_token", ["tokenHash"]),
   emailSubscriptions: defineTable({
     email: v.string(), token: v.string(), tokenHash: v.string(),
     unsubscribedAt: v.optional(v.number()), createdAt: v.number(),
@@ -45,6 +50,8 @@ export default defineSchema({
     firebaseUid: v.optional(v.string()),
     email: v.string(),
     emailVerified: v.optional(v.boolean()),
+    emailVerificationRequired: v.optional(v.boolean()),
+    verifiedEmail: v.optional(v.string()),
     marketingUnsubscribedAt: v.optional(v.number()),
     displayName: v.optional(v.string()),
     profilePhotoStorageId: v.optional(v.id("_storage")),

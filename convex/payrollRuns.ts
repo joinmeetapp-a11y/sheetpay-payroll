@@ -1,3 +1,4 @@
+import { requireVerifiedAccountantEmail } from "./lib/accountantEmailAccess";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
@@ -10,6 +11,7 @@ async function requirePayrollOwner(ctx: any, userId: any, businessId?: any) {
   if (!identity) throw new Error("Unauthenticated");
   const user = await ctx.db.get(userId);
   if (!user || user.firebaseUid !== identity.subject) throw new Error("Forbidden");
+  requireVerifiedAccountantEmail(user, identity);
   if (businessId) {
     const business = await ctx.db.get(businessId);
     if (!business || business.userId !== userId) throw new Error("Forbidden");

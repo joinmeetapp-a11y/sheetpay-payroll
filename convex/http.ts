@@ -354,4 +354,20 @@ for (const method of ["GET", "POST"] as const) http.route({
   return ok ? page('<h2>You are unsubscribed</h2><p>You will no longer receive optional Sheetpay emails. Essential account and security messages remain available.</p>') : unavailable();
  })
 });
+for (const method of ["GET", "POST"] as const) http.route({
+ path: "/accountant/verify-email", method,
+ handler: httpAction(async (ctx, request) => {
+  const unavailable = () => marketingPage('<h2>Verification link unavailable</h2><p>This link is invalid or expired. Sign in to Sheetpay and resend your verification email.</p><a href="https://sheetpay.app/accountant">Return to Sheetpay</a>', "Verify your Sheetpay email");
+  const token = new URL(request.url).searchParams.get("token") || "";
+  if (!/^[a-f0-9]{64}$/.test(token)) return unavailable();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  const tokenHash = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+  if (request.method === "GET") {
+   if (!await ctx.runQuery((internal as any).accountantVerification.inspect, { tokenHash })) return unavailable();
+   return marketingPage('<h2>Verify your email address</h2><p>Confirm your email to open your accountant workspace. This link expires after 24 hours.</p><form method="post"><button style="padding:14px 20px;border:0;border-radius:12px;background:#087b58;color:white;font-size:16px">Verify email address</button></form>', "Verify your Sheetpay email");
+  }
+  if (!await ctx.runMutation((internal as any).accountantVerification.consume, { tokenHash })) return unavailable();
+  return new Response(null, { status: 303, headers: { Location: "https://sheetpay.app/accountant?emailVerified=1", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+ })
+});
 export default http;
