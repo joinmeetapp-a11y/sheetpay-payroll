@@ -373,3 +373,64 @@ describe('Cayla tools, memory and secure audio',()=>{
   });
 });
 
+
+describe('Shared dashboard and Cayla payroll review', () => {
+  const dates = { periodStart: '2026-10-01', periodEnd: '2026-10-30', payDate: '2026-10-30', timezone: 'America/Port_of_Spain' };
+  it('calculates only selected dashboard employees without an AI call or payroll usage before approval', async () => {
+    const { owner, ids, t } = await fixture();
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    const args = { businessId: ids.business, employeeIds: [ids.employees[1]], ...dates, requestKey: crypto.randomUUID() };
+    const { commandId } = await owner.mutation(api.caylaAgent.beginDashboardReview, args);
+    expect((await owner.mutation(api.caylaAgent.beginDashboardReview, args)).commandId).toBe(commandId);
+    await owner.action(api.caylaAgentActions.prepare, { commandId });
+    const proposal = await owner.query(api.caylaAgent.getCommand, { commandId });
+    expect(proposal.clients[0].preparedRows.map((e: any) => e._id)).toEqual([ids.employees[1]]);
+    expect(proposal.clients[0].preparedRows[0].nis).toBeGreaterThan(0);
+    expect(proposal.clients[0].preparedRows[0].netPay).toBeLessThan(10000);
+    expect(await t.run(ctx => ctx.db.query('payrollRuns').collect())).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    const usage = await owner.query(api.usage.getMonthlyUsage, { businessId: ids.business });
+    expect(usage.payrollRunsUsed).toBe(0); expect(usage.caylaActionsUsed).toBe(0);
+    await expect(owner.mutation(api.caylaAgent.beginDashboardReview, { ...args, requestKey: crypto.randomUUID(), employeeIds: [] })).rejects.toThrow('Select');
+  });
+  it.each(['dashboard', 'cayla'])('edits, recalculates, removes and approves the exact reviewed %s snapshot', async mode => {
+    const { owner, ids, t, prepare } = await fixture();
+    let commandId;
+    if (mode === 'cayla') commandId = await prepare();
+    else { ({ commandId } = await owner.mutation(api.caylaAgent.beginDashboardReview, { businessId: ids.business, employeeIds: ids.employees, ...dates, requestKey: crypto.randomUUID() })); await owner.action(api.caylaAgentActions.prepare, { commandId }); }
+    await owner.mutation(api.caylaAgent.editPreparedClient, { commandId, businessId: ids.business, updates: [{ employeeId: ids.employees[0], fields: { bonus: 500, otherDeductions: 75, paye: 123 } }] });
+    const edited = (await owner.query(api.caylaAgent.getCommand, { commandId })).clients[0].preparedRows.find((row: any) => row._id === ids.employees[0]);
+    expect(edited).toMatchObject({ grossPay: 10500, bonus: 500, paye: 123, otherDeductions: 75, reviewStatus: 'review', statutoryOverrides: { paye: 123 } });
+    expect(edited.netPay).toBeCloseTo(10500 - 123 - edited.nis - edited.healthSurcharge - 75, 2);
+    await expect(owner.mutation(api.caylaAgent.approveClient, { commandId, businessId: ids.business, employeeIds: [ids.employees[0]] })).rejects.toThrow('acknowledge');
+    await owner.mutation(api.caylaAgent.editPreparedClient, { commandId, businessId: ids.business, updates: [], removeEmployeeIds: [ids.employees[1]] });
+    const proposal = await owner.query(api.caylaAgent.getCommand, { commandId });
+    expect(proposal.clients[0].preparedRows).toHaveLength(1);
+    const args = { commandId, businessId: ids.business, employeeIds: [ids.employees[0]], acknowledgeReview: true };
+    const approved = await owner.mutation(api.caylaAgent.approveClient, args);
+    expect(await owner.mutation(api.caylaAgent.approveClient, args)).toMatchObject({ runId: approved.runId, duplicate: true });
+    const run: any = await t.run(ctx => ctx.db.get(approved.runId));
+    expect(run.status).toBe('approved'); expect(run.employeesSnapshot).toHaveLength(1); expect(run.employeesSnapshot[0]).toMatchObject({ grossPay: 10500, paye: 123 });
+    expect(run.totalNet).toBeCloseTo(edited.netPay, 2);
+    expect((await t.run(ctx => ctx.db.get(ids.employees[0])) as any)?.basicPay).toBe(10000);
+    expect(await t.run(ctx => ctx.db.get(ids.employees[1]))).not.toBeNull();
+    expect(await owner.query(api.usage.getMonthlyUsage, { businessId: ids.business })).toMatchObject({ payrollRunsUsed: 1, payslipsUsed: 1 });
+  });
+  it('rejects unauthorized, stale, invalid and blocked approvals and restores automatic deductions', async () => {
+    const { owner, outsider, ids, t } = await fixture({ missing: true });
+    const args = { businessId: ids.business, employeeIds: ids.employees, ...dates, requestKey: crypto.randomUUID() };
+    await expect(outsider.mutation(api.caylaAgent.beginDashboardReview, args)).rejects.toThrow('Forbidden');
+    const { commandId } = await owner.mutation(api.caylaAgent.beginDashboardReview, args);
+    await owner.action(api.caylaAgentActions.prepare, { commandId });
+    await expect(owner.mutation(api.caylaAgent.approveClient, { commandId, businessId: ids.business, employeeIds: [ids.employees[0]], acknowledgeReview: true })).rejects.toThrow('blocking');
+    await expect(owner.mutation(api.caylaAgent.editPreparedClient, { commandId, businessId: ids.business, updates: [{ employeeId: ids.employees[1], fields: { userId: ids.other } }] })).rejects.toThrow('valid');
+    await expect(outsider.mutation(api.caylaAgent.editPreparedClient, { commandId, businessId: ids.business, updates: [] })).rejects.toThrow('Forbidden');
+    await owner.mutation(api.caylaAgent.editPreparedClient, { commandId, businessId: ids.business, updates: [{ employeeId: ids.employees[1], fields: { paye: 1 } }] });
+    await owner.mutation(api.caylaAgent.editPreparedClient, { commandId, businessId: ids.business, updates: [{ employeeId: ids.employees[1], fields: {} }], resetStatutory: true });
+    const automatic = (await owner.query(api.caylaAgent.getCommand, { commandId })).clients[0].preparedRows.find((row: any) => row._id === ids.employees[1]);
+    expect(automatic.paye).toBeGreaterThan(1); expect(automatic.statutoryOverrides).toEqual({});
+    await t.run(ctx => ctx.db.patch(ids.employees[1], { basicPay: 12000 }));
+    await expect(owner.mutation(api.caylaAgent.approveClient, { commandId, businessId: ids.business })).rejects.toThrow('changed');
+    await expect(owner.mutation(api.caylaAgent.editPreparedClient, { commandId, businessId: ids.business, updates: [] })).rejects.toThrow('changed');
+  });
+});

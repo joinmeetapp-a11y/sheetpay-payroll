@@ -10,6 +10,7 @@ import { createWorkspaceNotification } from './notifications';
 import { DAY, DEFAULT_PREFERENCES, employeeExceptions, fingerprint, localDate, validDate, validateIntent, validatePeriod } from './lib/caylaAgentPolicy';
 import {diagnostics} from './lib/caylaReasoning';
 import { accountantGrossEarnings } from '../shared/accountantEarnings';
+import { calculateReviewEmployee, validateReviewFields } from './lib/payrollReview';
 
 async function workspace(ctx: any, businessId: any, capability: any = 'read') {
   const business = await ctx.db.get(businessId);
@@ -46,6 +47,66 @@ const steps = ['Load clients', 'Check employee data', 'Calculate earnings', 'Cal
 const planSteps = (action: string) => action === 'reminder' ? ['Load clients', 'Check payroll dates', 'Prepare reminder review'] : steps;
 const progressCounts = (clients: any[]) => [clients.length, clients.reduce((n, b) => n + b.processed, 0), clients.reduce((n, b) => n + (b.earningsCalculated || 0), 0), clients.reduce((n, b) => n + (b.statutoryCalculated || 0), 0), clients.reduce((n, b) => n + b.processed, 0), clients.reduce((n, b) => n + b.processed, 0)];
 const safeSnapshot = (e: any) => Object.fromEntries(Object.entries(e).filter(([key]) => !['statutoryData', 'avatar', '_creationTime'].includes(key)));
+
+/** Dashboard runs prepare the same protected review as Cayla, without an AI request or Cayla usage charge. */
+export const beginDashboardReview = mutation({
+  args: { businessId: v.id('businesses'), employeeIds: v.array(v.id('employees')), periodStart: v.string(), periodEnd: v.string(), payDate: v.string(), timezone: v.string(), requestKey: v.string() },
+  handler: async (ctx, args) => {
+    const access = await workspace(ctx, args.businessId, 'runPayroll');
+    validatePeriod(args.periodStart, args.periodEnd, args.payDate);
+    if (!/^[a-zA-Z0-9_-]{8,100}$/.test(args.requestKey)) throw new Error('Invalid payroll request key.');
+    const prior = await ctx.db.query('caylaCommands').withIndex('by_request', q => q.eq('actorId', access.actor._id).eq('requestKey', args.requestKey)).first();
+    if (prior) { if (prior.contextBusinessId !== args.businessId) throw new Error('Request belongs to another client.'); return { commandId: prior._id }; }
+    const src = await source(ctx, access.business);
+    if (!args.employeeIds.length || args.employeeIds.length > 2500 || new Set(args.employeeIds).size !== args.employeeIds.length || args.employeeIds.some(id => !src.employees.some((e: any) => e._id === id))) throw new Error('Select 1 to 2,500 unique employees belonging to this client.');
+    await assertWithinLimit(ctx, access.owner, 'payroll');
+    await assertWithinLimit(ctx, access.owner, 'payslip', args.employeeIds.length);
+    const now = Date.now(), expiresAt = now + DAY;
+    const commandId = await ctx.db.insert('caylaCommands', { actorId: access.actor._id, workspaceOwnerId: access.owner._id, contextBusinessId: args.businessId, context: { view: 'Payroll' }, requestKey: args.requestKey, timezone: args.timezone, source: 'text', command: 'Run selected payroll', clientIds: [args.businessId],
+      intent: { action: 'prepare', scope: 'current', clientIds: [args.businessId], periodStart: args.periodStart, periodEnd: args.periodEnd, payDate: args.payDate }, status: 'planned', approvalStatus: 'pending', summary: 'Calculating selected employees for review.', steps: steps.map(label => ({ label, status: 'pending' })), createdAt: now, updatedAt: now, expiresAt });
+    await ctx.db.insert('caylaPreparedClients', { commandId, businessId: args.businessId, name: access.business.name, currency: access.business.currency || 'TTD', sourceFingerprint: src.fingerprint, periodStart: args.periodStart, periodEnd: args.periodEnd, payDate: args.payDate,
+      employeeIds: args.employeeIds, processed: 0, ready: 0, review: 0, blocking: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, status: 'planned', expiresAt });
+    await recordAccountantActivity(ctx, access.owner._id, access.actor._id, 'payroll.review_started', args.businessId, { commandId, employeeCount: args.employeeIds.length });
+    return { commandId };
+  },
+});
+
+export const editPreparedClient = mutation({
+  args: { commandId: v.id('caylaCommands'), businessId: v.id('businesses'), updates: v.array(v.object({ employeeId: v.id('employees'), fields: v.any() })), removeEmployeeIds: v.optional(v.array(v.id('employees'))), resetStatutory: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const access = await ownedCommand(ctx, args.commandId), command = access.command;
+    const b = await ctx.db.get(args.businessId);
+    await requireBusinessAccess(ctx, b, 'editPayroll');
+    const client = (await ctx.db.query('caylaPreparedClients').withIndex('by_command', q => q.eq('commandId', command._id)).collect()).find(c => c.businessId === args.businessId);
+    if (!client || command.status !== 'review' || client.status !== 'review' || client.runId || command.expiresAt < Date.now()) throw new Error('Open a current unapproved payroll review before editing.');
+    const src = await source(ctx, b);
+    if (src.fingerprint !== client.sourceFingerprint) throw new Error('Payroll data changed. Run payroll again before editing or approving.');
+    if (args.updates.length > 100 || (args.removeEmployeeIds?.length || 0) > 2500) throw new Error('Edit up to 100 employees at a time.');
+    const prepared = await ctx.db.query('caylaPreparedEmployees').withIndex('by_command_business', q => q.eq('commandId', command._id).eq('businessId', args.businessId)).collect();
+    const updateIds = args.updates.map(u => u.employeeId);
+    if (new Set(updateIds).size !== updateIds.length) throw new Error('Duplicate employee edits.');
+    for (const id of [...updateIds, ...(args.removeEmployeeIds || [])]) if (!prepared.some(p => p.employeeId === id && p.status !== 'excluded')) throw new Error('Employee is outside this payroll review.');
+    for (const update of args.updates) {
+      if (!update.fields || typeof update.fields !== 'object' || Array.isArray(update.fields)) throw new Error('Invalid payroll edit.');
+      validateReviewFields(update.fields);
+      const row = prepared.find(p => p.employeeId === update.employeeId)!;
+      const original = src.employees.find((e: any) => e._id === update.employeeId);
+      const next = { ...original, ...row.snapshot, ...update.fields };
+      const overrides = args.resetStatutory ? {} : { ...(row.snapshot?.statutoryOverrides || {}) };
+      for (const key of ['paye', 'nis', 'healthSurcharge']) if (key in update.fields) overrides[key] = update.fields[key];
+      const result = await calculateReviewEmployee(ctx, b, next, src.employees, { start: client.periodStart, end: client.periodEnd, payDate: client.payDate }, overrides);
+      await ctx.db.patch(row._id, { snapshot: result.snapshot || undefined, exceptions: result.exceptions, status: result.status });
+    }
+    for (const id of args.removeEmployeeIds || []) await ctx.db.patch(prepared.find(p => p.employeeId === id)!._id, { status: 'excluded' });
+    const remaining = (await ctx.db.query('caylaPreparedEmployees').withIndex('by_command_business', q => q.eq('commandId', command._id).eq('businessId', args.businessId)).collect()).filter(p => p.status !== 'excluded');
+    const ready = remaining.filter(p => p.status === 'ready');
+    const total = (field: string) => Number(ready.reduce((n, p) => n + Number(p.snapshot?.[field] || 0), 0).toFixed(2));
+    await ctx.db.patch(client._id, { ready: ready.length, review: remaining.filter(p => p.status === 'review').length, blocking: remaining.filter(p => p.status === 'blocking').length, totalGross: total('grossPay'), totalNet: total('netPay'), totalDeductions: Number((total('grossPay') - total('netPay')).toFixed(2)) });
+    await ctx.db.patch(command._id, { updatedAt: Math.max(Date.now(), command.updatedAt + 1) });
+    await recordAccountantActivity(ctx, access.owner._id, access.actor._id, 'payroll.review_edited', args.businessId, { commandId: command._id, editedCount: args.updates.length, removedCount: args.removeEmployeeIds?.length || 0 });
+    return { ok: true };
+  },
+});
 export const brief = query({
   args: { businessId: v.id('businesses'), timezone: v.string() },
   handler: async (ctx, args) => {
@@ -288,7 +349,7 @@ export const preparationFailure = internalMutation({
   },
 });
 export const approveClient = mutation({
-  args: { commandId: v.id('caylaCommands'), businessId: v.id('businesses') }, handler: async (ctx, args) => {
+  args: { commandId: v.id('caylaCommands'), businessId: v.id('businesses'), employeeIds: v.optional(v.array(v.id('employees'))), acknowledgeReview: v.optional(v.boolean()), expectedReviewUpdatedAt: v.optional(v.number()) }, handler: async (ctx, args) => {
     const access = await ownedCommand(ctx, args.commandId), c = access.command;
     const clients = await ctx.db.query('caylaPreparedClients').withIndex('by_command', (q: any) => q.eq('commandId', c._id)).collect();
     const client = clients.find((b: any) => b.businessId === args.businessId);
@@ -296,9 +357,10 @@ export const approveClient = mutation({
     const b = await ctx.db.get(client.businessId);
     await requireBusinessAccess(ctx, b, 'runPayroll');
     if (client.status === 'approved') return { runId: client.runId, reminderId: client.reminderId, duplicate: true };
+    if (args.expectedReviewUpdatedAt !== undefined && args.expectedReviewUpdatedAt !== c.updatedAt) throw new Error('The payroll review changed. Review the latest amounts before approving.');
     if (c.status !== 'review' || client.status !== 'review' || c.expiresAt < Date.now()) throw new Error('Prepare a current review before approval.');
     if ((await source(ctx, b)).fingerprint !== client.sourceFingerprint) throw new Error('Payroll data changed. Create a new plan before approving.');
-    let runId, reminderId;
+    let runId, reminderId, approvedCount = client.ready;
     if (c.intent.action === 'reminder') {
       const days = c.intent.daysBefore ?? 3;
       // Scheduled in-app/push notification, using the existing reminder validator and worker.
@@ -313,19 +375,23 @@ export const approveClient = mutation({
       reminderId = result.id;
     } else {
       const prepared = await ctx.db.query('caylaPreparedEmployees').withIndex('by_command_business', (q: any) => q.eq('commandId', c._id).eq('businessId', b._id)).collect();
-      const rows = prepared.filter((e: any) => e.status === 'ready').map((e: any) => e.snapshot);
+      if (args.employeeIds && (!args.employeeIds.length || new Set(args.employeeIds).size !== args.employeeIds.length)) throw new Error('Select unique employees before approval.');
+      const chosen = args.employeeIds ? prepared.filter((e: any) => args.employeeIds!.includes(e.employeeId)) : prepared.filter((e: any) => e.status === 'ready');
+      if (args.employeeIds && chosen.length !== args.employeeIds.length || chosen.some((e: any) => !e.snapshot || e.status === 'blocking' || e.status === 'excluded' || e.exceptions.some((issue: any) => issue.severity === 'BLOCKING') || e.status === 'review' && !args.acknowledgeReview)) throw new Error('Resolve blocking issues and acknowledge review warnings before approval.');
+      const rows = chosen.map((e: any) => e.snapshot);
+      approvedCount = rows.length;
       if (!rows.length) throw new Error('There are no ready employees to approve. Review the exceptions first.');
       runId = await savePreparedCaylaPayroll(ctx, b._id, rows, { start: client.periodStart, end: client.periodEnd, payDate: client.payDate });
     }
     await ctx.db.patch(client._id, { status: 'approved', ...(runId ? { runId } : {}), ...(reminderId ? { reminderId } : {}), approvedAt: Date.now() });
     const done = clients.every((b: any) => b._id === client._id || b.status === 'approved');
     await ctx.db.patch(c._id, { status: done ? 'complete' : 'review', approvalStatus: done ? 'approved' : 'partial', updatedAt: Date.now(), summary: reminderId ? 'Approved reminder saved. Enable browser notifications to receive push alerts.' : 'Approved ready payroll saved. Payslip previews are available; download, print or review recipients before emailing.' });
-    await event(ctx, access, 'cayla_payroll_approved', client.ready);
+    await event(ctx, access, 'cayla_payroll_approved', approvedCount);
     const prefs = await ctx.db.query('caylaPreferences').withIndex('by_actor_workspace', (q: any) => q.eq('actorId', access.actor._id).eq('workspaceOwnerId', access.owner._id)).first();
-    if (prefs?.settings.notifications !== false) await createWorkspaceNotification(ctx, { businessId: b._id, category: 'payroll', type: 'cayla_approval', title: reminderId ? 'Cayla reminder saved' : 'Cayla payroll approved', message: reminderId ? 'Your approved payroll reminder is saved.' : `${client.ready} ready employees approved; ${client.review + client.blocking} excluded for review.`, actionUrl: `/accountant?tab=Payroll&clientId=${b._id}`, dedupeKey: `cayla-approved:${c._id}:${b._id}`, channels: ['in_app'] });
+    if (prefs?.settings.notifications !== false) await createWorkspaceNotification(ctx, { businessId: b._id, category: 'payroll', type: 'cayla_approval', title: reminderId ? 'Cayla reminder saved' : 'Cayla payroll approved', message: reminderId ? 'Your approved payroll reminder is saved.' : `${approvedCount} reviewed employees approved; ${client.processed - approvedCount} not included in this run.`, actionUrl: `/accountant?tab=Payroll&clientId=${b._id}`, dedupeKey: `cayla-approved:${c._id}:${b._id}`, channels: ['in_app'] });
 
-    await recordAccountantActivity(ctx, access.owner._id, access.actor._id, reminderId ? 'cayla.reminder_saved' : 'cayla.payroll_approved', b._id, { commandId: c._id, runId, reminderId, employeeCount: client.ready, excludedCount: client.review + client.blocking });
-    if (done) await event(ctx, access, 'cayla_command_completed', client.ready);
+    await recordAccountantActivity(ctx, access.owner._id, access.actor._id, reminderId ? 'cayla.reminder_saved' : 'cayla.payroll_approved', b._id, { commandId: c._id, runId, reminderId, employeeCount: approvedCount, excludedCount: client.processed - approvedCount });
+    if (done) await event(ctx, access, 'cayla_command_completed', approvedCount);
     return { runId, reminderId };
   },
 });
@@ -341,7 +407,7 @@ export const getCommand = query({
       const changes=(c.intent?.adjustments||[]).filter((a:any)=>rosterRows.some((e:any)=>e._id===a.employeeId)).map((a:any)=>({name:rosterRows.find((e:any)=>e._id===a.employeeId)?.name,field:a.field,before:rosterRows.find((e:any)=>e._id===a.employeeId)?.[a.field]||0,after:a.value}));
       const excluded=rosterRows.filter((e:any)=>c.intent?.excludedEmployeeIds?.includes(e._id)).map((e:any)=>e.name);
       const readyRows=issues.filter((e:any)=>e.status==='ready');
-      result.push({ ...client, preparedRows: issues.map((e: any) => ({ ...(e.snapshot || { name: rosterRows.find((row: any) => row._id === e.employeeId)?.name, employeeId: rosterRows.find((row: any) => row._id === e.employeeId)?.employeeId }), _id: e.employeeId, reviewStatus: e.status })), changes,excluded,totalPaye:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.paye||0),0),totalNis:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.nis||0),0), issues: issues.filter((e: any) => e.exceptions.length).map((e: any) => ({ employeeId: e.employeeId, status: e.status, name: e.snapshot?.name || '', exceptions: e.exceptions })),
+      result.push({ ...client, preparedRows: issues.filter((e: any) => e.status !== 'excluded').map((e: any) => ({ ...(e.snapshot || rosterRows.find((row: any) => row._id === e.employeeId) || {}), _id: e.employeeId, reviewStatus: e.status, exceptions: e.exceptions })), changes,excluded,totalPaye:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.paye||0),0),totalNis:readyRows.reduce((n:number,e:any)=>n+(e.snapshot?.nis||0),0), issues: issues.filter((e: any) => e.status !== 'excluded' && e.exceptions.length).map((e: any) => ({ employeeId: e.employeeId, status: e.status, name: e.snapshot?.name || '', exceptions: e.exceptions })),
         run: run && historyAccessible(access.owner, run.createdAt) ? run : null, business: await ctx.db.get(client.businessId) });
     }
     const readonly = [];
