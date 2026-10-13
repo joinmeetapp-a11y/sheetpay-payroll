@@ -21,7 +21,8 @@ export async function stopForUpgrade(ctx:any,userId:any) {
 export async function enrollAfterSignup(ctx:any,user:any) {
  if(user.accountType!=="accountant" || !campaignFree(user) || !validEmail(user.email))return;
  if(user.emailVerified && isAdminEmail(user.email))return;
- const id=await ctx.db.insert("accountantEmailCampaigns",{userId:user._id,campaignId:CAMPAIGN_ID,enrolledAt:Date.now(),currentDay:1,nextSendAt:Date.now()+FIRST_DELAY,status:"active",tokenHash:"",unsubscribeToken:""});
+ const enrolledAt=Date.now();
+ const id=await ctx.db.insert("accountantEmailCampaigns",{userId:user._id,campaignId:CAMPAIGN_ID,enrolledAt,currentDay:1,nextSendAt:enrolledAt+FIRST_DELAY,status:"active",tokenHash:"",unsubscribeToken:""});
  await event(ctx,{_id:id,userId:user._id,campaignId:CAMPAIGN_ID},"enrolled");
 }
 export const enroll=internalMutation({
@@ -34,7 +35,8 @@ export const enroll=internalMutation({
   }
   const user=await ctx.db.get(args.userId);
   if(!user || user.accountType!=="accountant" || !campaignFree(user) || user.marketingUnsubscribedAt || !validEmail(user.email) || (user.emailVerified && isAdminEmail(user.email))) return null;
-  const id=await ctx.db.insert("accountantEmailCampaigns",{userId:user._id,campaignId:CAMPAIGN_ID,enrolledAt:Date.now(),currentDay:1,nextSendAt:Date.now()+FIRST_DELAY,status:"active",tokenHash:args.tokenHash,unsubscribeToken:args.token});
+  const enrolledAt=Date.now();
+ const id=await ctx.db.insert("accountantEmailCampaigns",{userId:user._id,campaignId:CAMPAIGN_ID,enrolledAt,currentDay:1,nextSendAt:enrolledAt+FIRST_DELAY,status:"active",tokenHash:args.tokenHash,unsubscribeToken:args.token});
   await event(ctx,{_id:id,userId:user._id,campaignId:CAMPAIGN_ID},"enrolled");return id;
  }
 });
