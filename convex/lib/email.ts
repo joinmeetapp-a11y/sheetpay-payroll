@@ -1,3 +1,4 @@
+"use node";
 /**
  * Reusable Sheetpay email service. All send paths go through here so that
  * templates, logging, idempotency, preferences, and retry logic stay

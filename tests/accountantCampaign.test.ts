@@ -142,10 +142,12 @@ describe("Accountant seven-day marketing campaign",()=>{
  });
  it("recipient-wide optional email unsubscribe stops marketing too", async () => {
   const { t, user, campaign } = await fixture(); const fetch = provider();
-  await t.mutation(api.emailSubscriptions.ensure, { email: 'accountant@example.com', token: 'a'.repeat(64), tokenHash: 'b'.repeat(64) });
+  const targetEmail = 'global-unsubscribe-test@example.com';
+  await t.run(ctx => ctx.db.patch(user, { email: targetEmail }));
+  await t.mutation(api.emailSubscriptions.ensure, { email: targetEmail, token: 'a'.repeat(64), tokenHash: 'b'.repeat(64) });
   await t.mutation(api.emailSubscriptions.unsubscribe, { tokenHash: 'b'.repeat(64) });
   await due(t, campaign); await t.action(api.accountantCampaignWorker.sendDay, { campaign });
-  expect(fetch.mock.calls.filter(([, options]: any) => JSON.parse(options.body).to.includes('accountant@example.com'))).toHaveLength(0); expect((await state(t, user)).state.status).toBe('unsubscribed');
+  expect(fetch.mock.calls.filter(([, options]: any) => JSON.parse(options.body).to.includes(targetEmail))).toHaveLength(0); expect((await state(t, user)).state.status).toBe('unsubscribed');
  });
 
 });

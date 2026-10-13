@@ -1,3 +1,4 @@
+"use node";
 import { randomBytes, createHash } from 'node:crypto';
 import { internal } from '../_generated/api';
 import { esc } from './emailComponents';
