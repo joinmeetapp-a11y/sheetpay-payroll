@@ -78,17 +78,19 @@ export const createOrUpdate = mutation({
       return existing._id;
     }
 
+    // Activate only after the matching Firebase verification screen is deployed.
+    const requireVerification = args.accountType === "accountant" && process.env.ACCOUNTANT_EMAIL_VERIFICATION_ENABLED === "true";
     const id = await ctx.db.insert("users", {
       firebaseUid: identity.subject,
       email: tokenEmail,
       emailVerified: identity.emailVerified === true,
-      emailVerificationRequired: args.accountType === "accountant",
+      emailVerificationRequired: requireVerification,
       displayName: args.displayName,
       accountType: args.accountType,
       createdAt: Date.now(),
     });
 
-    if (args.accountType === "accountant" && identity.emailVerified !== true) {
+    if (requireVerification && identity.emailVerified !== true) {
       await ctx.scheduler.runAfter(0, (internal as any).accountantVerificationEmails.sendForUser, { userId: id });
       return id;
     }

@@ -1,6 +1,6 @@
 /** Legacy accounts retain access. New accountant accounts require email ownership. */
 export function accountantEmailAccess(user: any, identity: any): boolean {
-  if (!user?.emailVerificationRequired) return true;
+  if (!user?.emailVerificationRequired || process.env.ACCOUNTANT_EMAIL_VERIFICATION_ENABLED !== "true") return true;
   const email = typeof identity?.email === "string" ? identity.email.trim().toLowerCase() : "";
   return !!email && email === user.email &&
     (identity.emailVerified === true || user.verifiedEmail === email);

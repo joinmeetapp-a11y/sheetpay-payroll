@@ -7,7 +7,7 @@ import schema from '../convex/schema';
 const modules = import.meta.glob('../convex/**/*.{ts,js}');
 const api = anyApi;
 const hash = (token: string) => createHash('sha256').update(token).digest('hex');
-beforeEach(() => { vi.useFakeTimers(); vi.stubEnv('RESEND_API_KEY', 'test'); vi.stubEnv('CONVEX_SITE_URL', 'https://example.convex.site'); });
+beforeEach(() => { vi.useFakeTimers(); vi.stubEnv('ACCOUNTANT_EMAIL_VERIFICATION_ENABLED', 'true'); vi.stubEnv('RESEND_API_KEY', 'test'); vi.stubEnv('CONVEX_SITE_URL', 'https://example.convex.site'); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 async function fixture() {
  const t = convexTest(schema, modules);
@@ -16,6 +16,11 @@ async function fixture() {
  return {t,actor,userId};
 }
 describe('new accountant email verification', () => {
+ it('keeps signup working before the matching frontend is deployed', async () => {
+  vi.stubEnv('ACCOUNTANT_EMAIL_VERIFICATION_ENABLED', 'false');
+  const {actor}=await fixture();
+  expect(await actor.query(api.users.getCurrentUser,{})).toMatchObject({emailVerificationRequired:false,accountantEmailAccess:true});
+ });
  it('requires verification on new signup, delays welcome/campaign, and blocks direct workspace API access', async () => {
   const {t,actor,userId}=await fixture();
   expect(await actor.query(api.users.getCurrentUser, {})).toMatchObject({emailVerificationRequired:true,accountantEmailAccess:false});
