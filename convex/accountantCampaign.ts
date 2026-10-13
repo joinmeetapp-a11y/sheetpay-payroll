@@ -49,6 +49,8 @@ async function eligible(ctx:any,c:any){
  if(!campaignFree(user)){await stopCampaign(ctx,c,"converted","upgraded");return null;}
  if(user.marketingUnsubscribedAt){await stopCampaign(ctx,c,"unsubscribed","marketing_opt_out");return null;}
  if(!validEmail(user.email)){await stopCampaign(ctx,c,"paused","invalid_email");return null;}
+ const subscription=await ctx.db.query("emailSubscriptions").withIndex("by_email",(q:any)=>q.eq("email",user.email.trim().toLowerCase())).first();
+ if(subscription?.unsubscribedAt!==undefined){await stopCampaign(ctx,c,"unsubscribed","recipient_email_opt_out");return null;}
  const suppressed=await ctx.db.query("emailSuppressions").withIndex("by_email",(q:any)=>q.eq("emailAddress",user.email.toLowerCase())).first();
  if(suppressed){await stopCampaign(ctx,c,"paused","recipient_suppressed");return null;}
  const prefs=await ctx.db.query("notificationPreferences").withIndex("by_user",(q:any)=>q.eq("userId",String(user._id))).first();

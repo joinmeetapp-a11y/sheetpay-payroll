@@ -109,7 +109,7 @@ describe("Accountant seven-day marketing campaign",()=>{
   const target=destination(7,{client:true,employees:true,payroll:true});
   expect(target.url).toBe("https://sheetpay.app/accountant?upgrade=1");
   const email=renderCampaign(3,undefined,destination(3,{client:false,employees:false,payroll:false}),"https://example.convex.site/marketing/unsubscribe?token=abc");
-  expect(email.text).toContain("Hi there,");expect(email.html).toContain('name="viewport"');expect(email.html).not.toMatch(/undefined|null/);
+  expect(email.html).toContain('data-sheetpay-unsubscribe');expect(email.html).toContain('role="button"');expect(email.text).toContain("Hi there,");expect(email.html).toContain('name="viewport"');expect(email.html).not.toMatch(/undefined|null/);
   expect(renderCampaign(1,"<script>",target,"https://example.com").html).not.toContain("<script>");
   expect(destination(2,{client:true,employees:false,payroll:false}).url).toContain("tab=Employees");
   expect(CAMPAIGN_ID).toBe("accountant_free_7_day_v1");
@@ -140,4 +140,12 @@ describe("Accountant seven-day marketing campaign",()=>{
   const bad=await t.run(ctx=>ctx.db.insert("users",{email:"not-an-email",accountType:"accountant"}));
   expect(await t.mutation(api.accountantCampaign.enroll,{userId:bad,token:"b".repeat(64),tokenHash:"bad"})).toBeNull();
  });
+ it("recipient-wide optional email unsubscribe stops marketing too", async () => {
+  const { t, user, campaign } = await fixture(); const fetch = provider();
+  await t.mutation(api.emailSubscriptions.ensure, { email: 'accountant@example.com', token: 'a'.repeat(64), tokenHash: 'b'.repeat(64) });
+  await t.mutation(api.emailSubscriptions.unsubscribe, { tokenHash: 'b'.repeat(64) });
+  await due(t, campaign); await t.action(api.accountantCampaignWorker.sendDay, { campaign });
+  expect(fetch.mock.calls.filter(([, options]: any) => JSON.parse(options.body).to.includes('accountant@example.com'))).toHaveLength(0); expect((await state(t, user)).state.status).toBe('unsubscribed');
+ });
+
 });

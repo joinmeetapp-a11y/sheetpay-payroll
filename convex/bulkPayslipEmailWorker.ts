@@ -3,6 +3,7 @@ import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal as _internal } from "./_generated/api";
 import { Buffer } from "node:buffer";
+import { emailUnsubscribe, withUnsubscribeButton, unsubscribeHeaders } from "./lib/emailUnsubscribe";
 
 const internal = _internal as any;
 const esc = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char] as string));
@@ -18,6 +19,12 @@ export const processJob = internalAction({
     try {
       const apiKey = process.env.RESEND_API_KEY;
       if (!apiKey) throw new Error("Resend is not configured. Add RESEND_API_KEY to the Accountant Convex deployment.");
+      const subscription = await emailUnsubscribe(ctx, item.recipient);
+      if (!subscription.allowed) {
+        await ctx.runMutation(internal.bulkPayslipEmail.updateRecipient, { recipientId: item._id, status: "skipped", errorMessage: item.outcomeUnknown ? "Recipient unsubscribed; no further email sent. A previous delivery attempt has an unconfirmed outcome." : "Recipient unsubscribed. No email was sent.", outcomeUnknown: !!item.outcomeUnknown });
+        await ctx.runMutation(internal.bulkPayslipEmail.finishBatch, args);
+        return;
+      }
       const pdf = await ctx.storage.get(item.storageId);
       if (!pdf) throw new Error("Payslip attachment is no longer available.");
       const bytes = Buffer.from(await pdf.arrayBuffer());
@@ -32,7 +39,7 @@ export const processJob = internalAction({
         method: "POST", signal: AbortSignal.timeout(15000),
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Idempotency-Key": item.idempotencyKey },
         body: JSON.stringify({ from: item.fromEmail || process.env.RESEND_FROM_EMAIL || "Sheetpay <notifications@sheetpay.app>",
-          to: [item.recipient], subject: batch.job.subject, html,
+          to: [item.recipient], subject: batch.job.subject, html: withUnsubscribeButton(html, subscription.url), headers: unsubscribeHeaders(subscription.url),
           reply_to: item.replyToEmail || batch.job.replyTo || process.env.RESEND_REPLY_TO || "support@sheetpay.app",
           attachments: [{ filename: item.filename, content: bytes.toString("base64"), content_type: "application/pdf" }] }),
       });

@@ -321,8 +321,8 @@ http.route({
   }),
 });
 
-function marketingPage(body:string) {
- return new Response('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sheetpay marketing preferences</title></head><body style="font-family:Arial,sans-serif;background:#f3f8f5;color:#183d33;margin:0;padding:30px 20px"><main style="max-width:520px;margin:40px auto;padding:26px;background:white;border-radius:20px"><h1>Sheetpay</h1>'+body+'</main></body></html>',{headers:{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"}});
+function marketingPage(body:string, title="Sheetpay marketing preferences") {
+ return new Response('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+title+'</title></head><body style="font-family:Arial,sans-serif;background:#f3f8f5;color:#183d33;margin:0;padding:30px 20px"><main style="max-width:520px;margin:40px auto;padding:26px;background:white;border-radius:20px"><h1>Sheetpay</h1>'+body+'</main></body></html>',{headers:{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"}});
 }
 for(const method of ["GET","POST"] as const) http.route({
  path:"/marketing/unsubscribe",method,
@@ -334,6 +334,24 @@ for(const method of ["GET","POST"] as const) http.route({
   const tokenHash=Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,"0")).join("");
   const ok=await ctx.runMutation((internal as any).accountantCampaign.unsubscribe,{tokenHash});
   return marketingPage(ok?"<h2>You're unsubscribed</h2><p>You will no longer receive this marketing campaign. Essential account messages and requested payroll emails are unaffected.</p>":"<h2>Link unavailable</h2><p>Contact support@sheetpay.app for help.</p>");
+ })
+});
+for (const method of ["GET", "POST"] as const) http.route({
+ path: "/email/unsubscribe", method,
+ handler: httpAction(async (ctx, request) => {
+  const page = (body: string) => marketingPage(body, "Sheetpay email preferences");
+  const token = new URL(request.url).searchParams.get("token") || "";
+  const unavailable = () => page('<h2>Link unavailable</h2><p>Use the unsubscribe button in your Sheetpay email, or contact support@sheetpay.app.</p>');
+  if (!/^[a-f0-9]{64}$/.test(token)) return unavailable();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  const tokenHash = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const subscription = await ctx.runQuery((internal as any).emailSubscriptions.inspectToken, { tokenHash });
+  if (!subscription) return unavailable();
+  if (request.method === "GET") return page(subscription.unsubscribed
+   ? '<h2>You are unsubscribed</h2><p>Optional Sheetpay emails are disabled for this address. Essential account and security messages remain available.</p>'
+   : '<h2>Unsubscribe from Sheetpay emails?</h2><p>This stops optional emails, including marketing, reminders, team updates and emailed payslips. Essential account and security messages remain available.</p><form method="post"><button style="padding:14px 20px;border:0;border-radius:12px;background:#087b58;color:white;font-size:16px">Unsubscribe</button></form>');
+  const ok = await ctx.runMutation((internal as any).emailSubscriptions.unsubscribe, { tokenHash });
+  return ok ? page('<h2>You are unsubscribed</h2><p>You will no longer receive optional Sheetpay emails. Essential account and security messages remain available.</p>') : unavailable();
  })
 });
 export default http;

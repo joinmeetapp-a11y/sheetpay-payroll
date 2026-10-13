@@ -50,11 +50,12 @@ export const reviewRun = query({
       const validEmployee = employee?.businessId === args.businessId;
       const email = validEmployee ? String(employee.email || "").trim().toLowerCase() : "";
       const previous = id ? await priorRecipients(ctx, run._id, id) : [];
+      const subscription = email ? await ctx.db.query("emailSubscriptions").withIndex("by_email", q => q.eq("email", email)).first() : null;
       const accepted = previous.some((item: any) => acceptedStatuses.includes(item.status));
       const pending = previous.some((item: any) => ["queued", "sending"].includes(item.status));
       const failed = previous.some((item: any) => item.status === "failed");
       rows.push({ employeeId: id, name: row.name || "Unknown employee", email,
-        status: !validEmployee || !ready(row) ? "not_ready" : !emailPattern.test(email) ? "missing_email" : accepted ? "already_sent" : pending ? "pending" : failed ? "failed" : "ready" });
+        status: !validEmployee || !ready(row) ? "not_ready" : !emailPattern.test(email) ? "missing_email" : accepted ? "already_sent" : subscription?.unsubscribedAt !== undefined ? "unsubscribed" : pending ? "pending" : failed ? "failed" : "ready" });
     }
     return { canSend, periodLabel: periodOf(run), rows, plan: accountantPlanFor(owner), watermark: ACCOUNTANT_PLANS[accountantPlanFor(owner)].watermark };
   },
@@ -275,12 +276,16 @@ export const finishBatch = internalMutation({
   args: { jobId: v.id("bulkEmailJobs") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.finishedAt) return;
+    if (!job) return;
+    const wasFinished = !!job.finishedAt;
     const rows = await ctx.db.query("bulkEmailRecipients").withIndex("by_job", (q) => q.eq("jobId", job._id)).collect();
     const sentCount = rows.filter((row) => acceptedStatuses.includes(row.status)).length;
     const failedCount = rows.filter((row) => row.status === "failed").length;
+    const skippedCount = rows.filter((row) => row.status === "skipped").length;
     const pending = rows.some((row) => ["queued", "sending"].includes(row.status));
-    await ctx.db.patch(job._id, { status: pending ? "sending" : failedCount ? "sent_with_errors" : "sent", sentCount, failedCount, updatedAt: Date.now(), finishedAt: pending ? undefined : Date.now() });
+    await ctx.db.patch(job._id, { status: pending ? "sending" : failedCount ? "sent_with_errors" : skippedCount ? "sent_with_skips" : "sent", sentCount, failedCount, updatedAt: Date.now(), finishedAt: pending ? undefined : Date.now() });
+    // Reconcile a late provider acceptance after a watchdog finished the job.
+    if (wasFinished) return;
     if (!pending && job.caylaCommandId) {
       await ctx.db.insert('caylaEvents', { actorId: job.requestedByUserId, workspaceOwnerId: job.workspaceOwnerId, commandId: job.caylaCommandId, name: 'cayla_payslips_sent', count: sentCount, createdAt: Date.now() });
       if (failedCount) await ctx.db.insert('caylaEvents', { actorId: job.requestedByUserId, workspaceOwnerId: job.workspaceOwnerId, commandId: job.caylaCommandId, name: 'cayla_command_failed', count: failedCount, createdAt: Date.now() });

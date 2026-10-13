@@ -48,7 +48,7 @@ async function fixture() {
   return { t, ids, owner, upload, job };
 }
 
-beforeEach(() => { vi.useFakeTimers(); vi.stubEnv("RESEND_API_KEY", "test-server-only-key"); });
+beforeEach(() => { vi.useFakeTimers(); vi.stubEnv("RESEND_API_KEY", "test-server-only-key"); vi.stubEnv("CONVEX_SITE_URL", "https://example.convex.site"); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("private bulk payslip delivery", () => {
@@ -106,6 +106,8 @@ describe("private bulk payslip delivery", () => {
     expect(requests).toHaveLength(2);
     for (const { body, headers } of requests) {
       expect(body.to).toHaveLength(1); expect(body.attachments).toHaveLength(1);
+      expect(body.html).toContain('data-sheetpay-unsubscribe');
+      expect(body.headers['List-Unsubscribe']).toContain('/email/unsubscribe?token=');
       expect(Buffer.from(body.attachments[0].content, "base64").subarray(0, 5).toString()).toBe("%PDF-");
       expect(body.attachments[0].filename).toBe(body.to[0] === "john@example.com" ? "Trini-Builders_John-Smith_September-2026.pdf" : "Trini-Builders_Jane-Doe_September-2026.pdf");
       expect(headers["Idempotency-Key"]).toContain(ids.run);
@@ -186,6 +188,21 @@ describe("private bulk payslip delivery", () => {
     await t.mutation(api.bulkPayslipEmail.updateDeliveryFromWebhook, { resendMessageId: "confirmed-id", status: "sent" });
     const jobs = await owner.query(api.bulkPayslipEmail.getEmailJobs, { businessId: ids.business }); expect(jobs[0].recipients[0].status).toBe("delivered");
   });
+  it("skips unsubscribed recipients without emailing or counting them as sent", async () => {
+    const { t, job, owner, ids } = await fixture();
+    await t.mutation(api.emailSubscriptions.ensure, { email: 'john@example.com', token: 'a'.repeat(64), tokenHash: 'b'.repeat(64) });
+    await t.mutation(api.emailSubscriptions.unsubscribe, { tokenHash: 'b'.repeat(64) });
+    const review = await owner.query(api.bulkPayslipEmail.reviewRun, { businessId: ids.business, payrollRunId: ids.run });
+    expect(review.rows.find((row: any) => row.email === 'john@example.com').status).toBe('unsubscribed');
+    const recipients: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, init: any) => { const body = JSON.parse(init.body); recipients.push(body.to[0]); return new Response(JSON.stringify({ id: 'accepted-jane' })); }));
+    await job(); await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(recipients).toEqual(['jane@example.com']);
+    const results = await owner.query(api.bulkPayslipEmail.getEmailJobs, { businessId: ids.business });
+    expect(results[0]).toMatchObject({ status: 'sent_with_skips', sentCount: 1, failedCount: 0 });
+    expect(results[0].recipients.find((row: any) => row.recipient === 'john@example.com')).toMatchObject({ status: 'skipped', errorMessage: 'Recipient unsubscribed. No email was sent.' });
+  });
+
 });
 
 

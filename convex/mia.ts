@@ -31,7 +31,7 @@ export const submitRequest=action({args:{token:v.optional(v.string()),requestId:
  const {request,send}:any=await ctx.runMutation(api.miaInternal.reserveTicket,{token:args.token,requestId:args.requestId,name,email,subject,description,page:pagePath(args.page),transcript:args.transcript,consent:args.consent});
  if(send){
   const text=`Support reference: ${request.reference}\nName: ${name}\nReply email: ${email}\nSubject: ${subject}\nIssue: ${description}\nPage: ${request.page}\nCreated: ${new Date(request.createdAt).toISOString()}\nAccount context: ${JSON.stringify(request.context)}\nTranscript consent: ${request.consent?'Yes':'No'}\n${request.consent?request.transcript:'No transcript included.'}`;
-  const delivered=await sendSupportMail({to:'support@sheetpay.app',replyTo:email,subject:`[${request.reference}] ${subject}`,text,idempotencyKey:`mia-ticket-${request._id}`});
+  const delivered=await sendSupportMail(ctx,{to:'support@sheetpay.app',replyTo:email,subject:`[${request.reference}] ${subject}`,text,idempotencyKey:`mia-ticket-${request._id}`});
   await ctx.runMutation(api.miaInternal.markDelivery,{id:request._id,status:delivered.ok?'accepted':'failed',...(delivered.id?{providerId:delivered.id}:{})});
   if(!delivered.ok)return {ok:false,reference:request.reference,error:'The email service did not confirm acceptance. Retry this request or contact support with the reference.'};
  }
@@ -42,7 +42,7 @@ export const submitRequest=action({args:{token:v.optional(v.string()),requestId:
 export const acknowledge=internalAction({args:{id:v.id('miaRequests')},handler:async(ctx,args)=>{
  const row:any=await ctx.runQuery(api.miaInternal.getTicket,args);
  if(!row || row.status!=='accepted'||row.ackStatus==='accepted')return;
- const sent=await sendSupportMail({to:row.email,replyTo:'support@sheetpay.app',subject:`Sheetpay support request ${row.reference}`,text:`Hi ${row.name},\n\nYour support request (${row.reference}) has been accepted by our email service for delivery to Sheetpay support. Keep this reference for follow-up.\n\nPhone: +1 868 292 3787\nEmail: support@sheetpay.app\nWhatsApp: https://wa.me/18682923787\n\nMia is Sheetpay's AI support assistant.`,idempotencyKey:`mia-ack-${row._id}`});
+ const sent=await sendSupportMail(ctx,{to:row.email,replyTo:'support@sheetpay.app',subject:`Sheetpay support request ${row.reference}`,text:`Hi ${row.name},\n\nYour support request (${row.reference}) has been accepted by our email service for delivery to Sheetpay support. Keep this reference for follow-up.\n\nPhone: +1 868 292 3787\nEmail: support@sheetpay.app\nWhatsApp: https://wa.me/18682923787\n\nMia is Sheetpay's AI support assistant.`,idempotencyKey:`mia-ack-${row._id}`});
  await ctx.runMutation(api.miaInternal.markAck,{id:row._id,status:sent.ok?'accepted':'pending'});
 }});
 export const retryAcknowledgements=internalAction({args:{},handler:async ctx=>{

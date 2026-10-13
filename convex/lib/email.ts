@@ -10,6 +10,8 @@
 
 import { internal } from "../_generated/api";
 import { renderTemplate, TemplateKey, EmailCategory } from "./emailTemplates";
+import { esc } from "./emailComponents";
+import { emailUnsubscribe, withUnsubscribeButton, unsubscribeHeaders } from "./emailUnsubscribe";
 
 export interface SendEmailOptions {
   /** Recipient email address. Must be a single validated address. */
@@ -271,13 +273,18 @@ export async function sendEmail(
     // suppression check is best-effort — never block sends on lookup failure
   }
 
+  const subscription = await emailUnsubscribe(ctx, options.to);
+  if (!subscription.allowed && !rendered.critical && !options.bypassPreferences) {
+    await logEmail(ctx, { recipient: options.to, emailType: String(options.emailType), subject: rendered.subject, status: "skipped", userId: options.userId, businessId: options.businessId, relatedEntityId: options.relatedEntityId, idempotencyKey: options.idempotencyKey, failedReason: "recipient unsubscribed", category: rendered.category });
+    return { success: false, status: "skipped", error: "recipient unsubscribed" };
+  }
   const payload = {
     from: `${env.fromName} <${env.fromEmail}>`,
     to: [options.to],
     reply_to: options.replyTo || env.replyTo,
     subject: rendered.subject,
-    html: rendered.html,
-    headers: { "X-Sheetpay-Template": String(options.emailType) },
+    html: withUnsubscribeButton(rendered.html, subscription.url),
+    headers: { "X-Sheetpay-Template": String(options.emailType), ...(!rendered.critical && !options.bypassPreferences ? unsubscribeHeaders(subscription.url) : {}) },
   };
 
   const { ok, body, attempts } = await postResend(env.apiKey, payload);
@@ -467,9 +474,11 @@ export async function sendSubscriptionEmail(
 
 /** Private support mail uses the existing sender configuration and retry transport.
  * Only metadata is stored in miaRequests; message bodies are never logged. */
-export async function sendSupportMail(payload: { to: string; subject: string; text: string; replyTo: string; idempotencyKey: string }) {
+export async function sendSupportMail(ctx: any, payload: { to: string; subject: string; text: string; replyTo: string; idempotencyKey: string }) {
  const env = resolveEnv();
  if (!env.apiKey || !isValidEmail(payload.to) || !isValidEmail(payload.replyTo)) return {ok:false};
- const result=await postResend(env.apiKey,{from:`${env.fromName} <${env.fromEmail}>`,to:[payload.to],reply_to:payload.replyTo,subject:payload.subject,text:payload.text},payload.idempotencyKey);
+ const subscription = await emailUnsubscribe(ctx, payload.to);
+ const html = withUnsubscribeButton(`<div style="max-width:560px;margin:0 auto;padding:24px;font-family:Arial,sans-serif;white-space:pre-wrap">${esc(payload.text)}</div>`, subscription.url);
+ const result=await postResend(env.apiKey,{from:`${env.fromName} <${env.fromEmail}>`,to:[payload.to],reply_to:payload.replyTo,subject:payload.subject,html,text:payload.text+"\n\nUnsubscribe from optional emails: "+subscription.url},payload.idempotencyKey);
  return {ok:result.ok && typeof result.body?.id==='string',id:result.ok?result.body?.id:undefined};
 }
