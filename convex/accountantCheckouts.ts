@@ -1,3 +1,4 @@
+import { recordGrowth, ensureSummary } from './lib/growth';
 import { internalMutation } from './_generated/server';
 import { v } from 'convex/values';
 export const begin = internalMutation({
@@ -15,5 +16,8 @@ export const begin = internalMutation({
  }
 });
 export const finish = internalMutation({ args: { id: v.id('accountantCheckouts'), transactionId: v.optional(v.string()) }, handler: async(ctx,args)=>{
+ const record = await ctx.db.get(args.id);
+ if (record) await recordGrowth(ctx, record.userId, args.transactionId ? 'checkout_started' : 'error_paddle_checkout', args.transactionId || String(record._id)+':'+record.updatedAt);
  await ctx.db.patch(args.id,{ status: args.transactionId ? 'ready':'failed', transactionId: args.transactionId, expiresAt: Date.now()+1800000,updatedAt:Date.now() });
 }});
+

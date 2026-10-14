@@ -1,3 +1,4 @@
+import { recordGrowth, ensureSummary } from './lib/growth';
 import { requireVerifiedAccountantEmail } from "./lib/accountantEmailAccess";
 import { mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
@@ -73,10 +74,14 @@ export const create = mutation({
       if (existing.length && !(user.emailVerified === true && isAdminEmail(user.email)) && !(user.plan !== "free" && user.planStatus === "active")) throw new Error("PLAN_REQUIRED:pro");
     }
     if (user.accountType === "accountant" && !ACCOUNTANT_PLANS[accountantPlanFor(user)].fullBranding && ((args.templateId && args.templateId !== "modern") || (args.fontFamily && args.fontFamily !== "sans") || (args.layoutStyle && args.layoutStyle !== "standard"))) throw new ConvexError({ code: "PLAN_LIMIT_REACHED", kind: "branding", message: "Full custom payslip branding requires a paid Accountant plan. Your setup is saved." });
-    return ctx.db.insert("businesses", {
+    const id = await ctx.db.insert("businesses", {
       ...args,
       updatedAt: Date.now(),
     });
+    await recordGrowth(ctx, args.userId, 'client_created', String(id));
+    const summary = await ensureSummary(ctx, args.userId);
+    if (args.countryCode) await ctx.db.patch(summary._id, { country: args.countryCode });
+    return id;
   },
 });
 
@@ -119,5 +124,6 @@ export const update = mutation({
     await ctx.db.patch(businessId, { ...fields, updatedAt: Date.now() });
   },
 });
+
 
 

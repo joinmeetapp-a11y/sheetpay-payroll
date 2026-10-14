@@ -1,3 +1,4 @@
+import { recordGrowth, ensureSummary } from './lib/growth';
 import { assertCapacity } from "./usage";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
@@ -73,7 +74,9 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const owner = await requireEmployeeOwner(ctx, args.businessId, args.userId);
     await assertCapacity(ctx, owner, "employees", 1);
-    return ctx.db.insert("employees", { ...args, userId: owner._id, createdAt: Date.now() });
+    const id = await ctx.db.insert("employees", { ...args, userId: owner._id, createdAt: Date.now() });
+    await recordGrowth(ctx, owner._id, 'employee_added', String(id));
+    return id;
   },
 });
 
@@ -218,8 +221,10 @@ export const bulkCreate = mutation({
       });
       ids.push(id);
     }
+    if (ids.length) { await recordGrowth(ctx, owner._id, 'employee_import_completed', ids.join(':').slice(0,250)); await recordGrowth(ctx, owner._id, 'employee_added', String(ids[0])); }
     return ids;
   },
 });
+
 
 

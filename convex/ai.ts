@@ -66,6 +66,9 @@ export const extractPayrollDocument = action({
   handler: async (ctx, args): Promise<any> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity || !args.requesterUid || identity.subject !== args.requesterUid) throw new Error("Unauthenticated");
+    const growthKey = crypto.randomUUID();
+    const growth = async (name: 'ocr_started' | 'ocr_completed' | 'error_ocr_import') => { try { await ctx.runMutation((internal as any).growthAnalytics.actionEvent, { name, requestKey: growthKey }); } catch {} };
+    await growth('ocr_started');
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
@@ -204,6 +207,7 @@ Rules:
       if (!res.ok) {
         const err = await res.text();
         console.error("OCR provider request failed", res.status);
+        await growth('error_ocr_import');
         return { ok: false, error: `OpenAI ${res.status}`, employees: [] };
       }
       const json = (await res.json()) as any;
@@ -218,6 +222,7 @@ Rules:
       }
       const employees = Array.isArray(parsed.employees) ? parsed.employees : [];
 
+      await growth('ocr_completed');
       return {
         ok: true,
         businessName: parsed.businessName ?? null,
@@ -230,6 +235,7 @@ Rules:
       };
     } catch (err: any) {
       console.error("OCR provider connection failed");
+      await growth('error_ocr_import');
       return {
         ok: false,
         error: "OCR could not complete. Please retry or import a spreadsheet.",
@@ -238,6 +244,7 @@ Rules:
     }
   },
 });
+
 
 
 

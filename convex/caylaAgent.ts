@@ -1,3 +1,4 @@
+import { recordGrowth } from './lib/growth';
 import { query, mutation, internalMutation, internalQuery } from './_generated/server';
 import { v } from 'convex/values';
 import { getActor, getAccessibleBusinesses, requireBusinessAccess, recordAccountantActivity } from './lib/accountantAccess';
@@ -29,6 +30,13 @@ async function ownedCommand(ctx: any, commandId: any) {
 async function event(ctx: any, access: any, name: string, count?: number) {
   const stage:Record<string,string>={cayla_command_started:'CONTEXT_LOADING',cayla_payroll_prepared:'REVIEW_CREATED',cayla_payroll_approved:'ACTION_EXECUTED',cayla_review_cancelled:'ACTION_EXECUTED',cayla_command_failed:'ERROR'};
   if(stage[name])diagnostics(access.command?.requestKey||String(access.command?._id||''),stage[name],{actorId:access.actor._id,workspaceId:access.owner._id,event:name,count});
+  const command = access.command;
+  const key = String(command?._id || 'unknown');
+  const isDashboard = command?.command === 'Run selected payroll';
+  if (name === 'cayla_command_started' && !isDashboard) await recordGrowth(ctx, access.owner._id, 'cayla_interaction_started', key);
+  if (name === 'cayla_payroll_prepared' && command?.intent?.action === 'prepare') await recordGrowth(ctx, access.owner._id, 'payroll_calculated', key);
+  if (name === 'cayla_command_failed') await recordGrowth(ctx, access.owner._id, command?.intent?.action === 'prepare' ? 'error_payroll_processing' : 'error_cayla_tool', key);
+  if (!isDashboard && ['cayla_command_completed','cayla_payroll_approved','cayla_payslips_generated'].includes(name) && (name !== 'cayla_command_completed' || command?.intent && command.intent.action !== 'help')) await recordGrowth(ctx, access.owner._id, 'cayla_tool_action_completed', key+':'+name);
   await ctx.db.insert('caylaEvents', { actorId: access.actor._id, workspaceOwnerId: access.owner._id, commandId: access.command?._id, name, count, createdAt: Date.now() });
 }
 async function roster(ctx: any, businessId: any) {
@@ -66,6 +74,7 @@ export const beginDashboardReview = mutation({
       intent: { action: 'prepare', scope: 'current', clientIds: [args.businessId], periodStart: args.periodStart, periodEnd: args.periodEnd, payDate: args.payDate }, status: 'planned', approvalStatus: 'pending', summary: 'Calculating selected employees for review.', steps: steps.map(label => ({ label, status: 'pending' })), createdAt: now, updatedAt: now, expiresAt });
     await ctx.db.insert('caylaPreparedClients', { commandId, businessId: args.businessId, name: access.business.name, currency: access.business.currency || 'TTD', sourceFingerprint: src.fingerprint, periodStart: args.periodStart, periodEnd: args.periodEnd, payDate: args.payDate,
       employeeIds: args.employeeIds, processed: 0, ready: 0, review: 0, blocking: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, status: 'planned', expiresAt });
+    await recordGrowth(ctx, access.owner._id, 'payroll_started', String(commandId));
     await recordAccountantActivity(ctx, access.owner._id, access.actor._id, 'payroll.review_started', args.businessId, { commandId, employeeCount: args.employeeIds.length });
     return { commandId };
   },
@@ -224,7 +233,8 @@ export const savePlan = internalMutation({
     const summary = intent.action==='exports' && records.every((r:any)=>!r.runId) ? 'No finalized payslips match this period. Prepare and approve payroll first.' : intent.clarification ? intent.clarification : !clientIds.length ? 'No clients match this request. Clients without a saved payday are not included in due-date commands.' : waiting ? 'Choose the missing payroll dates or review the client’s saved payroll before continuing.' : `${clientIds.length} clients · ${total} employees. ${writeAction ? 'Review the plan before continuing.' : 'Results come from your saved records.'}`;
     await ctx.db.patch(command._id, { intent, command: labels[intent.action], clientIds, status, summary,
       steps: writeAction ? planSteps(intent.action).map((label, i) => ({ label, status: i === 0 ? 'complete' : 'pending', ...(i === 0 ? { count: clientIds.length } : {}) })) : [], updatedAt: Date.now() });
-    if (status === 'complete') await event(ctx, access, 'cayla_command_completed', total);
+    if (intent.action === 'prepare') await recordGrowth(ctx, access.owner._id, 'payroll_started', String(command._id));
+    if (status === 'complete') await event(ctx, { ...access, command: { ...command, intent, status } }, 'cayla_command_completed', total);
     await recordAccountantActivity(ctx, access.owner._id, access.actor._id, 'cayla.plan_created', access.business._id, { commandId: command._id, actionType: intent.action, clientCount: clientIds.length, employeeCount: total });
     return {commandId:command._id,status};
   },
@@ -386,6 +396,7 @@ export const approveClient = mutation({
     await ctx.db.patch(client._id, { status: 'approved', ...(runId ? { runId } : {}), ...(reminderId ? { reminderId } : {}), approvedAt: Date.now() });
     const done = clients.every((b: any) => b._id === client._id || b.status === 'approved');
     await ctx.db.patch(c._id, { status: done ? 'complete' : 'review', approvalStatus: done ? 'approved' : 'partial', updatedAt: Date.now(), summary: reminderId ? 'Approved reminder saved. Enable browser notifications to receive push alerts.' : 'Approved ready payroll saved. Payslip previews are available; download, print or review recipients before emailing.' });
+    if (runId) await recordGrowth(ctx, access.owner._id, 'payroll_reviewed', String(runId));
     await event(ctx, access, 'cayla_payroll_approved', approvedCount);
     const prefs = await ctx.db.query('caylaPreferences').withIndex('by_actor_workspace', (q: any) => q.eq('actorId', access.actor._id).eq('workspaceOwnerId', access.owner._id)).first();
     if (prefs?.settings.notifications !== false) await createWorkspaceNotification(ctx, { businessId: b._id, category: 'payroll', type: 'cayla_approval', title: reminderId ? 'Cayla reminder saved' : 'Cayla payroll approved', message: reminderId ? 'Your approved payroll reminder is saved.' : `${approvedCount} reviewed employees approved; ${client.processed - approvedCount} not included in this run.`, actionUrl: `/accountant?tab=Payroll&clientId=${b._id}`, dedupeKey: `cayla-approved:${c._id}:${b._id}`, channels: ['in_app'] });
@@ -583,4 +594,5 @@ export const cancel = mutation({args:{commandId:v.id('caylaCommands')},handler:a
   await ctx.db.patch(args.commandId,{status:'cancelled',approvalStatus:'cancelled',summary:'Review cancelled. No additional payroll changes were finalized.',updatedAt:Date.now()});
   await event(ctx,access,'cayla_review_cancelled');
 }});
+
 

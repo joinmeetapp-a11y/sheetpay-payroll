@@ -1,3 +1,4 @@
+import { recordApprovedPayroll } from './lib/growth';
 import { requireVerifiedAccountantEmail } from "./lib/accountantEmailAccess";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
@@ -173,7 +174,9 @@ export async function savePreparedCaylaPayroll(ctx: any, businessId: any, rows: 
     totalDeductions: Number(rows.reduce((total, row) => total + Number(row.grossPay) - Number(row.netPay), 0).toFixed(2)), totalNet: sum('netPay'),
     countryCode: business.countryCode, currencyCode: business.currency, createdAt: now, updatedAt: now,
   });
+  await recordApprovedPayroll(ctx, runId);
   await reserveUsage(ctx, owner._id, 'payroll', `payroll:${runId}`);
   await reserveUsage(ctx, owner._id, 'payslip', `payslips:${runId}`, rows.length);
   return runId;
 }
+

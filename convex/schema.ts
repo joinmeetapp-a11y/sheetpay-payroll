@@ -1,3 +1,4 @@
+import { growthTables } from './growthSchema';
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { caylaAgentTables } from "./caylaAgentSchema";
@@ -6,6 +7,7 @@ import { socialTables } from "./socialSchema";
 export default defineSchema({
   ...socialTables,
   ...caylaAgentTables,
+  ...growthTables,
   accountantEmailVerifications: defineTable({
     userId: v.id("users"), email: v.string(), tokenHash: v.string(),
     createdAt: v.number(), expiresAt: v.number(), consumedAt: v.optional(v.number()),
@@ -906,4 +908,5 @@ export default defineSchema({
     .index("by_request_id", ["requestId"])
     .index("by_kind_time", ["kind", "createdAt"]),
 });
+
 

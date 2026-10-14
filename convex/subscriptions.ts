@@ -1,3 +1,5 @@
+import { recordGrowth } from './lib/growth';
+import { summarizeBilling } from './growthAnalytics';
 import { mutation, query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
@@ -121,6 +123,15 @@ export const finishPaddleEvent = internalMutation({
       planStatus: args.planStatus,
       errorMessage: args.errorMessage,
     });
+    const event = await ctx.db.get(args.docId);
+    if(event?.eventType.startsWith('adjustment.') && event.paddleCustomerId && ['processed','ignored'].includes(args.status)){
+      let adjustment: any; try { adjustment=JSON.parse(event.rawEvent).data; } catch {}
+      if(adjustment?.action==='refund' && adjustment.status==='approved'){const users=await ctx.db.query('users').withIndex('by_paddle_customer', q=>q.eq('paddleCustomerId',event.paddleCustomerId)).take(10);for(const user of users)await recordGrowth(ctx,user._id,'refund_recorded',String(adjustment.id||event.eventId));}
+    }
+    if (args.status === 'processed' && event?.paddleSubscriptionId && event.eventType.startsWith('subscription.')) {
+      const users = await ctx.db.query('users').withIndex('by_paddle_customer', q=>q.eq('paddleCustomerId', event.paddleCustomerId)).take(10);
+      for(const user of users) if(user.paddleSubscriptionId===event.paddleSubscriptionId) await summarizeBilling(ctx,user._id,event.rawEvent);
+    }
   },
 });
 
@@ -219,6 +230,8 @@ export const applyPaddleEvent = internalMutation({
           `${args.plan}:${args.planStatus}:${user._id}`,
       });
     }
+    await summarizeBilling(ctx, user._id);
+    if (previousStatus !== args.planStatus) await recordGrowth(ctx, user._id, 'billing_'+args.planStatus, `${args.paddleSubscriptionId}:${args.subscriptionUpdatedAt ?? args.occurredAt ?? Date.now()}`);
     return { ok: true };
   },
 });
@@ -230,5 +243,7 @@ export const expireScheduledAccess = internalMutation({ args: { userId: v.id("us
   const user = await ctx.db.get(args.userId);
   if (!user || user.paddleSubscriptionId !== args.subscriptionId || user.scheduledCancelAt !== args.effectiveAt || args.effectiveAt > Date.now() || !["active", "trialing"].includes(user.planStatus || "")) return;
   await ctx.db.patch(user._id, { planStatus: "expired", planUpdatedAt: Date.now() });
+  await summarizeBilling(ctx, user._id);
 } });
+
 

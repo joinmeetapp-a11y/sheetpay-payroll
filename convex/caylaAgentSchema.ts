@@ -39,7 +39,7 @@ export const caylaAgentTables = {
     totalGross: v.number(), totalDeductions: v.number(), totalNet: v.number(),
     status: v.string(), runId: v.optional(v.id("payrollRuns")), reminderId: v.optional(v.id("reminders")),
     approvedAt: v.optional(v.number()), expiresAt: v.number(),
-  }).index("by_command", ["commandId"]).index("by_expiry", ["expiresAt"]),
+  }).index("by_command", ["commandId"]).index("by_run", ["runId"]).index("by_expiry", ["expiresAt"]),
   caylaPreparedEmployees: defineTable({
     commandId: v.id("caylaCommands"), businessId: v.id("businesses"), employeeId: v.id("employees"),
     // Payroll data exists only in the protected preparation record, never command history or events.
@@ -54,3 +54,4 @@ export const caylaAgentTables = {
     name: v.string(), count: v.optional(v.number()), createdAt: v.number(),
   }).index("by_workspace", ["workspaceOwnerId"]),
 };
+
