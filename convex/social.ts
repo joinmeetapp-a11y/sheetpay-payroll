@@ -218,8 +218,14 @@ export const authorizedContext = query({args:{},handler:async ctx=>{
 export const tick = internalMutation({args:{},handler:async ctx=>{
   const s=await settingsRow(ctx);if(!s)return;
   // Recover crashed workers conservatively; never re-send an uncertain POST.
-  const pending=await ctx.db.query("socialPosts").order("desc").take(100),now=Date.now();
-  for(const p of pending)if(["generating","publishing"].includes(p.status)&&(p.leaseUntil||0)<now){
+  const now=Date.now();
+  // Only inspect in-flight workers. Previously every idle tick read the latest
+  // 100 posts, including large completed posts and their embeddings.
+  const generating=await ctx.db.query("socialPosts")
+    .withIndex("by_status_schedule",q=>q.eq("status","generating")).take(100);
+  const publishing=await ctx.db.query("socialPosts")
+    .withIndex("by_status_schedule",q=>q.eq("status","publishing")).take(100);
+  for(const p of [...generating,...publishing])if((p.leaseUntil||0)<now){
     await ctx.db.patch(p._id,{status:"failed",outcomeUnknown:!!p.publishRequestStartedAt,
       error:"Worker interrupted. "+(p.publishRequestStartedAt?"Verify LinkedIn before retrying.":"Retry is available."),
       errorPhase:p.status==="generating"?"generation":"publishing",updatedAt:now});
