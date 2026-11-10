@@ -181,17 +181,32 @@ export const listForCurrentUser = query({
       .withIndex("by_user_created", (q) => q.eq("userId", actor._id))
       .order("desc")
       .take(Math.max(1, Math.min(200, args.limit ?? 100)));
+    // Avoid repeatedly fetching the same business and membership for every
+    // notification. All lookups remain scoped to the authenticated actor.
+    const businessCache = new Map<string, any>();
+    const membershipCache = new Map<string, any>();
+    const getBusiness = async (id: Id<"businesses">) => {
+      const key = String(id);
+      if (!businessCache.has(key)) businessCache.set(key, await ctx.db.get(id));
+      return businessCache.get(key);
+    };
+    const getMembership = async (ownerId: Id<"users">) => {
+      const key = String(ownerId);
+      if (!membershipCache.has(key)) membershipCache.set(key,
+        await ctx.db.query("accountantMemberships")
+          .withIndex("by_workspace_member", q => q.eq("workspaceOwnerId", ownerId).eq("memberUserId", actor._id)).first());
+      return membershipCache.get(key);
+    };
     const candidates = rows.filter((item) =>
       !item.dismissedAt && !item.suppressed && prefs?.channels?.inApp !== false && categoryAllowed(prefs, item.category)
     );
     const visible: typeof rows = [];
     for (const item of candidates) {
       if (item.businessId) {
-        const business = await ctx.db.get(item.businessId);
+        const business = await getBusiness(item.businessId);
         if (!business) continue;
         if (business.userId !== actor._id) {
-          const membership = await ctx.db.query("accountantMemberships")
-            .withIndex("by_workspace_member", (q) => q.eq("workspaceOwnerId", business.userId).eq("memberUserId", actor._id)).first();
+          const membership = await getMembership(business.userId);
           if (!membership || membership.status !== "active" || (!membership.allClients && !membership.clientIds.includes(String(business._id)))) continue;
         }
       }
@@ -199,7 +214,7 @@ export const listForCurrentUser = query({
     }
     const unreadCount = visible.filter((item) => !item.readAt).length;
     const notifications = await Promise.all(visible.map(async (item) => {
-      const business = item.businessId ? await ctx.db.get(item.businessId) : null;
+      const business = item.businessId ? await getBusiness(item.businessId) : null;
       const employee = item.employeeId ? await ctx.db.get(item.employeeId) : null;
       const deliveries = await ctx.db.query("notificationDeliveries")
         .withIndex("by_notification_channel", (q) => q.eq("notificationId", item._id)).collect();
