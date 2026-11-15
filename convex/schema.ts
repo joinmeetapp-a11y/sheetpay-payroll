@@ -1,9 +1,11 @@
+import { portalPayrollTables } from "./portalPayrollSchema";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { caylaAgentTables } from "./caylaAgentSchema";
 import { socialTables } from "./socialSchema";
 
 export default defineSchema({
+  ...portalPayrollTables,
   ...socialTables,
   ...caylaAgentTables,
   accountantEmailVerifications: defineTable({
@@ -403,6 +405,7 @@ export default defineSchema({
     .index("by_expiry", ["expiresAt"])
     .index("by_storage", ["storageId"])
     .index("by_business_employee", ["businessId", "employeeId"])
+    .index("by_run_employee_version", ["payrollRunId", "employeeId", "payrollRunUpdatedAt", "status", "createdAt"])
     .index("by_workspace", ["workspaceOwnerId"]),
 
   accountantActivity: defineTable({
@@ -906,4 +909,5 @@ export default defineSchema({
     .index("by_request_id", ["requestId"])
     .index("by_kind_time", ["kind", "createdAt"]),
 });
+
 

@@ -1,3 +1,4 @@
+import { portalPayrollHttp } from "./portalPayrollHttp";
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -5,6 +6,7 @@ import { planForPriceId } from "./subscriptions";
 import { image as socialImage, preflight as socialImagePreflight } from "./socialImages";
 
 const http = httpRouter();
+http.route({path:"/v1/portal-payroll",method:"POST",handler:portalPayrollHttp});
 http.route({path:"/social/image",method:"GET",handler:socialImage});
 http.route({path:"/social/image",method:"OPTIONS",handler:socialImagePreflight});
 
@@ -371,3 +373,4 @@ for (const method of ["GET", "POST"] as const) http.route({
  })
 });
 export default http;
+

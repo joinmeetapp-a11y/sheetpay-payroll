@@ -153,18 +153,18 @@ function isEffective(effectiveFrom: string, effectiveTo: string | undefined, pay
   return effectiveFrom <= payDate && (!effectiveTo || payDate <= effectiveTo);
 }
 
-async function resolveRule(ctx: any, business: any, code: string, taxYear: number, payDate: string) {
-  const overrides = await ctx.db.query("businessStatutoryOverrides")
-    .withIndex("by_business_year", (q: any) => q.eq("businessId", business._id).eq("taxYear", taxYear))
-    .collect();
+export async function resolveRule(ctx: any, business: any, code: string, taxYear: number, payDate: string, bound?: number) {
+  const overridesQuery = ctx.db.query("businessStatutoryOverrides").withIndex("by_business_year", (q: any) => q.eq("businessId", business._id).eq("taxYear", taxYear));
+  const overrides = bound ? await overridesQuery.take(bound) : await overridesQuery.collect();
+  if (bound && overrides.length === bound) throw new Error("Too many payroll rule overrides; archive obsolete rules before API preparation.");
   const activeOverride = overrides
     .filter((r: any) => r.enabled && r.countryCode === code && isEffective(r.effectiveFrom, r.effectiveTo, payDate))
     .sort((a: any, b: any) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
   if (activeOverride) return { kind: "custom", record: activeOverride };
 
-  const stored = await ctx.db.query("statutoryRuleSets")
-    .withIndex("by_country_year", (q: any) => q.eq("countryCode", code).eq("taxYear", taxYear))
-    .collect();
+  const storedQuery = ctx.db.query("statutoryRuleSets").withIndex("by_country_year", (q: any) => q.eq("countryCode", code).eq("taxYear", taxYear));
+  const stored = bound ? await storedQuery.take(bound) : await storedQuery.collect();
+  if (bound && stored.length === bound) throw new Error("Too many payroll rule versions; archive obsolete rules before API preparation.");
   const activeStored = stored
     .filter((r: any) => r.verified && isEffective(r.effectiveFrom, r.effectiveTo, payDate))
     .sort((a: any, b: any) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
@@ -293,7 +293,7 @@ export const calculateStatutoryPayroll = query({
 });
 
 /** Shared by the existing query and Cayla; caller must authorize this business. */
-export async function calculateStatutoryForBusiness(ctx: any, business: any, args: any) {
+export async function calculateStatutoryForBusiness(ctx: any, business: any, args: any, preparedRule?: any) {
     const code = (business.countryCode || "").toUpperCase();
     if (!code) throw new Error("Business country is required before statutory calculation");
     if (args.countryCode && args.countryCode.toUpperCase() !== code) throw new Error("Payslip country does not match authenticated business country");
@@ -305,7 +305,7 @@ export async function calculateStatutoryForBusiness(ctx: any, business: any, arg
     const taxYear = parsedDate.getUTCFullYear();
     if (!Number.isFinite(taxYear)) throw new Error("A valid pay date is required");
 
-    const resolved = await resolveRule(ctx, business, code, taxYear, args.payDate);
+    const resolved = preparedRule === undefined ? await resolveRule(ctx, business, code, taxYear, args.payDate) : preparedRule;
     if (!resolved) {
       console.error("[statutory] no effective rule", { countryCode: code, frequency, taxYear, payDate: args.payDate });
       return { supported: false, countryCode: code, taxYear, reason: "Automatic statutory calculations are unavailable for this country or tax year." };
@@ -480,4 +480,5 @@ export const setBusinessPayrollDefaults = mutation({
     };
   },
 });
+
 
