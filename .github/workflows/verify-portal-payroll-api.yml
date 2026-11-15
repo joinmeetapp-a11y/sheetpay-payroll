@@ -1,0 +1,21 @@
+name: Verify Portal payroll API
+on:
+  pull_request:
+    paths: ['convex/**', 'shared/**', 'tests/**', 'scripts/create-portal-payroll-credential.mjs', 'tsconfig.portal-payroll.json', 'vitest.portal.config.ts', '.github/workflows/verify-portal-payroll-api.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx tsc --noEmit --project tsconfig.portal-payroll.json
+      - run: npx vitest run --config vitest.portal.config.ts
+      - run: node --check scripts/create-portal-payroll-credential.mjs
+# No deployment; configure the linked Portal and perform staging acceptance first.

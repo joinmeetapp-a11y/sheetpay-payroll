@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client"] },
+  "include": [
+    "convex/portalPayroll.ts",
+    "convex/portalPayrollHttp.ts",
+    "convex/portalPayrollSchema.ts",
+    "tests/portalPayroll.test.ts"
+  ]
+}

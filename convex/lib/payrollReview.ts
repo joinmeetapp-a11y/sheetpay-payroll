@@ -10,7 +10,7 @@ export function validateReviewFields(fields: Record<string, unknown>) {
 }
 
 /** Reuse the existing deterministic statutory engine; edits affect only this proposal. */
-export async function calculateReviewEmployee(ctx: any, business: any, employee: any, roster: any[], period: { start: string; end: string; payDate: string }, overrides: Record<string, number> = {}) {
+export async function calculateReviewEmployee(ctx: any, business: any, employee: any, roster: any[], period: { start: string; end: string; payDate: string }, overrides: Record<string, number> = {}, preparedRule?: any) {
   const e = { ...employee };
   for (const key of ['basicPay', 'overtimeHours', 'overtimeRate', 'bonus', 'commission', 'allowances', 'otherDeductions']) if (e[key] == null) e[key] = 0;
   const exceptions = employeeExceptions(e, roster);
@@ -20,7 +20,7 @@ export async function calculateReviewEmployee(ctx: any, business: any, employee:
     const gross = Number(accountantGrossEarnings({ ...e, basicPay: base }).toFixed(2));
     if (!Number.isFinite(gross) || gross <= 0) exceptions.push({ code: 'invalid_gross', severity: 'BLOCKING', message: 'Calculated gross pay must be greater than zero.' });
     else {
-      const result = await calculateStatutoryForBusiness(ctx, business, { grossIncome: gross, frequency: e.payFrequency, payDate: period.payDate, payPeriodStart: period.start, payPeriodEnd: period.end, otherDeductions: e.otherDeductions });
+      const result = await calculateStatutoryForBusiness(ctx, business, { grossIncome: gross, frequency: e.payFrequency, payDate: period.payDate, payPeriodStart: period.start, payPeriodEnd: period.end, otherDeductions: e.otherDeductions }, preparedRule);
       if (!result.supported) exceptions.push({ code: 'statutory_unavailable', severity: 'BLOCKING', message: 'Automatic statutory calculation is unavailable for this country or tax year.' });
       else {
         const value = (...keys: string[]) => result.statutoryDeductions.filter((d: any) => keys.includes(d.key)).reduce((sum: number, d: any) => sum + d.amount, 0);
@@ -37,3 +37,4 @@ export async function calculateReviewEmployee(ctx: any, business: any, employee:
   }
   return { snapshot, exceptions, status: exceptions.some(issue => issue.severity === 'BLOCKING') ? 'blocking' : exceptions.some(issue => issue.severity === 'REVIEW') ? 'review' : 'ready' };
 }
+
