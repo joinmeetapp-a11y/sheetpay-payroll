@@ -253,6 +253,6 @@ export const approveFiling=action({args:{id:v.id('practiceDrafts'),confirmed:v.b
  if(configuration(d.payload.country,d.payload.taxYear).version!==d.payload.configVersion)throw Error('Form specifications changed. Prepare and approve a new filing request.');
  await ctx.runQuery((internal as any).compliance.assertSource,{businessId:d.businessId,sourceRevision:d.payload.sourceRevision});
  await ctx.runMutation(api.practice.approveDraft,a);
- const g=await ctx.runAction(api.compliance.generate,{businessId:d.businessId,taxYear:d.payload.taxYear,...(d.payload.month?{month:d.payload.month}:{}),formId:d.payload.formId});
+ const g=await ctx.runAction(api.compliance.generate,{businessId:d.businessId,taxYear:d.payload.taxYear,...(d.payload.month?{month:d.payload.month}:{}),formId:d.payload.formId,expectedSourceRevision:d.payload.sourceRevision,expectedConfigVersion:d.payload.configVersion});
  await ctx.runMutation(api.practice.recordFilingResult,{id:a.id,generationId:g.generationId});return g;
 }});
