@@ -4,7 +4,10 @@ import { caylaAgentTables } from "./caylaAgentSchema";
 import { performanceTables } from "./performanceSchema";
 import { socialTables } from "./socialSchema";
 
+import { practiceTables } from "./practiceSchema";
+
 export default defineSchema({
+  ...practiceTables,
   ...socialTables,
   ...performanceTables,
   ...caylaAgentTables,
