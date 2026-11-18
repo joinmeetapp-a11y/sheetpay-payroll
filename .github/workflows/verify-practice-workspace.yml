@@ -1,0 +1,21 @@
+name: Verify Accountant practice backend
+on:
+  push:
+    branches: [feat/accountant-practice-portal-20261118]
+  pull_request:
+    branches: [perf/accountant-convex-io-20261117]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check:convex
+      - run: npx vitest run
+      - run: npm run check:social-bundle
