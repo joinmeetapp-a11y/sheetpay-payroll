@@ -56,9 +56,10 @@ export function extendFiling(report:any,runs:any[],support:any[],settlement:any)
    for(const e of report.employees)if(!/^\d{9}$/.test(e.contributionId))f.issues.push({code:'MISSING_DATA',message:`${e.name}: add the correct 9-digit contribution identifier (review country-specific identifier mapping)`,entity:'employee',id:e.id});
    f.issues.push(...issues);
    if(!report.business.phone)f.issues.push({code:'MISSING_DATA',entity:'business',id:report.business.id,message:'Add employer telephone number.'});
+   if(country==='TT'&&report.business.phone&&!/^\d{7}$/.test(report.business.phone.replace(/\D/g,'').replace(/^(?:1868|868)/,'')))f.issues.push({code:'MISSING_DATA',entity:'business',id:report.business.id,message:'Enter a valid 7-digit Trinidad & Tobago telephone number (optional +1 868 prefix).'});
    if(f.id==='ni187')f.issues.push(...paymentIssues);
    if(['ni184','ni187'].includes(f.id)&&!/^\d{6}$/.test(report.business.nisNumber))f.issues.push({code:'MISSING_DATA',entity:'business',id:report.business.id,message:'Add the 6-digit NIBTT employer registration number.'});
-   if(f.id==='ni184'&&!report.business.serviceCentreCode)f.issues.push({code:'MISSING_DATA',entity:'business',id:report.business.id,message:'Add employer NIBTT service centre code.'});
+   if(f.id==='ni184'&&!/^\d{1,6}$/.test(report.business.serviceCentreCode||''))f.issues.push({code:'MISSING_DATA',entity:'business',id:report.business.id,message:'Add employer NIBTT service centre code.'});
    if(f.id==='fin15a')f.issues.push({code:'SPECIFICATION',entity:'source',id:f.id,message:'The retrieved FIN15A embeds a contribution schedule effective April 2022. Current schedule applicability and paid-contribution/interest detail must be confirmed with SSB before official population is enabled. Use the contribution preparation report.'});
   }
   if(f.period==='monthly'&&!month)f.issues.push({code:'PERIOD',message:'Select a month for this form.',entity:'month',id:''});
