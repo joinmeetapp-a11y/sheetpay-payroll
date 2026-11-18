@@ -337,7 +337,7 @@ describe("generation safety and daily dispatch",()=>{
     await t.run(async ctx=>{const s=await ctx.db.query("socialSettings").first();await ctx.db.patch(s!._id,{postingEnabled:true});});
     await t.mutation(anyApi.social.tick,{});
     const tasks=await t.run(ctx=>ctx.db.system.query("_scheduled_functions").collect());
-    expect(tasks).toHaveLength(0);
+    expect(tasks.filter((task:any)=>task.name.includes("publish"))).toHaveLength(0);
     expect((await t.run(ctx=>ctx.db.get(postId)))?.status).toBe("awaiting_approval");
   });
   it("automatic mode dispatches once due and test mode still prevents LinkedIn requests",async()=>{
@@ -370,8 +370,39 @@ describe("generation safety and daily dispatch",()=>{
       await ctx.db.delete(postId);
     });
     await t.mutation(anyApi.social.tick,{});
+    const settings=await t.run(ctx=>ctx.db.query('socialSettings').first());
+    expect(settings?.generationFunctionId).toBeDefined();
+    await t.mutation(anyApi.social.generateScheduled,{targetAt:Date.parse('2026-10-06T04:10:00Z'),wakeAt:settings!.nextGenerationAt});
     const posts=await t.run(ctx=>ctx.db.query("socialPosts").collect());
     expect(posts).toHaveLength(1);expect(posts[0].dayKey).toBe("2026-10-06");
     expect(posts[0].scheduledFor).toBe(Date.parse("2026-10-06T04:10:00Z"));
   });
+});
+
+describe('event scheduled social jobs',()=>{
+ beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-05T12:00Z'));vi.stubEnv('SOCIAL_LIVE_PUBLISH_APPROVED','false');});
+ afterEach(()=>{vi.useRealTimers();vi.unstubAllEnvs();});
+ it('keeps one publish job across repeated approval and cancels it on skip',async()=>{
+  const {t,admin,postId}=await setup();await admin.mutation(anyApi.social.approve,{id:postId});
+  const first=(await t.run(ctx=>ctx.db.get(postId)))!.scheduledFunctionId;expect(first).toBeDefined();
+  await admin.mutation(anyApi.social.approve,{id:postId});expect((await t.run(ctx=>ctx.db.get(postId)))!.scheduledFunctionId).toBe(first);
+  await admin.mutation(anyApi.social.skip,{id:postId});expect((await t.run(ctx=>ctx.db.system.get(first!)))!.state.kind).toBe('canceled');
+ });
+ it('replaces a changed schedule and rejects stale callbacks or uncertain outcomes',async()=>{
+  const {t,admin,postId}=await setup();await admin.mutation(anyApi.social.approve,{id:postId});const before=(await t.run(ctx=>ctx.db.get(postId)))!;
+  await admin.mutation(anyApi.social.configure,{postingEnabled:true,testMode:true,mode:'approval',postingTime:'13:00',timezone:'America/Port_of_Spain',postingDays:[1]});
+  await admin.mutation(anyApi.social.approve,{id:postId});const next=(await t.run(ctx=>ctx.db.get(postId)))!;
+  expect(next.scheduledFunctionId).not.toBe(before.scheduledFunctionId);expect((await t.run(ctx=>ctx.db.system.get(before.scheduledFunctionId!)))!.state.kind).toBe('canceled');
+  const count=await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect());
+  await t.mutation(anyApi.social.publishScheduled,{id:postId,revision:before.revision,scheduledFor:before.scheduledFor});
+  expect(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).toHaveLength(count.length);
+  await t.run(ctx=>ctx.db.patch(postId,{outcomeUnknown:true}));vi.setSystemTime(new Date(next.scheduledFor+1000));
+  await t.mutation(anyApi.social.publishScheduled,{id:postId,revision:next.revision,scheduledFor:next.scheduledFor});
+  expect((await t.run(ctx=>ctx.db.get(postId)))!.status).toBe('scheduled');
+ });
+ it('migrates pending posts once without publishing completed posts',async()=>{
+  const {t,postId}=await setup();await t.run(ctx=>ctx.db.patch(postId,{status:'scheduled',approvalRequired:false}));
+  await t.mutation(anyApi.social.migrateSchedules,{paginationOpts:{numItems:50,cursor:null}});const first=(await t.run(ctx=>ctx.db.get(postId)))!.scheduledFunctionId;
+  await t.mutation(anyApi.social.migrateSchedules,{paginationOpts:{numItems:50,cursor:null}});expect((await t.run(ctx=>ctx.db.get(postId)))!.scheduledFunctionId).toBe(first);
+ });
 });

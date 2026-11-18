@@ -1,4 +1,5 @@
-import { mutation, query, internalMutation } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation, internalMutation } from "./functions";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { ACCOUNTANT_PLANS, effectiveAccountantPlan } from "../shared/accountantPlans";

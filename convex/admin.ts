@@ -1,4 +1,6 @@
-import { query, mutation, internalMutation, QueryCtx } from "./_generated/server";
+import { performanceReady, performanceCounter } from "./lib/performance";
+import { query, QueryCtx } from "./_generated/server";
+import { mutation, internalMutation } from "./functions";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
@@ -124,6 +126,30 @@ export const getOverview = query({
     const auth = await resolveAdmin(ctx, args.requesterUid);
     if (!auth || !can(auth.role, "overview")) return { authorized: false as const };
 
+    const ready = (await Promise.all(['users', 'payrollRuns', 'employees', 'caylaConversations', 'caylaUsageLogs'].map(table => performanceReady(ctx, table)))).every(Boolean);
+    if (ready) {
+      const values = await performanceCounter(ctx, 'global');
+      const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+      const start = today.getTime() - 29 * 86400000;
+      const daily = await ctx.db.query('performanceCounters').withIndex('by_key', q => q.gte('key', `signup:${new Date(start).toISOString().slice(0, 10)}`).lte('key', `signup:${today.toISOString().slice(0, 10)}`)).take(31);
+      const byDay = new Map(daily.map(row => [row.key.slice(7), row.values.count || 0]));
+      const signupsByDay = Array.from({length:30}, (_, i) => { const date = new Date(start + i * 86400000).toISOString().slice(0, 10); return {date, count:byDay.get(date) || 0}; });
+      // Exact rolling 7/30 day boundaries use a small createdAt-indexed range,
+      // including hours within the oldest day, just as the legacy dashboard did.
+      async function rollingDays(days:number){
+        const cutoff=Date.now()-days*86400000,day=new Date(cutoff);day.setUTCHours(0,0,0,0);
+        const nextDay=day.getTime()+86400000;
+        const boundary=await ctx.db.query('users').withIndex('by_created',q=>q.gte('createdAt',cutoff).lt('createdAt',nextDay)).collect();
+        return boundary.length+signupsByDay.filter(row=>Date.parse(row.date)>=nextDay).reduce((sum,row)=>sum+row.count,0);
+      }
+      const newLast30=await rollingDays(30),newLast7=await rollingDays(7);
+      const extract = (prefix:string) => Object.fromEntries(Object.entries(values).filter(([k]) => k.startsWith(prefix)).map(([k,v]) => [k.slice(prefix.length),v]));
+      return { authorized:true as const, role:auth.role,
+        totals: { ...values, businessAccounts: values['type:business'] || 0, accountantAccounts: values['type:accountant'] || 0,
+          activeSubscriptions:values['status:active'] || 0,canceledSubscriptions:values['status:canceled'] || 0,pastDueSubscriptions:values['status:past_due'] || 0,pausedSubscriptions:values['status:paused'] || 0,
+          arr:(values.mrr || 0)*12, monthlyRevenue:values.mrr || 0, newUsersLast30:newLast30,newUsersLast7:newLast7,ocrImports:null },
+        byPlan:{free:0,pro:0,accountant:0,...extract('plan:')},byAccountType:{business:0,accountant:0,...extract('type:')},byStatus:extract('status:'),signupsByDay };
+    }
     // NOTE: this scans the users/payrollRuns tables. For > ~100k rows switch
     // to reading the aggregated dailyMetrics table populated by the nightly
     // job in convex/analyticsAggregation.ts (to be added — see TODO).
@@ -221,11 +247,10 @@ export const getUsageOverview = query({
   handler: async (ctx, args) => {
     const auth = await resolveAdmin(ctx, args.requesterUid);
     if (!auth || !can(auth.role, "overview")) return { authorized: false as const };
-    const users = await ctx.db.query("users").collect();
-    const counters = await ctx.db.query("usageCounters").collect();
     const currentPeriod = new Date().toISOString().slice(0, 7);
-    const current = counters.filter((row) => row.period === currentPeriod);
-    const totals = current.reduce((acc, row) => ({
+    const summariesReady=await performanceReady(ctx,'usageCounters');
+    const current = summariesReady ? await ctx.db.query('usageCounters').withIndex('by_period_activity',q=>q.eq('period',currentPeriod)).order('desc').take(50) : await ctx.db.query("usageCounters").withIndex("by_period_activity", q => q.eq("period", currentPeriod)).collect();
+    const totals = summariesReady ? {payrollRuns:0,payslips:0,ocrScans:0,caylaActions:0,emails:0,reminderEmails:0,...await performanceCounter(ctx,`usage:${currentPeriod}`)} : current.reduce((acc, row) => ({
       payrollRuns: acc.payrollRuns + (row.payrollRunsUsed || 0),
       payslips: acc.payslips + (row.payslipsUsed || 0),
       ocrScans: acc.ocrScans + (row.ocrScansUsed || 0),
@@ -233,9 +258,9 @@ export const getUsageOverview = query({
       emails: acc.emails + (row.payslipEmailsUsed || row.emailsReserved || 0),
       reminderEmails: acc.reminderEmails + (row.reminderEmailsReserved || 0),
     }), { payrollRuns: 0, payslips: 0, ocrScans: 0, caylaActions: 0, emails: 0, reminderEmails: 0 });
-    const byUser = new Map(users.map((user) => [String(user._id), user]));
-    const topUsage = current.map((row) => {
-      const user = byUser.get(String(row.userId));
+    const ranked = current.sort((a,b) => ((b.payrollRunsUsed||0)+(b.payslipsUsed||0)+(b.ocrScansUsed||0)+(b.caylaActionsUsed||0)+(b.payslipEmailsUsed||b.emailsReserved||0))-((a.payrollRunsUsed||0)+(a.payslipsUsed||0)+(a.ocrScansUsed||0)+(a.caylaActionsUsed||0)+(a.payslipEmailsUsed||a.emailsReserved||0))).slice(0,50);
+    const topUsage = await Promise.all(ranked.map(async (row) => {
+      const user = await ctx.db.get(row.userId);
       return {
         userId: row.userId,
         email: user?.email || "Unknown",
@@ -246,7 +271,7 @@ export const getUsageOverview = query({
         caylaActions: row.caylaActionsUsed || 0,
         emails: row.payslipEmailsUsed || row.emailsReserved || 0,
       };
-    }).sort((a, b) => (b.payrollRuns + b.payslips + b.ocrScans + b.caylaActions + b.emails) - (a.payrollRuns + a.payslips + a.ocrScans + a.caylaActions + a.emails)).slice(0, 50);
+    }));
     return { authorized: true as const, period: currentPeriod, totals, topUsage };
   },
 });
@@ -263,9 +288,17 @@ export const listUsers = query({
   },
   handler: async (ctx, args) => {
     const auth = await resolveAdmin(ctx, args.requesterUid);
-    if (!auth || !can(auth.role, "users")) return { authorized: false as const };
+    if (!auth || !can(auth.role, "users")) return { authorized: false as const, page: [], users: [], continueCursor: "", isDone: true };
 
-    const page = await ctx.db.query("users").order("desc").paginate(args.paginationOpts);
+    const searching = Boolean(args.search?.trim()) && await performanceReady(ctx,'users');
+    const base = args.plan && args.plan!=='free' ? ctx.db.query('users').withIndex('by_plan',q=>q.eq('plan',args.plan as any)) : args.accountType ? ctx.db.query('users').withIndex('by_account_type',q=>q.eq('accountType',args.accountType as any)) : ctx.db.query('users');
+    const filteredQuery=base.filter(q=>q.and(...[
+      ...(args.plan?[args.plan==='free'?q.or(q.eq(q.field('plan'),'free'),q.eq(q.field('plan'),undefined)):q.eq(q.field('plan'),args.plan)]:[]),
+      ...(args.accountType?[q.eq(q.field('accountType'),args.accountType)]:[])
+    ]));
+    const query=searching ? ctx.db.query('users').withSearchIndex('search_users',q=>q.search('searchText',args.search!.trim().toLowerCase())) : filteredQuery.order('desc');
+    const page = await query.paginate({...args.paginationOpts,numItems:Math.min(100,Math.max(1,args.paginationOpts.numItems)),maximumRowsRead:200});
+    const countsReady=await performanceReady(ctx,'employees')&&await performanceReady(ctx,'payrollRuns');
     const search = args.search?.toLowerCase().trim();
 
     const filtered = page.page.filter((u) => {
@@ -281,13 +314,14 @@ export const listUsers = query({
     // Enrich with counts per user (indexed lookups — no table scan)
     const enriched = await Promise.all(
       filtered.map(async (u) => {
+        const counts = countsReady ? await performanceCounter(ctx, `user:${u._id}`) : null;
         const [empCount, runCount, business] = await Promise.all([
-          ctx.db
+          counts ? Promise.resolve(counts.employees || 0) : ctx.db
             .query("employees")
             .withIndex("by_user", (q) => q.eq("userId", u._id))
             .collect()
             .then((r) => r.length),
-          ctx.db
+          counts ? Promise.resolve(counts.payrolls || 0) : ctx.db
             .query("payrollRuns")
             .withIndex("by_user", (q) => q.eq("userId", u._id))
             .collect()
@@ -316,6 +350,7 @@ export const listUsers = query({
     return {
       authorized: true as const,
       users: enriched,
+      page: enriched,
       continueCursor: page.continueCursor,
       isDone: page.isDone,
     };

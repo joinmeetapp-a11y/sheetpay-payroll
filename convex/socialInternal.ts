@@ -1,4 +1,5 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
+import { internalMutation } from "./functions";
 import { v } from "convex/values";
 import { isAdminEmail } from "./admin";
 
@@ -18,7 +19,7 @@ export const completeGeneration = internalMutation({args:{id,operationId:v.strin
     const old=p.imageStorageId;
     await ctx.db.patch(p._id,{caption:a.caption,hook:a.hook,imageText:a.imageText,lesson:a.lesson,
       storyAngle:a.storyAngle,phrases:a.phrases,embedding:a.embedding,imageStorageId:a.storageId,imageRevision:p.revision,
-      status:approvalRequired?"awaiting_approval":"scheduled",approvalRequired,imagePortraitId:a.portraitId,hashtags:a.caption.match(/#\w+/g)||[],
+      status:approvalRequired?"awaiting_approval":"scheduled",policyRevision:settings.policyRevision||0,approvalRequired,imagePortraitId:a.portraitId,hashtags:a.caption.match(/#\w+/g)||[],
       sheetpayMentioned:/sheetpay/i.test(a.caption),sheetpayUrlIncluded:a.caption.includes("https://sheetpay.app/accountant"),
       error:undefined,errorPhase:undefined,leaseUntil:undefined,updatedAt:Date.now()});
     if(old)await ctx.storage.delete(old);
@@ -43,6 +44,7 @@ export const claimPublish = internalMutation({args:{id,operationId:v.string(),ma
   const p=await ctx.db.get(a.id);if(!p||!["scheduled","approved","failed"].includes(p.status)||p.outcomeUnknown||p.publishRequestStartedAt||p.linkedinPostId)return null;
   const s=await ctx.db.query("socialSettings").withIndex("by_key",q=>q.eq("key","kurt-prince")).unique();
   if(!s||s.ownerId!==p.ownerId)throw new Error("Settings unavailable");
+  if((p.policyRevision||0)!==(s.policyRevision||0))throw new Error("Publishing policy changed. Approve this post again.");
   if(!a.manual&&!s.postingEnabled)return null;
   if((s.mode==="approval"||p.approvalRequired)&&!p.approvedAt)throw new Error("Approval required");
   if(!p.caption||!p.imageStorageId||p.imageRevision!==p.revision)throw new Error("Caption and current image required");
@@ -61,7 +63,7 @@ export const beginPostRequest = internalMutation({args:{id,operationId:v.string(
   const p=await ctx.db.get(a.id),c=await ctx.db.get(a.connectionId);
   const s=await ctx.db.query("socialSettings").withIndex("by_key",q=>q.eq("key","kurt-prince")).unique();
   if(!p||p.operationId!==a.operationId||p.status!=="publishing"||p.publishRequestStartedAt||
-    !s||s.testMode||process.env.SOCIAL_LIVE_PUBLISH_APPROVED!=="true"||!c||c.ownerId!==p.ownerId||
+    !s||(p.policyRevision||0)!==(s.policyRevision||0)||s.testMode||process.env.SOCIAL_LIVE_PUBLISH_APPROVED!=="true"||!c||c.ownerId!==p.ownerId||
     c.status!=="connected"||c.expiresAt<=Date.now()||p.imagePortraitId!==s.portraitId||
     (!a.manual&&!s.postingEnabled)||(s.mode==="approval"&&!p.approvedAt))throw new Error("Live publication guard rejected the request");
   const user=await ctx.db.get(p.ownerId),role=await ctx.db.query("adminRoles").withIndex("by_user",q=>q.eq("userId",p.ownerId)).first();

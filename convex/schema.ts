@@ -1,10 +1,12 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { caylaAgentTables } from "./caylaAgentSchema";
+import { performanceTables } from "./performanceSchema";
 import { socialTables } from "./socialSchema";
 
 export default defineSchema({
   ...socialTables,
+  ...performanceTables,
   ...caylaAgentTables,
   accountantEmailVerifications: defineTable({
     userId: v.id("users"), email: v.string(), tokenHash: v.string(),
@@ -29,6 +31,7 @@ export default defineSchema({
     announcementId: v.id("accountantAnnouncements"), userId: v.id("users"), dismissedAt: v.number(),
   }).index("by_user_announcement", ["userId", "announcementId"]),
   accountantEmailCampaigns: defineTable({
+    scheduledFunctionId:v.optional(v.id("_scheduled_functions")),
     userId:v.id("users"),campaignId:v.string(),enrolledAt:v.number(),currentDay:v.number(),
     nextSendAt:v.number(),lastSentAt:v.optional(v.number()),completedAt:v.optional(v.number()),
     stoppedAt:v.optional(v.number()),stopReason:v.optional(v.string()),
@@ -47,6 +50,7 @@ export default defineSchema({
   miaRates: defineTable({key:v.string(),count:v.number(),expiresAt:v.number()}).index('by_key',['key']).index('by_expiry',['expiresAt']),
   miaRequests: defineTable({key:v.string(),principal:v.string(),reference:v.string(),name:v.string(),email:v.string(),subject:v.string(),description:v.string(),page:v.string(),transcript:v.string(),consent:v.boolean(),context:v.any(),status:v.string(),ackStatus:v.string(),ackAttempts:v.optional(v.number()),providerId:v.optional(v.string()),createdAt:v.number(),updatedAt:v.number(),expiresAt:v.number()}).index('by_key',['key']).index('by_expiry',['expiresAt']).index('by_ack',['ackStatus']).index('by_delivery_ack',['status','ackStatus']),
   users: defineTable({
+    searchText:v.optional(v.string()),
     firebaseUid: v.optional(v.string()),
     email: v.string(),
     emailVerified: v.optional(v.boolean()),
@@ -76,7 +80,11 @@ export default defineSchema({
     billingSubscriptionUpdatedAt: v.optional(v.number()),
   })
     .index("by_firebase_uid", ["firebaseUid"])
-    .index("by_paddle_customer", ["paddleCustomerId"]),
+    .index("by_created", ["createdAt"])
+    .index("by_plan", ["plan"])
+    .index("by_account_type", ["accountType"])
+    .index("by_paddle_customer", ["paddleCustomerId"])
+    .searchIndex("search_users",{searchField:"searchText",filterFields:["plan","accountType"]}),
 
   statutoryRuleSets: defineTable({
     countryCode: v.string(),
@@ -306,6 +314,7 @@ export default defineSchema({
   })
     .index("by_member", ["memberUserId"])
     .index("by_workspace", ["workspaceOwnerId"])
+    .index("by_workspace_status", ["workspaceOwnerId","status"])
     .index("by_workspace_member", ["workspaceOwnerId", "memberUserId"])
     .index("by_email_workspace", ["workspaceOwnerId", "email"]),
 
@@ -382,6 +391,7 @@ export default defineSchema({
     replyToEmail: v.optional(v.string()),
   })
     .index("by_job", ["jobId"])
+    .index("by_job_status", ["jobId", "status"])
     .index("by_job_employee", ["jobId", "employeeId"])
     .index("by_run_employee", ["payrollRunId", "employeeId"])
     .index("by_resend_message", ["resendMessageId"])
@@ -414,6 +424,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_workspace", ["workspaceOwnerId"])
+    .index("by_workspace_business", ["workspaceOwnerId", "businessId"])
     .index("by_business", ["businessId"])
     .index("by_actor", ["actorUserId"]),
 
@@ -438,6 +449,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_user_created", ["userId", "createdAt"])
+    .index("by_user_read", ["userId", "readAt"])
     .index("by_user_dedupe", ["userId", "dedupeKey"])
     .index("by_workspace", ["workspaceOwnerId"])
     .index("by_business", ["businessId"]),
@@ -521,6 +533,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_user_id", ["userId"])
+    .index("by_user_business", ["userId", "businessId"])
     .index("by_firm_id", ["businessId"]),
 
   // OpenAI usage and cost tracking
@@ -599,6 +612,7 @@ export default defineSchema({
   // The cron finds due rows via the by_next_run_at index — never scans the
   // whole table.
   reminders: defineTable({
+    scheduledFunctionId:v.optional(v.id("_scheduled_functions")),
     userId: v.id("users"),
     workspaceOwnerId: v.optional(v.id("users")),
     businessId: v.optional(v.id("businesses")),
@@ -700,6 +714,7 @@ export default defineSchema({
   // fresh row (no reset job needed). Counts increase only when the operation
   // actually succeeds; enforcement lives server-side in convex/usage.ts.
   usageCounters: defineTable({
+    activityScore:v.optional(v.number()),
     userId: v.id("users"),
     period: v.string(),
     payslipsUsed: v.number(),
@@ -712,7 +727,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_user", ["userId"])
-    .index("by_user_period", ["userId", "period"]),
+    .index("by_user_period", ["userId", "period"])
+    .index("by_period_activity", ["period","activityScore"]),
 
   // Idempotency ledger for usage increments — one row per operation id so a
   // retried mutation, duplicated webhook, or double-clicked button cannot

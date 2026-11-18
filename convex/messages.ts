@@ -1,4 +1,5 @@
-import { mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation } from "./functions";
 import { requireOwnUser } from "./lib/ownUser";
 import { requireBusinessAccess } from "./lib/accountantAccess";
 import { v } from "convex/values";

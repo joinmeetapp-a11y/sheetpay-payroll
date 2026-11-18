@@ -1,4 +1,5 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
+import { internalMutation } from "./functions";
 import { v } from "convex/values";
 import { CAMPAIGN_ID, FIRST_DELAY, DAY_DELAY, RETRY_BUDGET, campaignFree, validEmail, destination, renderCampaign } from "../shared/accountantCampaign";
 import { isAdminEmail } from "./admin";

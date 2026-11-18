@@ -1,5 +1,8 @@
+import { performanceReady } from "./lib/performance";
+import { getActor } from "./lib/accountantAccess";
 import { requireVerifiedAccountantEmail } from "./lib/accountantEmailAccess";
-import { mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation } from "./functions";
 import { ConvexError, v } from "convex/values";
 import { isAdminEmail } from "./admin";
 import { assertCapacity, accountantPlanFor, throwLimit, ACCOUNTANT_PLANS } from "./usage";
@@ -121,3 +124,16 @@ export const update = mutation({
 });
 
 
+
+export const listAccessibleSummaries=query({args:{userId:v.id('users')},handler:async(ctx,a)=>{
+ const {actor}=await getActor(ctx);if(actor._id!==a.userId)return [];
+ if(!await performanceReady(ctx,'businesses'))return (await getAccessibleBusinesses(ctx,a.userId)).map(({_id,userId,name,countryCode,countryName,currency,currencySymbol,defaultPayrollFrequency}:any)=>({_id,userId,name,countryCode,countryName,currency,currencySymbol,defaultPayrollFrequency}));
+ const owned=await ctx.db.query('businessDirectory').withIndex('by_user',q=>q.eq('userId',actor._id)).collect();
+ const memberships=await ctx.db.query('accountantMemberships').withIndex('by_member',q=>q.eq('memberUserId',actor._id)).collect();
+ const rows=[...owned];for(const member of memberships){if(member.status!=='active')continue;
+  if(member.allClients)rows.push(...await ctx.db.query('businessDirectory').withIndex('by_user',q=>q.eq('userId',member.workspaceOwnerId)).collect());
+  else for(const id of new Set(member.clientIds)){const normalized=ctx.db.normalizeId('businesses',id);if(!normalized)continue;const row=await ctx.db.query('businessDirectory').withIndex('by_source',q=>q.eq('sourceId',normalized)).unique();if(row?.userId===member.workspaceOwnerId)rows.push(row);}
+ }
+ return [...new Map(rows.map(({sourceId,_id,_creationTime,...row})=>[String(sourceId),{...row,_id:sourceId}])).values()];
+}});
+export const getAccessibleDetail=query({args:{businessId:v.id('businesses')},handler:async(ctx,a)=>{const business=await ctx.db.get(a.businessId);await requireBusinessAccess(ctx,business,'read');return business;}});

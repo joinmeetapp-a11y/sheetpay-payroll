@@ -1,0 +1,199 @@
+{
+  "instrumentation": "Application database methods: documents returned and UTF-8 JSON bytes; not production billing",
+  "measurements": [
+    {
+      "label": "one client",
+      "employees": 10,
+      "runs": 10,
+      "notifications": 30,
+      "usage": {
+        "before": {
+          "documentsRead": 12,
+          "jsonBytesRead": 6013,
+          "jsonResponseBytes": 482
+        },
+        "after": {
+          "documentsRead": 6,
+          "jsonBytesRead": 1062,
+          "jsonResponseBytes": 482
+        }
+      },
+      "payroll": {
+        "before": {
+          "documentsRead": 13,
+          "jsonBytesRead": 32480,
+          "jsonResponseBytes": 31771
+        },
+        "after": {
+          "documentsRead": 12,
+          "jsonBytesRead": 4445,
+          "jsonResponseBytes": 3169
+        }
+      },
+      "notificationsRead": {
+        "before": {
+          "documentsRead": 152,
+          "jsonBytesRead": 59331,
+          "jsonResponseBytes": 44771
+        },
+        "after": {
+          "documentsRead": 32,
+          "jsonBytesRead": 11094,
+          "jsonResponseBytes": 34
+        }
+      }
+    },
+    {
+      "label": "large employee list",
+      "employees": 500,
+      "runs": 10,
+      "notifications": 0,
+      "usage": {
+        "before": {
+          "documentsRead": 502,
+          "jsonBytesRead": 281397,
+          "jsonResponseBytes": 483
+        },
+        "after": {
+          "documentsRead": 6,
+          "jsonBytesRead": 1066,
+          "jsonResponseBytes": 483
+        }
+      },
+      "payroll": {
+        "before": {
+          "documentsRead": 13,
+          "jsonBytesRead": 32472,
+          "jsonResponseBytes": 31763
+        },
+        "after": {
+          "documentsRead": 12,
+          "jsonBytesRead": 4443,
+          "jsonResponseBytes": 3167
+        }
+      }
+    },
+    {
+      "label": "extensive history",
+      "employees": 10,
+      "runs": 1000,
+      "notifications": 0,
+      "usage": {
+        "before": {
+          "documentsRead": 12,
+          "jsonBytesRead": 6013,
+          "jsonResponseBytes": 482
+        },
+        "after": {
+          "documentsRead": 6,
+          "jsonBytesRead": 1064,
+          "jsonResponseBytes": 482
+        }
+      },
+      "payroll": {
+        "before": {
+          "documentsRead": 1003,
+          "jsonBytesRead": 3176455,
+          "jsonResponseBytes": 3176736
+        },
+        "after": {
+          "documentsRead": 12,
+          "jsonBytesRead": 4447,
+          "jsonResponseBytes": 3169
+        }
+      }
+    },
+    {
+      "label": "large notification history",
+      "employees": 1,
+      "runs": 1,
+      "notifications": 1000,
+      "usage": {
+        "before": {
+          "documentsRead": 3,
+          "jsonBytesRead": 1020,
+          "jsonResponseBytes": 481
+        },
+        "after": {
+          "documentsRead": 6,
+          "jsonBytesRead": 1057,
+          "jsonResponseBytes": 481
+        }
+      },
+      "payroll": {
+        "before": {
+          "documentsRead": 4,
+          "jsonBytesRead": 1673,
+          "jsonResponseBytes": 955
+        },
+        "after": {
+          "documentsRead": 5,
+          "jsonBytesRead": 1378,
+          "jsonResponseBytes": 397
+        }
+      },
+      "notificationsRead": {
+        "before": {
+          "documentsRead": 502,
+          "jsonBytesRead": 196962,
+          "jsonResponseBytes": 149433
+        },
+        "after": {
+          "documentsRead": 102,
+          "jsonBytesRead": 36075,
+          "jsonResponseBytes": 34
+        }
+      }
+    },
+    {
+      "label": "10 accountants",
+      "admin": {
+        "before": {
+          "documentsRead": 167,
+          "jsonBytesRead": 192393,
+          "jsonResponseBytes": 1581
+        },
+        "after": {
+          "documentsRead": 8,
+          "jsonBytesRead": 1475,
+          "jsonResponseBytes": 1633
+        }
+      }
+    },
+    {
+      "label": "100 accountants",
+      "admin": {
+        "before": {
+          "documentsRead": 1607,
+          "jsonBytesRead": 1736314,
+          "jsonResponseBytes": 1597
+        },
+        "after": {
+          "documentsRead": 8,
+          "jsonBytesRead": 1486,
+          "jsonResponseBytes": 1652
+        }
+      }
+    },
+    {
+      "label": "250 bulk recipients",
+      "queue": {
+        "before": {
+          "documentsRead": 251,
+          "jsonBytesRead": 136332,
+          "jsonResponseBytes": 1034
+        },
+        "after": {
+          "documentsRead": 18,
+          "jsonBytesRead": 6103,
+          "jsonResponseBytes": 1034
+        }
+      },
+      "finish": {
+        "documentsRead": 3,
+        "jsonBytesRead": 788,
+        "jsonResponseBytes": 4
+      }
+    }
+  ]
+}

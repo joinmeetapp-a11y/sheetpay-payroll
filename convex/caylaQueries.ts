@@ -1,5 +1,6 @@
 import { validatePayrollSnapshot } from "./payrollRuns";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalQuery, query } from "./_generated/server";
+import { internalMutation, mutation } from "./functions";
 import { v } from "convex/values";
 import { assertWithinLimit, incrementUsageIdempotent, historyAccessible, reserveUsage } from "./usage";
 
@@ -10,12 +11,7 @@ export const getOrCreateConversation = internalMutation({
     businessId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const conversations = await ctx.db
-      .query("caylaConversations")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
-      .order("desc")
-      .collect();
-    const existing = conversations.find((conversation) => conversation.businessId === args.businessId);
+    const existing = await ctx.db.query("caylaConversations").withIndex("by_user_business", q => q.eq("userId", args.userId).eq("businessId", args.businessId)).order("desc").first();
     if (existing) return existing._id;
     return await ctx.db.insert("caylaConversations", {
       userId: args.userId,
@@ -57,12 +53,7 @@ export const appendMessages = internalMutation({
 export const getConversationHistory = internalQuery({
   args: { userId: v.string(), businessId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const conversations = await ctx.db
-      .query("caylaConversations")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
-      .order("desc")
-      .collect();
-    return conversations.find((conversation) => conversation.businessId === args.businessId) ?? null;
+    return ctx.db.query("caylaConversations").withIndex("by_user_business", q => q.eq("userId", args.userId).eq("businessId", args.businessId)).order("desc").first();
   },
 });
 

@@ -1,4 +1,4 @@
-import { internalMutation } from './_generated/server';
+import { internalMutation } from "./functions";
 import { v } from 'convex/values';
 export const begin = internalMutation({
  args: { userId: v.id('users'), plan: v.union(v.literal('accountant_monthly'), v.literal('accountant_yearly')) },

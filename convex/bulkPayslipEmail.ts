@@ -1,4 +1,7 @@
-import { action, internalMutation, mutation, query } from "./_generated/server";
+import { performanceCounter, performanceReady } from "./lib/performance";
+import { paginationOptsValidator } from "convex/server";
+import { action, query } from "./_generated/server";
+import { internalMutation, mutation } from "./functions";
 import { ConvexError, v } from "convex/values";
 import { internal as _internal } from "./_generated/api";
 import { requireBusinessAccess, recordAccountantActivity } from "./lib/accountantAccess";
@@ -175,17 +178,24 @@ export const createBulkEmailJob = mutation({
   },
 });
 
+async function requireReadRun(ctx:any,businessId:any,runId:any){
+ const business=await ctx.db.get(businessId);const access=await requireBusinessAccess(ctx,business,'read');
+ if(await performanceReady(ctx,'payrollRuns')){
+  const run=await ctx.db.query('payrollRunSummaries').withIndex('by_run',(q:any)=>q.eq('runId',runId)).unique();
+  if(!run||run.businessId!==businessId||!historyAccessible(access.owner,run.createdAt))throw new Error('Payroll run not found');
+ }else await requireRun(ctx,businessId,runId,'read');
+}
 export const getEmailJobs = query({
-  args: { businessId: v.id("businesses"), payrollRunId: v.optional(v.id("payrollRuns")), limit: v.optional(v.number()) },
+  args: { businessId: v.id("businesses"), payrollRunId: v.optional(v.id("payrollRuns")), limit: v.optional(v.number()), includeRecipients:v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     await requireBusinessAccess(ctx, await ctx.db.get(args.businessId), "read");
-    if (args.payrollRunId) await requireRun(ctx, args.businessId, args.payrollRunId, "read");
+    if (args.payrollRunId) await requireReadRun(ctx, args.businessId, args.payrollRunId);
     const jobQuery = args.payrollRunId
       ? ctx.db.query("bulkEmailJobs").withIndex("by_run", (q) => q.eq("payrollRunId", args.payrollRunId!))
       : ctx.db.query("bulkEmailJobs").withIndex("by_business", (q) => q.eq("businessId", args.businessId));
     const jobs = await jobQuery.order("desc").take(Math.max(1, Math.min(100, args.limit ?? 30)));
     return Promise.all(jobs.map(async (job) => ({ ...job,
-      recipients: (await ctx.db.query("bulkEmailRecipients").withIndex("by_job", (q) => q.eq("jobId", job._id)).collect())
+      recipients: (args.includeRecipients===false ? [] : await ctx.db.query("bulkEmailRecipients").withIndex("by_job", (q) => q.eq("jobId", job._id)).collect())
         .map(({ _id, employeeId, employeeName, recipient, status, errorMessage, resendMessageId, outcomeUnknown, createdAt }) =>
           ({ _id, employeeId, employeeName, recipient, status, errorMessage, resendMessageId, outcomeUnknown, createdAt })),
     })));
@@ -232,13 +242,12 @@ export const takeQueued = internalMutation({
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job || job.finishedAt) return null;
-    const rows = await ctx.db.query("bulkEmailRecipients").withIndex("by_job", (q) => q.eq("jobId", job._id)).collect();
-    const sending = rows.find((row) => row.status === "sending");
+    const sending = await ctx.db.query("bulkEmailRecipients").withIndex("by_job_status", q=>q.eq("jobId",job._id).eq("status","sending")).first();
     if (sending) {
       if (Date.now() - (sending.sendingAt || 0) < 60000) return null;
       await ctx.db.patch(sending._id, { status: "failed", outcomeUnknown: true, errorMessage: "Email request interrupted. Retry Failed will check the same provider request without duplicating it." });
     }
-    const recipient = rows.find((row) => row.status === "queued");
+    const recipient = await ctx.db.query("bulkEmailRecipients").withIndex("by_job_status", q=>q.eq("jobId",job._id).eq("status","queued")).first();
     if (recipient) {
       try { await reserveUsage(ctx, recipient.workspaceOwnerId, "email", `bulk:${recipient.payrollRunId}:${recipient.employeeId}`); }
       catch (error: any) { await ctx.db.patch(recipient._id, { status: "failed", errorMessage: error?.data?.message || "Monthly payslip email allowance reached. Retry after upgrading or after the monthly reset." }); return { job, recipient: null }; }
@@ -278,11 +287,18 @@ export const finishBatch = internalMutation({
     const job = await ctx.db.get(args.jobId);
     if (!job) return;
     const wasFinished = !!job.finishedAt;
+    let sentCount:number, failedCount:number, skippedCount:number, pending:boolean;
+    if (await performanceReady(ctx,'bulkEmailRecipients')) {
+      const counts=await performanceCounter(ctx,`job:${job._id}`);
+      sentCount=counts.sent||0;failedCount=counts.failed||0;skippedCount=counts.skipped||0;pending=(counts.pending||0)>0;
+    } else {
     const rows = await ctx.db.query("bulkEmailRecipients").withIndex("by_job", (q) => q.eq("jobId", job._id)).collect();
-    const sentCount = rows.filter((row) => acceptedStatuses.includes(row.status)).length;
-    const failedCount = rows.filter((row) => row.status === "failed").length;
-    const skippedCount = rows.filter((row) => row.status === "skipped").length;
-    const pending = rows.some((row) => ["queued", "sending"].includes(row.status));
+    sentCount = rows.filter((row) => acceptedStatuses.includes(row.status)).length;
+    failedCount = rows.filter((row) => row.status === "failed").length;
+    skippedCount = rows.filter((row) => row.status === "skipped").length;
+    pending = rows.some((row) => ["queued", "sending"].includes(row.status));
+    }
+    if (wasFinished && job.sentCount===sentCount && job.failedCount===failedCount && !pending) return;
     await ctx.db.patch(job._id, { status: pending ? "sending" : failedCount ? "sent_with_errors" : skippedCount ? "sent_with_skips" : "sent", sentCount, failedCount, updatedAt: Date.now(), finishedAt: pending ? undefined : Date.now() });
     // Reconcile a late provider acceptance after a watchdog finished the job.
     if (wasFinished) return;
@@ -337,3 +353,16 @@ export const reserveEmailBatch = mutation({
 });
 
 
+
+export const listJobs = query({args:{businessId:v.id('businesses'),payrollRunId:v.optional(v.id('payrollRuns')),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
+ await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ if(a.payrollRunId)await requireReadRun(ctx,a.businessId,a.payrollRunId);
+ const q=a.payrollRunId?ctx.db.query('bulkEmailJobs').withIndex('by_run',q=>q.eq('payrollRunId',a.payrollRunId!)):ctx.db.query('bulkEmailJobs').withIndex('by_business',q=>q.eq('businessId',a.businessId));
+ return q.order('desc').paginate({...a.paginationOpts,numItems:Math.min(20,Math.max(1,a.paginationOpts.numItems))});
+}});
+export const listJobRecipients=query({args:{jobId:v.id('bulkEmailJobs'),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
+ const job=await ctx.db.get(a.jobId);if(!job)throw new Error('Send job not found');
+ await requireReadRun(ctx,job.businessId,job.payrollRunId);
+ const page=await ctx.db.query('bulkEmailRecipients').withIndex('by_job',q=>q.eq('jobId',job._id)).paginate({...a.paginationOpts,numItems:Math.min(50,Math.max(1,a.paginationOpts.numItems))});
+ return {...page,page:page.page.map(({_id,employeeId,employeeName,recipient,status,errorMessage,resendMessageId,outcomeUnknown,createdAt})=>({_id,employeeId,employeeName,recipient,status,errorMessage,resendMessageId,outcomeUnknown,createdAt}))};
+}});

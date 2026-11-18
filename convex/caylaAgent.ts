@@ -1,4 +1,5 @@
-import { query, mutation, internalMutation, internalQuery } from './_generated/server';
+import { query, internalQuery } from "./_generated/server";
+import { mutation, internalMutation } from "./functions";
 import { v } from 'convex/values';
 import { getActor, getAccessibleBusinesses, requireBusinessAccess, recordAccountantActivity } from './lib/accountantAccess';
 import { reserveUsage, assertWithinLimit, historyAccessible } from './usage';

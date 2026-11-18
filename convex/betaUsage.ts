@@ -1,4 +1,5 @@
-import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
+import { query, internalQuery } from "./_generated/server";
+import { mutation, internalMutation } from "./functions";
 import { v } from "convex/values";
 
 // Defaults; the client mirrors these for UI counters but Convex is

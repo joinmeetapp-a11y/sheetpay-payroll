@@ -7,16 +7,20 @@ export const socialStatus = v.union(...[
 ].map(s => v.literal(s)));
 export const socialTables = {
   socialSettings: defineTable({
+    policyRevision:v.optional(v.number()),
     key: v.string(), ownerId: v.id("users"), postingEnabled: v.boolean(), testMode: v.boolean(),
     mode: v.union(v.literal("approval"), v.literal("automatic")), postingTime: v.string(),
     timezone: v.string(), postingDays: v.array(v.number()), generationLeadMinutes: v.number(),
     portraitId: v.optional(v.id("_storage")), lastTopicId: v.optional(v.id("socialTopics")),
+    generationFunctionId:v.optional(v.id("_scheduled_functions")), nextGenerationAt:v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
   socialTopics: defineTable({ name: v.string(), enabled: v.boolean(), lastUsedAt: v.optional(v.number()),
     useCount: v.number(), createdAt: v.number() }).index("by_name", ["name"]),
   socialPosts: defineTable({
+    policyRevision:v.optional(v.number()),
     dayKey: v.string(), ownerId: v.id("users"), createdAt: v.number(), updatedAt: v.number(),
+    scheduledFunctionId:v.optional(v.id("_scheduled_functions")),
     scheduledFor: v.number(), publishedAt: v.optional(v.number()), status: socialStatus,
     topicId: v.id("socialTopics"), topic: v.string(), storyIdea: v.optional(v.string()),
     hook: v.optional(v.string()), caption: v.optional(v.string()), imageText: v.optional(v.string()),
@@ -32,7 +36,7 @@ export const socialTables = {
     publishAttemptId: v.optional(v.string()), publishRequestStartedAt: v.optional(v.number()),
     outcomeUnknown: v.optional(v.boolean()), testCompletedAt: v.optional(v.number()),
     linkedinResponse: v.optional(v.object({status: v.number(), requestId: v.optional(v.string())})),
-  }).index("by_day", ["dayKey"]).index("by_status_schedule", ["status", "scheduledFor"]),
+  }).index("by_day", ["dayKey"]).index("by_status_schedule", ["status", "scheduledFor"]).index("by_status_lease",["status","leaseUntil"]),
   linkedinConnections: defineTable({
     ownerId: v.id("users"), memberUrn: v.string(), name: v.string(), encryptedAccessToken: v.string(),
     encryptedRefreshToken: v.optional(v.string()), expiresAt: v.number(), refreshExpiresAt: v.optional(v.number()),

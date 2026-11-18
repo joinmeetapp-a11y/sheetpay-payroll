@@ -1,4 +1,5 @@
-import { internalMutation, internalQuery, mutation } from './_generated/server';
+import { internalQuery } from "./_generated/server";
+import { internalMutation, mutation } from "./functions";
 import { ConvexError, v } from 'convex/values';
 import { accountantPlanFor, accountantLimitsFor, accountantRemindersFor, hasUnlimitedAccountantAccess } from './usage';
 import { usagePeriod } from '../shared/accountantPlans';

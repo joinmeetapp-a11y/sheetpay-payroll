@@ -1,4 +1,4 @@
-import { internalMutation } from './_generated/server';
+import { internalMutation } from "./functions";
 
 /** Temporary email PDFs are not payroll history. Remove expired copies and stop stale deliveries. */
 export const purgeExpiredAttachments = internalMutation({ args: {}, handler: async ctx => {

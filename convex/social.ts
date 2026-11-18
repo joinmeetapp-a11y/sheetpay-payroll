@@ -1,4 +1,8 @@
-import { query, mutation, internalQuery, internalMutation, QueryCtx, MutationCtx } from "./_generated/server";
+import { syncSocialPost, scheduleGeneration } from "./lib/socialScheduling";
+import { internalMutation as rawInternalMutation } from "./_generated/server";
+import { paginationOptsValidator } from "convex/server";
+import { query, internalQuery, QueryCtx, MutationCtx } from "./_generated/server";
+import { mutation, internalMutation } from "./functions";
 import { internal } from "./_generated/api";
 import { v, ConvexError } from "convex/values";
 import { Id, Doc } from "./_generated/dataModel";
@@ -73,13 +77,14 @@ export const configure = mutation({
     const c=await ctx.db.query("linkedinConnections").withIndex("by_owner",q=>q.eq("ownerId",s.ownerId)).unique();
     if(!args.testMode && (process.env.SOCIAL_LIVE_PUBLISH_APPROVED!=="true" || !c?.verifiedAt || c.expiresAt<=Date.now() || c.status!=="connected")) throw new ConvexError("First live test needs explicit approval and a tested LinkedIn connection");
     // Invalidate approvals when publishing policy or schedule changes.
-    if(s.testMode!==args.testMode || s.mode!==args.mode || s.postingTime!==args.postingTime || s.timezone!==args.timezone || JSON.stringify(s.postingDays)!==JSON.stringify(args.postingDays)){
+    const policyChanged=s.testMode!==args.testMode || s.mode!==args.mode || s.postingTime!==args.postingTime || s.timezone!==args.timezone || JSON.stringify(s.postingDays)!==JSON.stringify(args.postingDays);
+    if(policyChanged){
       const pending=await ctx.db.query("socialPosts").order("desc").take(100);
       for(const p of pending)if(["approved","scheduled","awaiting_approval","draft"].includes(p.status)&&!p.publishRequestStartedAt){
         await ctx.db.patch(p._id,{status:"draft",approvedAt:undefined,approvedBy:undefined,testCompletedAt:undefined,approvalRequired:args.mode==="approval"});
       }
     }
-    await ctx.db.patch(s._id,{...args,updatedAt:Date.now()});await log(ctx,"settings_updated","admin");
+    await ctx.db.patch(s._id,{...args,policyRevision:(s.policyRevision||0)+(policyChanged?1:0),updatedAt:Date.now()});await log(ctx,"settings_updated","admin");
   }
 });
 export const updateTopic = mutation({args:{id:v.optional(v.id("socialTopics")),name:v.string(),enabled:v.boolean()},handler:async(ctx,a)=>{
@@ -134,7 +139,7 @@ export const approve = mutation({args:{id:v.id("socialPosts")},handler:async(ctx
   const reference=p.dayKey===localClock(Date.now(),s.timezone).date?Date.now():p.scheduledFor;
   const time=scheduledInstant(reference,s.timezone,s.postingTime);if(time===null)throw new ConvexError("Invalid local posting time");
   await ctx.db.patch(p._id,{status:"scheduled",approvedAt:Date.now(),approvedBy:actor.userId,
-    approvalRequired:s.mode==="approval",scheduledFor:Math.max(Date.now(),time),testCompletedAt:undefined,updatedAt:Date.now()});
+    policyRevision:s.policyRevision||0,approvalRequired:s.mode==="approval",scheduledFor:Math.max(Date.now(),time),testCompletedAt:undefined,updatedAt:Date.now()});
 }});
 export const skip = mutation({args:{id:v.id("socialPosts")},handler:async(ctx,a)=>{
   await requireSocialAdmin(ctx);const p=await ownedPost(ctx,a.id);editable(p);
@@ -218,8 +223,14 @@ export const authorizedContext = query({args:{},handler:async ctx=>{
 export const tick = internalMutation({args:{},handler:async ctx=>{
   const s=await settingsRow(ctx);if(!s)return;
   // Recover crashed workers conservatively; never re-send an uncertain POST.
-  const pending=await ctx.db.query("socialPosts").order("desc").take(100),now=Date.now();
-  for(const p of pending)if(["generating","publishing"].includes(p.status)&&(p.leaseUntil||0)<now){
+  const now=Date.now();
+  // Only inspect in-flight workers. Previously every idle tick read the latest
+  // 100 posts, including large completed posts and their embeddings.
+  const generating=await ctx.db.query("socialPosts")
+    .withIndex("by_status_lease",q=>q.eq("status","generating").lt("leaseUntil",now)).take(25);
+  const publishing=await ctx.db.query("socialPosts")
+    .withIndex("by_status_lease",q=>q.eq("status","publishing").lt("leaseUntil",now)).take(25);
+  for(const p of [...generating,...publishing])if((p.leaseUntil||0)<now){
     await ctx.db.patch(p._id,{status:"failed",outcomeUnknown:!!p.publishRequestStartedAt,
       error:"Worker interrupted. "+(p.publishRequestStartedAt?"Verify LinkedIn before retrying.":"Retry is available."),
       errorPhase:p.status==="generating"?"generation":"publishing",updatedAt:now});
@@ -227,16 +238,31 @@ export const tick = internalMutation({args:{},handler:async ctx=>{
   }
   const expired=await ctx.db.query("socialOAuthStates").withIndex("by_expiry",q=>q.lt("expiresAt",now)).take(100);
   for(const row of expired)await ctx.db.delete(row._id);
-  if(!s.postingEnabled)return;
-  const clock=localClock(now,s.timezone);
-  const scheduled=scheduledInstant(now,s.timezone,s.postingTime);if(scheduled===null)return;
-  const existing=await ctx.db.query("socialPosts").withIndex("by_day",q=>q.eq("dayKey",clock.date)).unique();
-  if(s.postingDays.includes(clock.day)&&existing&&["scheduled","approved"].includes(existing.status)&&!existing.testCompletedAt&&now>=existing.scheduledFor&&existing.scheduledFor>=scheduled-s.generationLeadMinutes*60000)
-    await ctx.scheduler.runAfter(0,internal.socialWorker.publish,{id:existing._id});
-  const targetAt=now+s.generationLeadMinutes*60000,targetClock=localClock(targetAt,s.timezone);
-  const targetSchedule=scheduledInstant(targetAt,s.timezone,s.postingTime);
-  const targetPost=targetClock.date===clock.date?existing:await ctx.db.query("socialPosts").withIndex("by_day",q=>q.eq("dayKey",targetClock.date)).unique();
-  if(!targetPost&&s.portraitId&&s.postingDays.includes(targetClock.day)&&targetSchedule!==null&&
-    now>=targetSchedule-s.generationLeadMinutes*60000&&now<targetSchedule+1800000)
-    await createPost(ctx,s,undefined,undefined,targetAt);
+  // Generation and publishing are event scheduled. Repair a missing wakeup only.
+  if(s.postingEnabled && s.portraitId){
+    const job=s.generationFunctionId?await ctx.db.system.get(s.generationFunctionId):null;
+    if(!job || ['failed','canceled','success'].includes(job.state.kind)) await scheduleGeneration(ctx,s);
+  }
+}});
+
+export const publishScheduled = internalMutation({args:{id:v.id('socialPosts'),revision:v.number(),scheduledFor:v.number()},handler:async(ctx,a)=>{
+  const p=await ctx.db.get(a.id),s=await settingsRow(ctx);
+  if(!p||!s?.postingEnabled||(p.policyRevision||0)!==(s.policyRevision||0)||p.revision!==a.revision||p.scheduledFor!==a.scheduledFor||p.scheduledFor>Date.now()||p.testCompletedAt||!['scheduled','approved'].includes(p.status)||p.publishRequestStartedAt||p.outcomeUnknown||p.linkedinPostId)return;
+  if(!s.postingDays.includes(localClock(p.scheduledFor,s.timezone).day))return;
+  // The existing atomic claim in the action is the final duplicate/permission guard.
+  await ctx.scheduler.runAfter(0,internal.socialWorker.publish,{id:p._id});
+}});
+export const generateScheduled=internalMutation({args:{targetAt:v.number(),wakeAt:v.number()},handler:async(ctx,a)=>{
+  const s=await settingsRow(ctx);if(!s?.postingEnabled||s.nextGenerationAt!==a.wakeAt)return;
+  const clock=localClock(a.targetAt,s.timezone);
+  if(s.portraitId&&s.postingDays.includes(clock.day)&&!await ctx.db.query('socialPosts').withIndex('by_day',q=>q.eq('dayKey',clock.date)).first())await createPost(ctx,s,undefined,undefined,a.targetAt);
+  await scheduleGeneration(ctx,(await settingsRow(ctx))!);
+}});
+// Run once after deployment; resumable and safe to rerun alongside live writes.
+export const migrateSchedules=rawInternalMutation({args:{paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
+  const page=await ctx.db.query('socialPosts').paginate({...a.paginationOpts,numItems:Math.min(50,a.paginationOpts.numItems)});
+  for(const p of page.page)if(['scheduled','approved'].includes(p.status)&&!p.scheduledFunctionId)await syncSocialPost(ctx,null,p);
+  const s=await settingsRow(ctx);if(s&&!s.generationFunctionId)await scheduleGeneration(ctx,s);
+  if(!page.isDone)await ctx.scheduler.runAfter(1000,(internal as any).social.migrateSchedules,{paginationOpts:{numItems:50,cursor:page.continueCursor}});
+  return {isDone:page.isDone,continueCursor:page.continueCursor};
 }});

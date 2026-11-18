@@ -1,5 +1,5 @@
 // Deployment-only fixtures. Internal functions are inaccessible to browser clients.
-import { internalMutation } from './_generated/server';
+import { internalMutation } from "./functions";
 import { v } from 'convex/values';
 import { TT_FIELDS, BB_FIELDS } from '../shared/compliance/registry';
 import { aggregate } from '../shared/compliance/aggregate';

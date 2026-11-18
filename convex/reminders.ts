@@ -1,4 +1,5 @@
-import { query, mutation, internalMutation, internalQuery, QueryCtx, MutationCtx } from "./_generated/server";
+import { query, internalQuery, QueryCtx, MutationCtx } from "./_generated/server";
+import { mutation, internalMutation } from "./functions";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -341,16 +342,13 @@ export const unregisterDeviceToken = mutation({
 // Internal — used by cron and by the FCM sender
 // ═════════════════════════════════════════════════════════════════════════════
 
-export const claimDueReminders = internalMutation({
-  args: { now: v.number(), limit: v.number() },
-  handler: async (ctx, args) => {
+async function claimDue(ctx:any,args:{now:number;limit:number;reminderId?:Id<'reminders'>}) {
     // Indexed scan: only rows whose nextRunAt <= now, ordered ascending.
     // The `enabled` filter is applied in-memory but the search space is
     // already bounded by nextRunAt, so this stays cheap.
-    const due = await ctx.db
-      .query("reminders")
-      .withIndex("by_next_run_at", (q) => q.lte("nextRunAt", args.now))
-      .take(args.limit);
+    const specific=args.reminderId?await ctx.db.get(args.reminderId):null;
+    const due = args.reminderId ? specific && specific.enabled && specific.nextRunAt<=args.now ? [specific] : [] : await ctx.db.query('reminders').withIndex('by_enabled_next_run',(q:any)=>q.eq('enabled',true).lte('nextRunAt',args.now)).take(Math.min(200,Math.max(1,args.limit)));
+
 
     const claimed: {
       reminderId: Id<"reminders">;
@@ -459,8 +457,12 @@ export const claimDueReminders = internalMutation({
       });
     }
     return claimed;
-  },
-});
+}
+export const claimDueReminders=internalMutation({args:{now:v.number(),limit:v.number()},handler:claimDue});
+export const dispatchScheduled=internalMutation({args:{reminderId:v.id('reminders'),scheduledFor:v.number()},handler:async(ctx,a)=>{
+ const reminder=await ctx.db.get(a.reminderId);if(!reminder?.enabled||reminder.nextRunAt!==a.scheduledFor||a.scheduledFor>Date.now())return;
+ return claimDue(ctx,{now:Date.now(),limit:1,reminderId:a.reminderId});
+}});
 
 export const markOccurrenceStatus = internalMutation({
   args: {

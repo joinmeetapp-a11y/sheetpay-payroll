@@ -59,7 +59,7 @@ export async function requireBusinessAccess(
   const canSend = capability === "sendPayslips" && membership.canSendPayslips;
   if (!canSend && !allowed?.has(capability)) throw new Error("PERMISSION_DENIED");
   // Queries have a read-only database; update activity only in mutations.
-  if (typeof ctx.db.patch === "function") await ctx.db.patch(membership._id, { lastActiveAt: Date.now() });
+  if (typeof ctx.db.patch === "function" && (!membership.lastActiveAt || Date.now() - membership.lastActiveAt >= 300000)) await ctx.db.patch(membership._id, { lastActiveAt: Date.now() });
   return { actor, owner, membership, role: membership.role };
 }
 
@@ -76,9 +76,12 @@ export async function getAccessibleBusinesses(ctx: any, expectedUserId: any) {
   const assigned: any[] = [];
   for (const membership of membershipRows) {
     if (membership.status !== "active") continue;
-    const clients = await ctx.db.query("businesses")
-      .withIndex("by_user", (q: any) => q.eq("userId", membership.workspaceOwnerId))
-      .collect();
+    const clients = membership.allClients
+      ? await ctx.db.query("businesses").withIndex("by_user", (q: any) => q.eq("userId", membership.workspaceOwnerId)).collect()
+      : (await Promise.all([...new Set<string>(membership.clientIds)].map(async id => {
+          const normalized = ctx.db.normalizeId("businesses", id);
+          return normalized ? ctx.db.get(normalized) : null;
+        }))).filter(client => client && client.userId === membership.workspaceOwnerId);
     for (const client of clients) {
       if (membership.allClients || membership.clientIds.includes(String(client._id))) assigned.push(client);
     }

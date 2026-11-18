@@ -1,4 +1,5 @@
-import { mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation } from "./functions";
 import { v } from "convex/values";
 import { calculateTrinidadPayroll } from "./lib/countryTaxRules/trinidad_and_tobago";
 import { calculateBarbadosPayroll } from "./lib/countryTaxRules/barbados";

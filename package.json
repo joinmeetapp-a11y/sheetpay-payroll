@@ -19,7 +19,8 @@
     "test:mia": "vitest run tests/mia.test.ts",
     "test:social": "vitest run tests/social.test.ts",
     "check:convex": "tsc --noEmit --project tsconfig.pricing.json",
-    "check:social-bundle": "node scripts/check-social-bundle.mjs"
+    "check:social-bundle": "node scripts/check-social-bundle.mjs",
+    "test:performance": "vitest run tests/performance.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -29,6 +30,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "canvas-confetti": "^1.9.4",
     "convex": "^1.44.0",
+    "convex-helpers": "^0.1.136",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.18.0",

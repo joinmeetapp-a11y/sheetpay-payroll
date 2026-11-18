@@ -1,5 +1,8 @@
+import { paginationOptsValidator } from "convex/server";
+import { performanceReady } from "./lib/performance";
 import { assertCapacity } from "./usage";
-import { mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation } from "./functions";
 import { v } from "convex/values";
 import { requireBusinessAccess, recordAccountantActivity } from "./lib/accountantAccess";
 
@@ -223,3 +226,27 @@ export const bulkCreate = mutation({
 });
 
 
+
+export const listRoster=query({args:{businessId:v.id('businesses'),status:v.optional(v.string()),search:v.optional(v.string()),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
+ await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ if(!await performanceReady(ctx,'employees'))throw new Error('Employee directory is being prepared. Please retry shortly.');
+ const query=a.search?.trim()?ctx.db.query('employeeDirectory').withSearchIndex('search_directory',q=>{const s=q.search('searchText',a.search!.trim().toLowerCase()).eq('businessId',a.businessId);return a.status?s.eq('status',a.status):s;}):a.status?ctx.db.query('employeeDirectory').withIndex('by_business_status',q=>q.eq('businessId',a.businessId).eq('status',a.status!)).order('desc'):ctx.db.query('employeeDirectory').withIndex('by_business',q=>q.eq('businessId',a.businessId)).order('desc');
+ const page=await query.paginate({...a.paginationOpts,numItems:Math.min(50,Math.max(1,a.paginationOpts.numItems))});
+ return {...page,page:page.page.map(({sourceId,_id,searchText,...r})=>({...r,_id:sourceId}))};
+}});
+export const getDetail=query({args:{employeeId:v.id('employees')},handler:async(ctx,a)=>{
+ const row=await ctx.db.get(a.employeeId);if(!row)return null;await requireBusinessAccess(ctx,await ctx.db.get(row.businessId),'read');return row;
+}});
+
+// Dashboard previews are bounded. This API must never supply payroll inputs.
+export const dashboardPreview=query({args:{businessId:v.id('businesses')},handler:async(ctx,a)=>{
+ await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ const rows=await ctx.db.query('employees').withIndex('by_business',q=>q.eq('businessId',a.businessId)).take(5);
+ return rows.map(({_id,name,employeeId,basicPay,bonus,overtimeHours,overtimeRate,grossPay,paye,nis,netPay,payrollIdentifiers})=>({_id,name,employeeId,basicPay,bonus,overtimeHours,overtimeRate,grossPay,paye,nis,netPay,payrollIdentifiers}));
+}});
+// Complete ID set for an explicit Run payroll action, independently of UI pages.
+export const getPayrollIds=query({args:{businessId:v.id('businesses')},handler:async(ctx,a)=>{
+ await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ if(await performanceReady(ctx,'employees'))return (await ctx.db.query('employeeDirectory').withIndex('by_business',q=>q.eq('businessId',a.businessId)).collect()).map(r=>r.sourceId);
+ return (await ctx.db.query('employees').withIndex('by_business',q=>q.eq('businessId',a.businessId)).collect()).map(r=>r._id);
+}});

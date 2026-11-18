@@ -1,5 +1,8 @@
+import { paginationOptsValidator } from "convex/server";
+import { performanceReady, performanceCounter } from "./lib/performance";
 import { requireVerifiedAccountantEmail } from "./lib/accountantEmailAccess";
-import { mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation } from "./functions";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { assertWithinLimit, incrementUsageIdempotent, historyAccessible, reserveUsage } from "./usage";
@@ -177,3 +180,26 @@ export async function savePreparedCaylaPayroll(ctx: any, businessId: any, rows: 
   await reserveUsage(ctx, owner._id, 'payslip', `payslips:${runId}`, rows.length);
   return runId;
 }
+
+export const listHistory=query({args:{businessId:v.id('businesses'),status:v.optional(v.string()),from:v.optional(v.number()),to:v.optional(v.number()),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
+ const {owner}=await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ if(!await performanceReady(ctx,'payrollRuns'))throw new Error('Payroll summaries are being prepared. Please retry shortly.');
+ let q=a.status?ctx.db.query('payrollRunSummaries').withIndex('by_business_status_created',q=>q.eq('businessId',a.businessId).eq('status',a.status!).gte('createdAt',a.from??0).lte('createdAt',a.to??Number.MAX_SAFE_INTEGER)):ctx.db.query('payrollRunSummaries').withIndex('by_business_created',q=>q.eq('businessId',a.businessId).gte('createdAt',a.from??0).lte('createdAt',a.to??Number.MAX_SAFE_INTEGER));
+ const page=await q.order('desc').paginate({...a.paginationOpts,numItems:Math.min(50,Math.max(1,a.paginationOpts.numItems)),maximumRowsRead:100});
+ return {...page,page:page.page.filter(r=>historyAccessible(owner,r.createdAt)).map(({runId,_id,...r})=>({...r,_id:runId}))};
+}});
+export const recentSummaries=query({args:{businessId:v.id('businesses')},handler:async(ctx,a)=>{
+ const {owner}=await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ const ready=await performanceReady(ctx,'payrollRuns');
+ if(!ready){const runs=await ctx.db.query('payrollRuns').withIndex('by_business',q=>q.eq('businessId',a.businessId)).order('desc').take(8);return runs.filter(r=>historyAccessible(owner,r.createdAt)).map(({employeesSnapshot,statutoryBreakdown,...r})=>({...r,employeeCount:employeesSnapshot.length}));}
+ const runs=await ctx.db.query('payrollRunSummaries').withIndex('by_business_created',q=>q.eq('businessId',a.businessId)).order('desc').take(8);
+ return runs.filter(r=>historyAccessible(owner,r.createdAt)).map(({runId,_id,...r})=>({...r,_id:runId}));
+}});
+export const getDetail=query({args:{businessId:v.id('businesses'),runId:v.id('payrollRuns')},handler:async(ctx,a)=>{
+ const {owner}=await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ const run=await ctx.db.get(a.runId);if(!run||run.businessId!==a.businessId||!historyAccessible(owner,run.createdAt))return null;return run;
+}});
+export const businessStats=query({args:{businessId:v.id('businesses')},handler:async(ctx,a)=>{
+ await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
+ return {ready:await performanceReady(ctx,'employees')&&await performanceReady(ctx,'payrollRuns'),...await performanceCounter(ctx,`business:${a.businessId}`)};
+}});

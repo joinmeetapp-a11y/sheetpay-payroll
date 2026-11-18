@@ -1,4 +1,5 @@
-import { action, internalMutation, mutation } from './_generated/server';
+import { action } from "./_generated/server";
+import { internalMutation, mutation } from "./functions";
 import { internal } from './_generated/api';
 import { ConvexError, v } from 'convex/values';
 import { requireOwnUser } from './lib/ownUser';
