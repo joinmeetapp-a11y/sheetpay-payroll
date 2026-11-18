@@ -138,6 +138,8 @@ export const saveProfile = mutation({
     timezone: v.string(),
     availability: v.array(availability),
     published: v.boolean(),
+    bookingLayout: v.optional(v.string()),
+    widgetLayout: v.optional(v.string()),
     widgetGreeting: v.string(),
     widgetPosition: v.string(),
     widgetVoice: v.boolean(),

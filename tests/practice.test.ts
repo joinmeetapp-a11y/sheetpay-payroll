@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { convexTest } from "convex-test";
 import { anyApi } from "convex/server";
 import schema from "../convex/schema";
+import { BOOKING_DESIGNS,WIDGET_DESIGNS } from "../shared/practiceDesigns";
 import { availableSlots, validateProfile } from "../shared/practice";
 const api = anyApi;
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
@@ -412,4 +413,7 @@ describe("private portal and reviewed commands", () => {
       await f.t.run((ctx) => ctx.db.query("practiceReminders").collect()),
     ).toHaveLength(0);
   });
+  it('persists all six booking/widget designs and exposes only public branding fields',async()=>{const f=await fixture();for(let i=0;i<6;i++){const input={...profile,ownerId:f.ids.owner,bookingLayout:BOOKING_DESIGNS[i].id,widgetLayout:WIDGET_DESIGNS[i].id};await f.owner.mutation(api.practice.saveProfile,input);const publicView=await f.t.query(api.practice.publicProfile,{slug:profile.slug});expect(publicView.bookingLayout).toBe(input.bookingLayout);expect(publicView.widgetLayout).toBe(input.widgetLayout);expect(publicView.ownerId).toBeUndefined();}await expect(f.other.mutation(api.practice.saveProfile,{...profile,ownerId:f.ids.owner,bookingLayout:'minimal',widgetLayout:'voice'})).rejects.toThrow();});
+  it('preserves legacy saves and rejects unknown design identifiers',async()=>{const f=await fixture();await f.owner.mutation(api.practice.saveProfile,{...profile,ownerId:f.ids.owner,bookingLayout:'studio',widgetLayout:'cards'});await f.owner.mutation(api.practice.saveProfile,{...profile,ownerId:f.ids.owner});const current=await f.owner.query(api.practice.getProfile,{ownerId:f.ids.owner});expect(current.bookingLayout).toBe('studio');expect(current.widgetLayout).toBe('cards');for(const key of ['bookingLayout','widgetLayout'])await expect(f.owner.mutation(api.practice.saveProfile,{...profile,ownerId:f.ids.owner,[key]:'unsupported-design'})).rejects.toThrow('supported');});
+
 });

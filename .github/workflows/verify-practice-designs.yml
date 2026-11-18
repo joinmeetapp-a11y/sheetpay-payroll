@@ -1,0 +1,20 @@
+name: Verify booking and widget design settings
+on:
+  push:
+    branches: [feat/booking-widget-layouts-20261118]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check:convex
+      - run: npx vitest run
+      - run: npm run check:social-bundle

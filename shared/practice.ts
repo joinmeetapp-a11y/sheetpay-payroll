@@ -1,3 +1,4 @@
+import { BOOKING_DESIGNS, WIDGET_DESIGNS } from './practiceDesigns';
 export const LEAD_STAGES = [
   "New",
   "Contacted",
@@ -32,6 +33,8 @@ export function validAsset(value: string) {
   }
 }
 export function validateProfile(p: any) {
+  if(p.bookingLayout!==undefined&&!BOOKING_DESIGNS.some(d=>d.id===p.bookingLayout)||p.widgetLayout!==undefined&&!WIDGET_DESIGNS.some(d=>d.id===p.widgetLayout))throw Error('Choose a supported booking page and widget design.');
+
   if (
     !/^[a-z0-9](?:[a-z0-9-]{1,58}[a-z0-9])$/.test(p.slug) ||
     ["admin", "accountant", "portal", "sheetpay", "support", "api"].includes(
