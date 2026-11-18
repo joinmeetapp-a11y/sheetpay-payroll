@@ -66,6 +66,8 @@ export function extendFiling(report:any,runs:any[],support:any[],settlement:any)
   if(f.period==='annual'&&month)f.issues.push({code:'PERIOD',message:'Select full tax year for this annual form.',entity:'month',id:''});
   f.status=f.issues.length?(f.issues.some((x:any)=>['MISSING_DATA','SUPPORTING_DATA','SETTLEMENT'].includes(x.code))?'Missing Information':'Needs Review'):'Ready';
  }
- const relevant=report.forms.filter((f:any)=>f.official&&f.period===(month?'monthly':'annual'));
+ const it76=report.forms.find((f:any)=>f.id==='it76');if(it76&&!it76.issues.length&&report.employees.length&&report.employees.every((e:any)=>e.review?.it76===0)){it76.notApplicable=true;it76.notApplicableReason='All reviewed IT76 taxable benefit amounts are zero.';}
+ report.filing.notApplicable=report.forms.filter((f:any)=>f.notApplicable).map((f:any)=>({id:f.id,reason:f.notApplicableReason}));
+ const relevant=report.forms.filter((f:any)=>!f.notApplicable&&f.official&&f.period===(month?'monthly':'annual'));
  report.filing.excluded=relevant.filter((f:any)=>f.issues.length).map((f:any)=>({id:f.id,name:f.name,reasons:f.issues.map((x:any)=>x.message)}));report.filing.included=relevant.filter((f:any)=>!f.issues.length).map((f:any)=>f.id);report.filing.complete=relevant.length>0&&!report.filing.excluded.length;report.filing.supportIssues=issues;return report;
 }
