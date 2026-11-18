@@ -7,7 +7,7 @@ const crons = cronJobs();
 // The by_next_run_at index bounds this to just due rows — never a table scan.
 crons.interval(
   "dispatch-due-reminders",
-  { minutes: 15 },
+  { minutes: 1 },
   internal.fcm.dispatchDueReminders,
   {}
 );
@@ -17,6 +17,6 @@ crons.interval('mia-ack-retry', { minutes: 15 }, (internal as any).mia.retryAckn
 
 crons.interval('temporary-payroll-attachments-retention', { hours: 1 }, (internal as any).privacyRetention.purgeExpiredAttachments, {});
 
-crons.interval("accountant-free-onboarding-campaign", { minutes: 15 }, (internal as any).accountantCampaignWorker.dispatch, {});
+crons.interval("accountant-free-onboarding-campaign", { minutes: 1 }, (internal as any).accountantCampaignWorker.dispatch, {});
 export default crons;
-crons.interval("private-linkedin-social-dispatch", { minutes: 15 }, internal.social.tick, {});
+crons.interval("private-linkedin-social-dispatch", { minutes: 1 }, internal.social.tick, {});

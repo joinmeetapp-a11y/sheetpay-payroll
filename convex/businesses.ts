@@ -124,7 +124,6 @@ export const update = mutation({
 });
 
 
-
 export const listAccessibleSummaries=query({args:{userId:v.id('users')},handler:async(ctx,a)=>{
  const {actor}=await getActor(ctx);if(actor._id!==a.userId)return [];
  if(!await performanceReady(ctx,'businesses'))return (await getAccessibleBusinesses(ctx,a.userId)).map(({_id,userId,name,countryCode,countryName,currency,currencySymbol,defaultPayrollFrequency}:any)=>({_id,userId,name,countryCode,countryName,currency,currencySymbol,defaultPayrollFrequency}));

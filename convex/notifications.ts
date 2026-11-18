@@ -183,7 +183,46 @@ export const listForCurrentUser = query({
       .withIndex("by_user_created", (q) => q.eq("userId", actor._id))
       .order("desc")
       .take(Math.max(1, Math.min(200, args.limit ?? 100)));
-    return enrichNotifications(ctx, actor, prefs, rows, true);
+    // Avoid repeatedly fetching the same business and membership for every
+    // notification. All lookups remain scoped to the authenticated actor.
+    const businessCache = new Map<string, any>();
+    const membershipCache = new Map<string, any>();
+    const getBusiness = async (id: Id<"businesses">) => {
+      const key = String(id);
+      if (!businessCache.has(key)) businessCache.set(key, await ctx.db.get(id));
+      return businessCache.get(key);
+    };
+    const getMembership = async (ownerId: Id<"users">) => {
+      const key = String(ownerId);
+      if (!membershipCache.has(key)) membershipCache.set(key,
+        await ctx.db.query("accountantMemberships")
+          .withIndex("by_workspace_member", q => q.eq("workspaceOwnerId", ownerId).eq("memberUserId", actor._id)).first());
+      return membershipCache.get(key);
+    };
+    const candidates = rows.filter((item) =>
+      !item.dismissedAt && !item.suppressed && prefs?.channels?.inApp !== false && categoryAllowed(prefs, item.category)
+    );
+    const visible: typeof rows = [];
+    for (const item of candidates) {
+      if (item.businessId) {
+        const business = await getBusiness(item.businessId);
+        if (!business) continue;
+        if (business.userId !== actor._id) {
+          const membership = await getMembership(business.userId);
+          if (!membership || membership.status !== "active" || (!membership.allClients && !membership.clientIds.includes(String(business._id)))) continue;
+        }
+      }
+      visible.push(item);
+    }
+    const unreadCount = visible.filter((item) => !item.readAt).length;
+    const notifications = await Promise.all(visible.map(async (item) => {
+      const business = item.businessId ? await getBusiness(item.businessId) : null;
+      const employee = item.employeeId ? await ctx.db.get(item.employeeId) : null;
+      const deliveries = await ctx.db.query("notificationDeliveries")
+        .withIndex("by_notification_channel", (q) => q.eq("notificationId", item._id)).collect();
+      return { ...item, businessName: business?.name, employeeName: employee?.name, deliveries };
+    }));
+    return { notifications, unreadCount };
   },
 });
 
@@ -196,7 +235,7 @@ export const markRead = mutation({
     if (!item.readAt) await ctx.db.patch(item._id, { readAt: Date.now() });
     const delivery = await ctx.db.query("notificationDeliveries")
       .withIndex("by_notification_channel", (q) => q.eq("notificationId", item._id).eq("channel", "in_app")).first();
-    if (delivery && delivery.status !== "read") await ctx.db.patch(delivery._id, { status: "read", updatedAt: Date.now() });
+    if (delivery) await ctx.db.patch(delivery._id, { status: "read", updatedAt: Date.now() });
     return { ok: true };
   },
 });
@@ -205,7 +244,19 @@ export const markAllRead = mutation({
   args: {},
   handler: async (ctx) => {
     const { actor } = await getActor(ctx);
-    return markUnreadBatch(ctx,actor._id);
+    const rows = await ctx.db.query("notifications")
+      .withIndex("by_user_created", (q) => q.eq("userId", actor._id))
+      .order("desc").take(200);
+    const now = Date.now();
+    for (const item of rows) {
+      if (!item.dismissedAt && !item.suppressed && !item.readAt) {
+        await ctx.db.patch(item._id, { readAt: now });
+        const delivery = await ctx.db.query("notificationDeliveries")
+          .withIndex("by_notification_channel", (q) => q.eq("notificationId", item._id).eq("channel", "in_app")).first();
+        if (delivery) await ctx.db.patch(delivery._id, { status: "read", updatedAt: now });
+      }
+    }
+    return { ok: true };
   },
 });
 
@@ -215,7 +266,6 @@ export const dismiss = mutation({
     const { actor } = await getActor(ctx);
     const item = await ctx.db.get(args.notificationId);
     if (!item || item.userId !== actor._id) throw new Error("Notification not found.");
-    if(item.dismissedAt)return {ok:true};
     const now = Date.now();
     await ctx.db.patch(item._id, { dismissedAt: now });
     const delivery = await ctx.db.query("notificationDeliveries")
@@ -433,7 +483,6 @@ export const getPreferencesForUser = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => preferencesFor(ctx, args.userId),
 });
-
 
 async function enrichNotifications(ctx:any,actor:any,prefs:any,rows:any[],includeDetails:boolean){
     // Avoid repeatedly fetching the same business and membership for every

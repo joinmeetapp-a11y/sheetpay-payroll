@@ -226,7 +226,6 @@ export const bulkCreate = mutation({
 });
 
 
-
 export const listRoster=query({args:{businessId:v.id('businesses'),status:v.optional(v.string()),search:v.optional(v.string()),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
  await requireBusinessAccess(ctx,await ctx.db.get(a.businessId),'read');
  if(!await performanceReady(ctx,'employees'))throw new Error('Employee directory is being prepared. Please retry shortly.');

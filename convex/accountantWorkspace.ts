@@ -23,7 +23,7 @@ export const getTeam = query({
     const business = await ctx.db.get(businessId);
     const { owner } = await requireBusinessAccess(ctx, business, "read");
     const [members, invites] = await Promise.all([
-      ctx.db.query("accountantMemberships").withIndex("by_workspace_status", (q) => q.eq("workspaceOwnerId", owner._id).eq("status","active")).collect(),
+      ctx.db.query("accountantMemberships").withIndex("by_workspace", (q) => q.eq("workspaceOwnerId", owner._id)).collect(),
       ctx.db.query("accountantInvites").withIndex("by_workspace", (q) => q.eq("workspaceOwnerId", owner._id)).order("desc").take(50),
     ]);
     return {
@@ -47,10 +47,14 @@ export const listActivity = query({
     const business = await ctx.db.get(args.businessId);
     const { owner } = await requireBusinessAccess(ctx, business, "read");
     const limit = Math.min(100, Math.max(1, args.limit ?? 30));
-    const groups=await Promise.all([args.businessId,undefined].map(id=>ctx.db.query('accountantActivity').withIndex('by_workspace_business',q=>q.eq('workspaceOwnerId',owner._id).eq('businessId',id)).order('desc').take(limit)));
-    const rows=groups.flat().sort((a,b)=>b._creationTime-a._creationTime).slice(0,limit);
-    const actors=new Map<string,Promise<any>>();
-    return Promise.all(rows.map(async row=>{if(!actors.has(String(row.actorUserId)))actors.set(String(row.actorUserId),ctx.db.get(row.actorUserId));const actor=await actors.get(String(row.actorUserId));return {...row,actorName:actor?.displayName||actor?.email||'Sheetpay user'};}));
+    const rows = await ctx.db.query("accountantActivity")
+      .withIndex("by_workspace", (q) => q.eq("workspaceOwnerId", owner._id))
+      .order("desc").take(limit);
+    const allowed = new Set([String(args.businessId)]);
+    return Promise.all(rows.filter((row) => !row.businessId || allowed.has(String(row.businessId))).map(async (row) => {
+      const actor = await ctx.db.get(row.actorUserId);
+      return { ...row, actorName: actor?.displayName || actor?.email || "Sheetpay user" };
+    }));
   },
 });
 
@@ -239,7 +243,6 @@ export const revokeInvitation = mutation({
     return { ok: true };
   },
 });
-
 
 
 export const listActivityPage=query({args:{businessId:v.id('businesses'),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{

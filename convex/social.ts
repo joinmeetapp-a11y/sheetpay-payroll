@@ -227,9 +227,9 @@ export const tick = internalMutation({args:{},handler:async ctx=>{
   // Only inspect in-flight workers. Previously every idle tick read the latest
   // 100 posts, including large completed posts and their embeddings.
   const generating=await ctx.db.query("socialPosts")
-    .withIndex("by_status_lease",q=>q.eq("status","generating").lt("leaseUntil",now)).take(25);
+    .withIndex("by_status_schedule",q=>q.eq("status","generating")).take(100);
   const publishing=await ctx.db.query("socialPosts")
-    .withIndex("by_status_lease",q=>q.eq("status","publishing").lt("leaseUntil",now)).take(25);
+    .withIndex("by_status_schedule",q=>q.eq("status","publishing")).take(100);
   for(const p of [...generating,...publishing])if((p.leaseUntil||0)<now){
     await ctx.db.patch(p._id,{status:"failed",outcomeUnknown:!!p.publishRequestStartedAt,
       error:"Worker interrupted. "+(p.publishRequestStartedAt?"Verify LinkedIn before retrying.":"Retry is available."),
@@ -238,11 +238,18 @@ export const tick = internalMutation({args:{},handler:async ctx=>{
   }
   const expired=await ctx.db.query("socialOAuthStates").withIndex("by_expiry",q=>q.lt("expiresAt",now)).take(100);
   for(const row of expired)await ctx.db.delete(row._id);
-  // Generation and publishing are event scheduled. Repair a missing wakeup only.
-  if(s.postingEnabled && s.portraitId){
-    const job=s.generationFunctionId?await ctx.db.system.get(s.generationFunctionId):null;
-    if(!job || ['failed','canceled','success'].includes(job.state.kind)) await scheduleGeneration(ctx,s);
-  }
+  if(!s.postingEnabled)return;
+  const clock=localClock(now,s.timezone);
+  const scheduled=scheduledInstant(now,s.timezone,s.postingTime);if(scheduled===null)return;
+  const existing=await ctx.db.query("socialPosts").withIndex("by_day",q=>q.eq("dayKey",clock.date)).unique();
+  if(s.postingDays.includes(clock.day)&&existing&&["scheduled","approved"].includes(existing.status)&&!existing.testCompletedAt&&now>=existing.scheduledFor&&existing.scheduledFor>=scheduled-s.generationLeadMinutes*60000)
+    await ctx.scheduler.runAfter(0,internal.socialWorker.publish,{id:existing._id});
+  const targetAt=now+s.generationLeadMinutes*60000,targetClock=localClock(targetAt,s.timezone);
+  const targetSchedule=scheduledInstant(targetAt,s.timezone,s.postingTime);
+  const targetPost=targetClock.date===clock.date?existing:await ctx.db.query("socialPosts").withIndex("by_day",q=>q.eq("dayKey",targetClock.date)).unique();
+  if(!targetPost&&s.portraitId&&s.postingDays.includes(targetClock.day)&&targetSchedule!==null&&
+    now>=targetSchedule-s.generationLeadMinutes*60000&&now<targetSchedule+1800000)
+    await createPost(ctx,s,undefined,undefined,targetAt);
 }});
 
 export const publishScheduled = internalMutation({args:{id:v.id('socialPosts'),revision:v.number(),scheduledFor:v.number()},handler:async(ctx,a)=>{

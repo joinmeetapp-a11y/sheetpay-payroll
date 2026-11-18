@@ -99,7 +99,7 @@ Idle cron frequency (configuration-derived estimate): social, reminders and onbo
 ## Regression validation
 
 - Backend: 244 tests across 16 files passed; new performance, permission, free-plan, directory, admin pagination, bulk progress and scheduling tests included.
-- Backend Convex TypeScript check passed. An explicit `convex/tsconfig.json` also ensures production deployment actually checks backend types instead of skipping because that file was absent.
+- Backend Convex TypeScript check passed.
 - Convex browser/Node runtime bundles and renderer compatibility checks passed.
 - Backend production build passed.
 - Requested frontend TypeScript and production build passed, including a build with the actual checked-in public production configuration and optimized API checks.
@@ -163,7 +163,6 @@ Backend implementation/source files (many financial feature files change only th
 - `convex/privacyRetention.ts`
 - `convex/profile.ts`
 - `convex/reminders.ts`
-- `convex/tsconfig.json`
 - `convex/schema.ts`
 - `convex/social.ts`
 - `convex/socialInternal.ts`
@@ -182,8 +181,6 @@ Backend implementation/source files (many financial feature files change only th
 Frontend: `scripts/firebase-predeploy.mjs`, `src/components/AdminDashboard.tsx`, `src/components/accountant/{AccountantExperience,AccountantNotifications,BulkPayslipActions,EmployeeRoster}.tsx`, `tests/browser/mock-convex.tsx`, and the dashboard rendering, deployment guard and roster interaction config tests. Release report, deployment instructions and fixture measurements accompany the changes.
 
 ## Deployment, verification and rollback
-
-The compatibility rollback passed 225 original tests, backend TypeScript and runtime bundling checks. It retains schema additions and scheduled entry points while restoring legacy reads and polling.
 
 See `docs/convex-io-deploy.md` for exact Cloud Shell commands, backup, migrations, frontend build/Hosting deployment, verification and compatibility rollback. No GitHub Actions deployment is used.
 
