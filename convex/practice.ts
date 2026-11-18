@@ -959,6 +959,7 @@ export const saveDraft = internalMutation({
         "document_request",
         "message",
         "appointment",
+        "filing_pack",
       ].includes(a.kind)
     )
       throw Error("Unsupported action.");
@@ -1003,7 +1004,12 @@ export const approveDraft = mutation({
       throw Error("Draft expired or discarded. Prepare it again.");
     const p = d.payload;
     let result: any;
-    if (d.kind === "lead")
+    if(d.kind==='filing_pack'){
+      if(!d.businessId)throw Error('Select a client.');const b=await ctx.db.get(d.businessId);await requireBusinessAccess(ctx,b,'editPayroll');
+      if(b!.userId!==d.ownerId||(b!.complianceRevision||0)!==p.sourceRevision)throw Error('Source records changed. Prepare and review the filing request again.');
+      result=d._id;
+    }
+    else if (d.kind === "lead")
       result = await insertLead(ctx, d.ownerId, p, "Cayla");
     else if (d.kind === "followup")
       result = await addFollowup(ctx, d.ownerId, p);
@@ -1105,3 +1111,7 @@ export const expireThrottle = internalMutation({
     if (r?.window === a.window) await ctx.db.delete(a.id);
   },
 });
+
+export const recordFilingResult=mutation({args:{id:v.id('practiceDrafts'),generationId:v.id('complianceGenerations')},handler:async(ctx,a)=>{
+ const {actor}=await getActor(ctx),d=await ctx.db.get(a.id),g=await ctx.db.get(a.generationId);if(!d||d.actorId!==actor._id||d.kind!=='filing_pack'||d.status!=='approved'||!g||g.businessId!==d.businessId)throw Error('Filing draft unavailable.');await requireBusinessAccess(ctx,await ctx.db.get(g.businessId),'editPayroll');await ctx.db.patch(d._id,{result:String(g._id)});
+}});
