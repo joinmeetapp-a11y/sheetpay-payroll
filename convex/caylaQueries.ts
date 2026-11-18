@@ -213,7 +213,7 @@ export const savePayrollRun = internalMutation({
       .filter((q) => q.and(q.eq(q.field("month"), args.month), q.eq(q.field("year"), args.year), q.eq(q.field("businessId"), business._id)))
       .first();
 
-    await validatePayrollSnapshot(ctx, business._id, args.employeesSnapshot);
+    await validatePayrollSnapshot(ctx, business._id, args.employeesSnapshot,{year:args.year,month:args.month});
     if (existing) {
       const oldIds = new Set(existing.employeesSnapshot.map((row: any) => row._id));
       const added = args.employeesSnapshot.filter((row: any) => !oldIds.has(row._id));

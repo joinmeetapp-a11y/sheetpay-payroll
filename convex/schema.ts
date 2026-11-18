@@ -20,8 +20,11 @@ export default defineSchema({
     email: v.string(), token: v.string(), tokenHash: v.string(),
     unsubscribedAt: v.optional(v.number()), createdAt: v.number(),
   }).index("by_email", ["email"]).index("by_token", ["tokenHash"]),
-  complianceReviews: defineTable({businessId:v.id("businesses"),employeeId:v.string(),taxYear:v.number(),month:v.string(),values:v.any(),confirmed:v.boolean(),fingerprint:v.string(),reviewedBy:v.id("users"),updatedAt:v.number()}).index("by_business_year",["businessId","taxYear"]),
-  complianceGenerations: defineTable({businessId:v.id("businesses"),workspaceOwnerId:v.id("users"),actorId:v.id("users"),taxYear:v.number(),month:v.string(),formId:v.string(),version:v.string(),config:v.any(),summary:v.any(),sourceRuns:v.any(),employeeIds:v.array(v.string()),status:v.string(),createdAt:v.number(),completedAt:v.optional(v.number())}).index("by_business_year",["businessId","taxYear"]),
+  complianceSupportingData: defineTable({businessId:v.id('businesses'),taxYear:v.number(),month:v.string(),runId:v.id('payrollRuns'),runUpdatedAt:v.number(),employeeId:v.string(),values:v.any(),reviewedBy:v.id('users'),updatedAt:v.number()}).index('by_period',['businessId','taxYear','month']).index('by_run_employee',['runId','employeeId']),
+  complianceSettlements: defineTable({businessId:v.id('businesses'),taxYear:v.number(),month:v.string(),values:v.any(),reviewedBy:v.id('users'),updatedAt:v.number()}).index('by_period',['businessId','taxYear','month']),
+  complianceSupportAudit: defineTable({businessId:v.id('businesses'),actorId:v.id('users'),entity:v.string(),reference:v.string(),sourceVersion:v.number(),createdAt:v.number()}).index('by_business',['businessId','createdAt']),
+  complianceReviews: defineTable({businessId:v.id("businesses"),employeeId:v.string(),taxYear:v.number(),month:v.string(),values:v.any(),confirmed:v.boolean(),fingerprint:v.string(),reviewedBy:v.id("users"),updatedAt:v.number()}).index("by_business_year",["businessId","taxYear"]).index("by_business_year_month",["businessId","taxYear","month"]),
+  complianceGenerations: defineTable({businessId:v.id("businesses"),workspaceOwnerId:v.id("users"),cacheKey:v.optional(v.string()),sourceRevision:v.optional(v.number()),actorId:v.id("users"),taxYear:v.number(),month:v.string(),formId:v.string(),version:v.string(),config:v.any(),summary:v.any(),sourceRuns:v.any(),employeeIds:v.array(v.string()),status:v.string(),createdAt:v.number(),completedAt:v.optional(v.number())}).index("by_business_year",["businessId","taxYear"]).index("by_cache",["businessId","taxYear","cacheKey"]),
   complianceGeneratedRows: defineTable({generationId:v.id("complianceGenerations"),ordinal:v.number(),record:v.any()}).index("by_generation",["generationId","ordinal"]),
   complianceAudit: defineTable({generationId:v.id("complianceGenerations"),businessId:v.id("businesses"),actorId:v.id("users"),event:v.string(),format:v.optional(v.string()),createdAt:v.number()}).index("by_generation",["generationId"]),
 
@@ -132,6 +135,9 @@ export default defineSchema({
     website: v.optional(v.string()),
     taxRegistrationId: v.optional(v.string()),
     compliancePayeNumber: v.optional(v.string()),
+    compliancePhone: v.optional(v.string()),
+    complianceServiceCentreCode: v.optional(v.string()),
+    complianceRevision: v.optional(v.number()),
     nisNumber: v.optional(v.string()),
     signatoryName: v.optional(v.string()),
     signatoryTitle: v.optional(v.string()),
@@ -237,6 +243,7 @@ export default defineSchema({
   })
     .index("by_business", ["businessId"])
     .index("by_business_year", ["businessId", "year"])
+    .index("by_business_year_month", ["businessId", "year", "month"])
     .index("by_user", ["userId"]),
 
   messages: defineTable({

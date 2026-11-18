@@ -16,7 +16,7 @@ export function aggregate(business:any, year:number, runs:any[], employees:any[]
  if(!included.length) issue('NO_PAYROLL','No payroll periods exist for this tax year.');
  for(const run of included){
   if(['void','voided','cancelled','canceled'].includes(run.status))continue;
-  if(!['completed','finalized','paid'].includes(run.status)){issue('DRAFT_PAYROLL',`${run.periodLabel||run.month}: payroll is not finalized`,'payroll',String(run._id));continue;}
+  if(!['completed','finalized','paid','approved'].includes(run.status)){issue('DRAFT_PAYROLL',`${run.periodLabel||run.month}: payroll is not finalized`,'payroll',String(run._id));continue;}
   if(!run.month || !run.employeesSnapshot?.length)issue('MISSING_DATA','Payroll period or employee snapshot is missing','payroll',String(run._id));
   if((run.countryCode && run.countryCode!==business.countryCode)||(run.currencyCode && run.currencyCode!==business.currency))issue('JURISDICTION','Payroll country/currency differs from the client. Review historical configuration.','payroll',String(run._id));
   trace.push({id:String(run._id),updatedAt:run.updatedAt,period:run.periodLabel||`${run.month} ${year}`,month:run.month,status:run.status,taxRuleVersion:run.taxRuleVersion||'Not recorded'});
@@ -75,6 +75,6 @@ export function aggregate(business:any, year:number, runs:any[], employees:any[]
   }
   specific.push({...form,issues:formIssues,status:formIssues.length?(formIssues.some(i=>['MISSING_DATA','NO_PAYROLL','MISSING_STATUTORY'].includes(i.code))?'Missing Data':'Needs Review'):'Ready'});
  }
- return {business:{id:String(business._id),name:business.name,country:business.countryCode,currency:business.currency,address:business.address||'',taxRegistrationId:business.taxRegistrationId||'',nisNumber:business.nisNumber||'',payeNumber:business.compliancePayeNumber||''},config,year,month:month||'',employees:records,employeeCount:records.length,periodCount:trace.length,monthly:[...monthly.values()],trace,fingerprint:fingerprint(trace),history,totals:forms,reconciliation,reconciled,issues,forms:specific,status:issues.length?(issues.some(i=>i.code==='MISSING_DATA'||i.code==='NO_PAYROLL')?'Missing Data':'Needs Review'):'Ready',readiness:Math.round(100*(records.length+trace.length+4-Math.min(records.length+trace.length+4,issues.length))/(records.length+trace.length+4))};
+ return {business:{id:String(business._id),name:business.name,country:business.countryCode,currency:business.currency,address:business.address||'',taxRegistrationId:business.taxRegistrationId||'',nisNumber:business.nisNumber||'',payeNumber:business.compliancePayeNumber||'',phone:business.compliancePhone||'',serviceCentreCode:business.complianceServiceCentreCode||''},config,year,month:month||'',employees:records,employeeCount:records.length,periodCount:trace.length,monthly:[...monthly.values()],trace,fingerprint:fingerprint(trace),history,totals:forms,reconciliation,reconciled,issues,forms:specific,status:issues.length?(issues.some(i=>i.code==='MISSING_DATA'||i.code==='NO_PAYROLL')?'Missing Data':'Needs Review'):'Ready',readiness:Math.round(100*(records.length+trace.length+4-Math.min(records.length+trace.length+4,issues.length))/(records.length+trace.length+4))};
 }
 export function fingerprint(trace:any[]){return JSON.stringify(trace.map(r=>[r.id,r.updatedAt]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));}

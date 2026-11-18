@@ -1,3 +1,4 @@
+import { validateSupporting } from '../shared/compliance/filing';
 import { paginationOptsValidator } from "convex/server";
 import { performanceReady, performanceCounter } from "./lib/performance";
 import { requireVerifiedAccountantEmail } from "./lib/accountantEmailAccess";
@@ -61,7 +62,7 @@ export const create = mutation({
     const user = await requirePayrollOwner(ctx, args.userId, args.businessId);
     await assertWithinLimit(ctx, user, "payroll");
     await assertWithinLimit(ctx, user, "payslip", args.employeesSnapshot.length);
-    await validatePayrollSnapshot(ctx, args.businessId, args.employeesSnapshot);
+    await validatePayrollSnapshot(ctx, args.businessId, args.employeesSnapshot, {year:args.year,month:args.month});
 
     const runId = await ctx.db.insert("payrollRuns", {
       ...args,
@@ -96,7 +97,7 @@ export const update = mutation({
     if (!before) throw new Error("Payroll run not found");
     const owner = await requirePayrollOwner(ctx, before.userId, before.businessId);
     if (fields.employeesSnapshot) {
-      await validatePayrollSnapshot(ctx, before.businessId, fields.employeesSnapshot);
+      await validatePayrollSnapshot(ctx, before.businessId, fields.employeesSnapshot, {year:before.year,month:before.month});
       const oldIds = new Set(before.employeesSnapshot.map((row: any) => row._id));
       const added = fields.employeesSnapshot.filter((row: any) => !oldIds.has(row._id));
       for (const employee of added) await reserveUsage(ctx, owner._id, "payslip", `payslips-added:${runId}:${employee._id}`);
@@ -147,13 +148,14 @@ export const update = mutation({
   },
 });
 
-export async function validatePayrollSnapshot(ctx: any, businessId: any, rows: any[]) {
+export async function validatePayrollSnapshot(ctx: any, businessId: any, rows: any[], period?:{year:number;month:string}) {
   if (!rows.length || rows.length > 2500) throw new Error("Choose 1 to 2,500 employees for payroll.");
   const seen = new Set<string>();
   for (const row of rows) {
     const id = ctx.db.normalizeId("employees", String(row._id || ''));
     const employee = id ? await ctx.db.get(id) : null;
     if (!employee || employee.businessId !== businessId || seen.has(String(id))) throw new Error("Payroll employees must be unique and belong to this client.");
+    if(row.filingSupport){if(!period)throw new Error("Contribution supporting details require the payroll year and month.");validateSupporting(row.filingSupport,period.year,period.month,row);}
     seen.add(String(id));
   }
 }
@@ -163,7 +165,7 @@ export async function validatePayrollSnapshot(ctx: any, businessId: any, rows: a
 export async function savePreparedCaylaPayroll(ctx: any, businessId: any, rows: any[], period: { start: string; end: string; payDate: string }) {
   const business = await ctx.db.get(businessId);
   const { owner } = await requireBusinessAccess(ctx, business, 'runPayroll');
-  await validatePayrollSnapshot(ctx, businessId, rows);
+  await validatePayrollSnapshot(ctx, businessId, rows,{year:Number(period.end.slice(0,4)),month:new Date(period.end+'T12:00:00Z').toLocaleString('en',{month:'long',timeZone:'UTC'})});
   await assertWithinLimit(ctx, owner, 'payroll');
   await assertWithinLimit(ctx, owner, 'payslip', rows.length);
   const sum = (field: string) => Number(rows.reduce((total, row) => total + Number(row[field] || 0), 0).toFixed(2));

@@ -14,7 +14,7 @@ const MAX_TOKENS_COMPLEX = 2048;
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 const CAYLA_TOOLS = [
  {type:"function" as const,function:{name:"get_tax_compliance",description:"Get actual annual or monthly compliance totals, missing employee identifiers, readiness and reconciliation for the selected client, or all accessible clients. Never invent figures.",parameters:{type:"object",properties:{taxYear:{type:"number"},month:{type:"string"},allClients:{type:"boolean"}},required:["taxYear"]}}},
- {type:"function" as const,function:{name:"generate_tax_compliance",description:"Generate validated TD4, IT76, annual pack or payroll preparation reports for the selected client. Requires user confirmation. Never bypass validation or claim a government filing submission.",parameters:{type:"object",properties:{taxYear:{type:"number"},month:{type:"string"},formId:{type:"string",enum:["td4","td5","it76","annual_pack","paye_summary","contribution_summary","employee_statement","tamis_paye"]}},required:["taxYear","formId"]}}},
+ {type:"function" as const,function:{name:"generate_tax_compliance",description:"Prepare validated monthly/annual filing_pack, NI 184, NI 187, existing TD4, IT76, TAMIS or preparation reports for the selected client. Requires user confirmation. Never bypass validation or claim a government filing submission.",parameters:{type:"object",properties:{taxYear:{type:"number"},month:{type:"string"},formId:{type:"string",enum:["td4","td5","it76","annual_pack","filing_pack","ni184","ni187","dp10","nis_schedule","td6","c3","fin15a","iris_paye","bz_td4","tt_monthly_paye","paye_summary","contribution_summary","employee_statement","tamis_paye"]}},required:["taxYear","formId"]}}},
 
   {
     type: "function" as const,
@@ -403,7 +403,7 @@ Your personality:
 - You always format numbers with 2 decimal places for payroll figures.
 
 Capabilities:
-- For tax/compliance requests use get_tax_compliance first. Readiness and tax totals come only from that tool. Explain missing data and differences exactly. generate_tax_compliance requires confirmation and server validation; no tool files returns with government. Direct users to Tax & Compliance to preview/download saved generations.
+- For tax/compliance requests use get_tax_compliance first. Readiness and tax totals come only from that tool. Explain missing data and differences exactly. generate_tax_compliance requires confirmation and server validation; no tool files returns with government. Use formId filing_pack for monthly or annual filing pack requests. Use ni184 and ni187 for Trinidad contribution forms, preserve month and taxYear, and explain excluded forms. Direct users to Tax & Compliance to preview/download saved generations.
 - You can look up employee records, payroll runs, tax breakdowns, and attendance data using the provided tools.
 - For SENSITIVE ACTIONS (run_payroll, send_all_payslips), call the tool and it will return a pendingConfirmation object — do NOT execute until the user confirms.
 - When the user confirms a pending action, proceed with execution immediately.
