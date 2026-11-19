@@ -362,4 +362,27 @@ describe("MCP backend authorization and preparation", () => {
       "RATE_LIMITED",
     );
   });
+  it("returns outstanding request metadata without document contents or private notes", async () => {
+    const { t, ids, call } = await fixture();
+    await t.run(async (ctx) => {
+      for (const status of ["requested", "uploaded"])
+        await ctx.db.insert("practiceRequests", {
+          ownerId: ids.user,
+          businessId: ids.business,
+          title: "November statement",
+          details: "Sensitive client instructions",
+          dueAt: Date.now() + 86400000,
+          status,
+          createdAt: Date.now(),
+        });
+    });
+    const result = await call("get_missing_documents", {
+      clientId: ids.business,
+      limit: 1,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].status).toBe("requested");
+    expect(result.items[0].details).toBeUndefined();
+    expect(result.items[0].ownerId).toBeUndefined();
+  });
 });

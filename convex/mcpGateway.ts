@@ -84,7 +84,9 @@ export const invoke = internalAction({
       ];
       const code = allowed.includes(error?.data?.code)
         ? error.data.code
-        : "ACCESS_DENIED";
+        : error?.message === "INVALID_REQUEST"
+          ? "INVALID_REQUEST"
+          : "ACCESS_DENIED";
       return {
         _mcpError: {
           code,

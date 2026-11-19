@@ -341,7 +341,7 @@ export const execute = internalMutation({
           await clientAccess(ctx, x, row.sourceId);
           items.push({
             id: row.sourceId,
-            name: row.name,
+            name: row.name.slice(0, 200),
             country: row.countryCode,
             currency: row.currency,
           });
@@ -413,7 +413,7 @@ export const execute = internalMutation({
             .filter((d) => d.ownerId === x.c.ownerId)
             .map((d) => ({
               id: d._id,
-              title: d.title,
+              title: d.title.slice(0, 200),
               dueAt: d.dueAt,
               status: d.status,
             })),
