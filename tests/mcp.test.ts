@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { createHmac } from "node:crypto";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { anyApi } from "convex/server";
@@ -384,5 +385,51 @@ describe("MCP backend authorization and preparation", () => {
     expect(result.items[0].status).toBe("requested");
     expect(result.items[0].details).toBeUndefined();
     expect(result.items[0].ownerId).toBeUndefined();
+  });
+  it("records real Firebase-authenticated consent only with a matching gateway proof", async () => {
+    const { t, owner, ids } = await fixture();
+    const secret = "test-storage-secret-with-at-least-32-characters";
+    vi.stubEnv("MCP_STORAGE_SECRET", secret);
+    const scopes = ["payroll:prepare", "clients:read"],
+      clientId = "chatgpt-test",
+      grantId = "grant-new";
+    const proof = createHmac("sha256", secret)
+      .update(
+        JSON.stringify([
+          "mcp-owner",
+          ids.user,
+          clientId,
+          grantId,
+          [...scopes].sort(),
+        ]),
+      )
+      .digest("hex");
+    const args = {
+      ownerId: ids.user,
+      clientId,
+      clientName: "ChatGPT",
+      grantId,
+      scopes,
+      proof,
+    };
+    const id = await owner.mutation(api.mcp.connect, args);
+    expect(await owner.mutation(api.mcp.connect, args)).toBe(id);
+    const records = await owner.query(api.mcp.connections, {});
+    expect(records.items.find((c: any) => c.id === id)).toMatchObject({
+      application: "ChatGPT",
+      organizationId: ids.user,
+      scopes,
+    });
+    await expect(
+      owner.mutation(api.mcp.connect, { ...args, scopes: ["documents:read"] }),
+    ).rejects.toThrow("ACCESS_DENIED");
+    const outsider = t.withIdentity({
+      subject: "mcp-other",
+      email: "other@example.com",
+      emailVerified: true,
+    });
+    await expect(outsider.mutation(api.mcp.revoke, { id })).rejects.toThrow(
+      "ACCESS_DENIED",
+    );
   });
 });
