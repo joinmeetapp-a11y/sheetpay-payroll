@@ -6,7 +6,9 @@ import { socialTables } from "./socialSchema";
 
 import { practiceTables } from "./practiceSchema";
 
+import {mcpTables} from './mcpSchema';
 export default defineSchema({
+  ...mcpTables,
   ...practiceTables,
   ...socialTables,
   ...performanceTables,

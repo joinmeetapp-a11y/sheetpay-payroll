@@ -16,7 +16,7 @@ import { calculateReviewEmployee, validateReviewFields } from './lib/payrollRevi
 async function workspace(ctx: any, businessId: any, capability: any = 'read') {
   const business = await ctx.db.get(businessId);
   const access = await requireBusinessAccess(ctx, business, capability);
-  const clients = (await getAccessibleBusinesses(ctx, access.actor._id)).filter((b: any) => b.userId === access.owner._id);
+  const clients = ctx.mcpClientOnly ? [business] : (await getAccessibleBusinesses(ctx, access.actor._id)).filter((b: any) => b.userId === access.owner._id);
   return { ...access, business, clients };
 }
 async function ownedCommand(ctx: any, commandId: any) {
@@ -33,14 +33,16 @@ async function event(ctx: any, access: any, name: string, count?: number) {
   await ctx.db.insert('caylaEvents', { actorId: access.actor._id, workspaceOwnerId: access.owner._id, commandId: access.command?._id, name, count, createdAt: Date.now() });
 }
 async function roster(ctx: any, businessId: any) {
-  const all = await ctx.db.query('employees').withIndex('by_business', (q: any) => q.eq('businessId', businessId)).collect();
+  const query=ctx.db.query('employees').withIndex('by_business',(q:any)=>q.eq('businessId',businessId));
+  const all=ctx.mcpClientOnly?await query.take(2501):await query.collect();
+  if(ctx.mcpClientOnly&&all.length>2500)throw Error('MCP preparation supports at most 2500 client employees. Use Sheetpay for this client.');
   const real = all.filter((e: any) => !e.isDemo);
   return (real.length ? real : all).filter((e: any) => !['inactive', 'deleted'].includes(String(e.status || '').toLowerCase()));
 }
 async function source(ctx: any, business: any) {
   const employees = await roster(ctx, business._id);
-  const overrides = await ctx.db.query('businessStatutoryOverrides').withIndex('by_business', (q: any) => q.eq('businessId', business._id)).collect();
-  const rules = business.countryCode ? await ctx.db.query('statutoryRuleSets').withIndex('by_country_year', (q: any) => q.eq('countryCode', business.countryCode)).collect() : [];
+  const overrideQuery=ctx.db.query('businessStatutoryOverrides').withIndex('by_business',(q:any)=>q.eq('businessId',business._id));const overrides=ctx.mcpClientOnly?await overrideQuery.take(101):await overrideQuery.collect();if(ctx.mcpClientOnly&&overrides.length>100)throw Error('Use Sheetpay to review this client statutory setup.');
+  const ruleQuery=business.countryCode?ctx.db.query('statutoryRuleSets').withIndex('by_country_year',(q:any)=>q.eq('countryCode',business.countryCode)):null;const rules=ruleQuery?(ctx.mcpClientOnly?await ruleQuery.take(101):await ruleQuery.collect()):[];if(ctx.mcpClientOnly&&rules.length>100)throw Error('Use Sheetpay to review statutory rule history.');
   const previous = await ctx.db.query('payrollRuns').withIndex('by_business', (q: any) => q.eq('businessId', business._id)).order('desc').first();
   return { employees, previous, fingerprint: await fingerprint({ business, employees, overrides, rules, previous }) };
 }
@@ -52,11 +54,13 @@ const safeSnapshot = (e: any) => Object.fromEntries(Object.entries(e).filter(([k
 /** Dashboard runs prepare the same protected review as Cayla, without an AI request or Cayla usage charge. */
 export const beginDashboardReview = mutation({
   args: { businessId: v.id('businesses'), employeeIds: v.array(v.id('employees')), periodStart: v.string(), periodEnd: v.string(), payDate: v.string(), timezone: v.string(), requestKey: v.string() },
-  handler: async (ctx, args) => {
+  handler: beginDashboardReviewImpl,
+});
+export async function beginDashboardReviewImpl(ctx:any,args:{businessId:any;employeeIds:any[];periodStart:string;periodEnd:string;payDate:string;timezone:string;requestKey:string}) {
     const access = await workspace(ctx, args.businessId, 'runPayroll');
     validatePeriod(args.periodStart, args.periodEnd, args.payDate);
     if (!/^[a-zA-Z0-9_-]{8,100}$/.test(args.requestKey)) throw new Error('Invalid payroll request key.');
-    const prior = await ctx.db.query('caylaCommands').withIndex('by_request', q => q.eq('actorId', access.actor._id).eq('requestKey', args.requestKey)).first();
+    const prior = await ctx.db.query('caylaCommands').withIndex('by_request', (q:any) => q.eq('actorId', access.actor._id).eq('requestKey', args.requestKey)).first();
     if (prior) { if (prior.contextBusinessId !== args.businessId) throw new Error('Request belongs to another client.'); return { commandId: prior._id }; }
     const src = await source(ctx, access.business);
     if (!args.employeeIds.length || args.employeeIds.length > 2500 || new Set(args.employeeIds).size !== args.employeeIds.length || args.employeeIds.some(id => !src.employees.some((e: any) => e._id === id))) throw new Error('Select 1 to 2,500 unique employees belonging to this client.');
@@ -69,8 +73,8 @@ export const beginDashboardReview = mutation({
       employeeIds: args.employeeIds, processed: 0, ready: 0, review: 0, blocking: 0, totalGross: 0, totalDeductions: 0, totalNet: 0, status: 'planned', expiresAt });
     await recordAccountantActivity(ctx, access.owner._id, access.actor._id, 'payroll.review_started', args.businessId, { commandId, employeeCount: args.employeeIds.length });
     return { commandId };
-  },
-});
+}
+
 
 export const editPreparedClient = mutation({
   args: { commandId: v.id('caylaCommands'), businessId: v.id('businesses'), updates: v.array(v.object({ employeeId: v.id('employees'), fields: v.any() })), removeEmployeeIds: v.optional(v.array(v.id('employees'))), resetStatutory: v.optional(v.boolean()) },
@@ -139,7 +143,9 @@ export const interpreterContext = internalQuery({
 });
 export const beginRequest = internalMutation({
   args: { businessId: v.id('businesses'), requestKey: v.string(), timezone: v.string(), context: v.optional(contextValidator), source: v.union(v.literal('text'), v.literal('voice')) },
-  handler: async (ctx, args) => {
+  handler: beginRequestImpl,
+});
+export async function beginRequestImpl(ctx:any,args:any) {
     const access = await workspace(ctx, args.businessId);
     localDate(Date.now(), args.timezone);
     if (args.context) {
@@ -172,11 +178,13 @@ export const beginRequest = internalMutation({
     await event(ctx, { ...access, command: { _id: commandId } }, 'cayla_command_started');
     if (args.source === 'voice') await event(ctx, { ...access, command: { _id: commandId } }, 'cayla_voice_command_started');
     return { commandId, duplicate: false };
-  },
-});
+}
+
 export const savePlan = internalMutation({
   args: { commandId: v.id('caylaCommands'), intent: intentValidator },
-  handler: async (ctx, args) => {
+  handler: savePlanImpl,
+});
+export async function savePlanImpl(ctx:any,args:any) {
     const access = await ownedCommand(ctx, args.commandId), { command } = access;
     if (command.status !== 'understanding') return command._id;
     const intent = validateIntent(args.intent, access.clients.map((b: any) => String(b._id)));
@@ -228,8 +236,8 @@ export const savePlan = internalMutation({
     if (status === 'complete') await event(ctx, access, 'cayla_command_completed', total);
     await recordAccountantActivity(ctx, access.owner._id, access.actor._id, 'cayla.plan_created', access.business._id, { commandId: command._id, actionType: intent.action, clientCount: clientIds.length, employeeCount: total });
     return {commandId:command._id,status};
-  },
-});
+}
+
 export const requestFailure = internalMutation({
   args: { commandId: v.id('caylaCommands') }, handler: async (ctx, args) => {
     const access = await ownedCommand(ctx, args.commandId);
@@ -253,7 +261,9 @@ export const setDates = mutation({
   },
 });
 export const startPreparation = internalMutation({
-  args: { commandId: v.id('caylaCommands'), token: v.string() }, handler: async (ctx, args) => {
+  args: { commandId: v.id('caylaCommands'), token: v.string() }, handler: startPreparationImpl,
+});
+export async function startPreparationImpl(ctx:any,args:{commandId:any;token:string}) {
     const access = await ownedCommand(ctx, args.commandId), c = access.command;
     if (c.expiresAt < Date.now()) throw new Error('This plan expired. Create a new command.');
     if (c.status === 'review' || c.status === 'complete') return { done: true };
@@ -264,10 +274,12 @@ export const startPreparation = internalMutation({
     if (clients.some((r: any) => r.status === 'waiting' || r.status === 'stale')) throw new Error('This plan needs new payroll data or dates. Start a new command.');
     await ctx.db.patch(c._id, { status: 'working', leaseToken: args.token, leaseUntil: Date.now() + 90000, summary: 'Cayla is preparing your review…', updatedAt: Date.now() });
     return { done: false };
-  },
-});
+}
+
 export const prepareBatch = internalMutation({
-  args: { commandId: v.id('caylaCommands'), token: v.string() }, handler: async (ctx, args) => {
+  args: { commandId: v.id('caylaCommands'), token: v.string() }, handler: prepareBatchImpl,
+});
+export async function prepareBatchImpl(ctx:any,args:{commandId:any;token:string}) {
     const access = await ownedCommand(ctx, args.commandId), c = access.command;
     if (c.status !== 'working' || c.leaseToken !== args.token) throw new Error('Preparation is no longer active.');
     const clients = await ctx.db.query('caylaPreparedClients').withIndex('by_command', (q: any) => q.eq('commandId', c._id)).collect();
@@ -339,8 +351,8 @@ export const prepareBatch = internalMutation({
     const total = clients.reduce((n: number, b: any) => n + (b._id === client._id ? processed : b.processed), 0);
     await ctx.db.patch(c._id, { leaseUntil: Date.now() + 90000, updatedAt: Date.now(), summary: `Checked ${total} employees. Preparing the remaining review…`, steps: steps.map((label, i) => ({ label, status: i === 0 ? 'complete' : 'working', count: progressCounts(clients.map((b: any) => b._id === client._id ? { ...b, processed, earningsCalculated, statutoryCalculated } : b))[i] })) });
     return { done: false };
-  },
-});
+}
+
 export const preparationFailure = internalMutation({
   args: { commandId: v.id('caylaCommands'), token: v.string() }, handler: async (ctx, args) => {
     const access = await ownedCommand(ctx, args.commandId);

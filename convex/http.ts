@@ -4,7 +4,10 @@ import { internal } from "./_generated/api";
 import { planForPriceId } from "./subscriptions";
 import { image as socialImage, preflight as socialImagePreflight } from "./socialImages";
 
+import {tools as mcpTools,store as mcpStore} from './mcpHttp';
 const http = httpRouter();
+http.route({path:'/mcp/tools',method:'POST',handler:mcpTools});
+http.route({path:'/mcp/oauth-store',method:'POST',handler:mcpStore});
 http.route({path:"/social/image",method:"GET",handler:socialImage});
 http.route({path:"/social/image",method:"OPTIONS",handler:socialImagePreflight});
 

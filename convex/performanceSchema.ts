@@ -1,7 +1,7 @@
 import { defineTable } from "convex/server";
 import { v } from "convex/values";
 export const performanceTables = {
-  businessDirectory:defineTable({sourceId:v.id('businesses'),userId:v.id('users'),name:v.string(),countryCode:v.optional(v.string()),countryName:v.optional(v.string()),currency:v.string(),currencySymbol:v.string(),defaultPayrollFrequency:v.optional(v.string())}).index('by_source',['sourceId']).index('by_user',['userId']),
+  businessDirectory:defineTable({sourceId:v.id('businesses'),userId:v.id('users'),name:v.string(),countryCode:v.optional(v.string()),countryName:v.optional(v.string()),currency:v.string(),currencySymbol:v.string(),defaultPayrollFrequency:v.optional(v.string())}).index('by_source',['sourceId']).index('by_user',['userId']).searchIndex('search_name',{searchField:'name',filterFields:['userId']}),
   employeeDirectory:defineTable({sourceId:v.id('employees'),businessId:v.id('businesses'),name:v.string(),employeeId:v.string(),email:v.optional(v.string()),position:v.string(),status:v.string(),searchText:v.string()}).index('by_source',['sourceId']).index('by_business',['businessId']).index('by_business_status',['businessId','status']).searchIndex('search_directory',{searchField:'searchText',filterFields:['businessId','status']}),
   performanceContributions: defineTable({sourceId:v.string(),table:v.string(),values:v.any()}).index("by_source",["sourceId"]),
   performanceCounters: defineTable({key:v.string(),values:v.record(v.string(),v.number())}).index("by_key",["key"]),

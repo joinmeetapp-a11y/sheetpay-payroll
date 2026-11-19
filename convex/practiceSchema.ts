@@ -120,7 +120,7 @@ export const practiceTables = {
     createdAt: v.number(),
     reminderJob: v.optional(v.id("_scheduled_functions")),
   })
-    .index("by_business", ["businessId"])
+    .index("by_business", ["businessId"]).index("by_business_status_due",["businessId","status","dueAt"])
     .index("by_owner_status_due", ["ownerId", "status", "dueAt"]),
   practiceUploads: defineTable({
     businessId: v.optional(v.id("businesses")),
