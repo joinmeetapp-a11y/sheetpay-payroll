@@ -195,6 +195,8 @@ export const publicProfile = query({
       .first();
     if (!p?.published) return null;
     const { ownerId, _id, _creationTime, updatedAt, ...safe } = p;
+    // Preserve the saved design so upgrading restores it; Free publishes basic styles.
+    if(await practicePlan(ctx,ownerId)==='free')return {...safe,bookingLayout:'split',widgetLayout:'classic'};
     return safe;
   },
 });

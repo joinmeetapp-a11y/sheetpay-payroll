@@ -482,7 +482,8 @@ describe('practice quota entry points',()=>{
   const f=await fixture();await f.owner.mutation(api.practice.saveProfile,{ownerId:f.ids.owner,...profile,bookingLayout:'editorial'});
   await f.t.run(ctx=>ctx.db.patch(f.ids.owner,{planStatus:'canceled'}));
   expect((await f.owner.query(api.practice.planStatus,{ownerId:f.ids.owner})).plan).toBe('free');
-  expect((await f.t.query(api.practice.publicProfile,{slug:profile.slug})).bookingLayout).toBe('editorial');
+  expect((await f.t.query(api.practice.publicProfile,{slug:profile.slug})).bookingLayout).toBe('split');
+  expect((await f.owner.query(api.practice.getProfile,{ownerId:f.ids.owner})).bookingLayout).toBe('editorial');
  });
 });
 

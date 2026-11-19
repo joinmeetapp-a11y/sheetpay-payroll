@@ -12,4 +12,4 @@ The existing PLAN_LIMIT_REACHED event opens the existing upgrade modal. The prac
 
 ## Deployment and compatibility
 
-Deploy backend first, then frontend. Targets are unchanged: Convex prod:clear-avocet-926 and Firebase Hosting myglowtext. The new practiceUsage table is additive; no backfill or destructive migration is required. Counters start with new successful operations after deployment, not inferred from old records. Existing paid subscriptions and payroll counters are unchanged.
+Deploy backend first, then frontend. Targets are unchanged: Convex prod:clear-avocet-926 and Firebase Hosting myglowtext. The new practiceUsage table is additive; no backfill or destructive migration is required. Counters start with new successful operations after deployment, not inferred from old records. Existing paid subscriptions and payroll counters are unchanged. A downgraded account publishes the basic booking/widget designs; saved premium design selections are preserved and restored on upgrade. Existing service records are retained; Free cannot add beyond three.
