@@ -432,4 +432,24 @@ describe("MCP backend authorization and preparation", () => {
       "ACCESS_DENIED",
     );
   });
+  it("reports completed approval performed only through the existing Sheetpay interface", async () => {
+    vi.useFakeTimers();
+    const { t, call, owner, ids } = await fixture();
+    const job = await call("prepare_payroll", {
+      ...preparation,
+      clientId: ids.business,
+    });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const preview = await call("get_payroll_preview", { jobId: job.jobId });
+    expect(preview.reviewRequired).toBe(true);
+    await owner.mutation(api.caylaAgent.approveClient, {
+      commandId: job.commandId,
+      businessId: ids.business,
+      expectedReviewUpdatedAt: preview.version,
+    });
+    const completed = await call("get_payroll_preview", { jobId: job.jobId });
+    expect(completed.approvalStatus).toBe("approved");
+    expect(completed.status).toBe("complete");
+    expect(completed.reviewRequired).toBe(false);
+  });
 });

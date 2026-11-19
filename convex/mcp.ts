@@ -287,11 +287,11 @@ function compactJob(job: any, command: any) {
     jobId: job._id,
     clientId: job.businessId,
     commandId: job.commandId,
-    status: job.status,
+    status: command.approvalStatus === "approved" ? "complete" : job.status,
     approvalStatus: command.approvalStatus,
     version: command.updatedAt,
     expiresAt: command.expiresAt,
-    reviewRequired: true,
+    reviewRequired: command.approvalStatus !== "approved",
   };
 }
 export const execute = internalMutation({
@@ -367,11 +367,13 @@ export const execute = internalMutation({
       result = {
         ...compactJob(job, command),
         status:
-          command.expiresAt < Date.now()
-            ? "expired"
-            : job.sourceRevision !== (client.complianceRevision || 0)
-              ? "stale"
-              : job.status,
+          command.approvalStatus === "approved"
+            ? "complete"
+            : command.expiresAt < Date.now()
+              ? "expired"
+              : job.sourceRevision !== (client.complianceRevision || 0)
+                ? "stale"
+                : job.status,
         summary: command.summary,
         totals: prepared.map((p) => ({
           gross: p.totalGross,
