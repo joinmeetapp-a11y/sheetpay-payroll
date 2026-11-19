@@ -1,3 +1,6 @@
+import { practicePlan, practiceAllowance, practiceLimit } from './lib/practiceEntitlements';
+import { usagePeriod } from '../shared/accountantPlans';
+import { PRACTICE_FREE_LIMITS } from '../shared/practicePlans';
 import { v } from "convex/values";
 import { paginationOptsValidator, anyApi } from "convex/server";
 import { query, internalQuery } from "./_generated/server";
@@ -114,6 +117,9 @@ async function notice(
     read: false,
   });
 }
+export const planStatus = query({
+ args:ownerArgs,handler:async(ctx,{ownerId})=>{await staff(ctx,ownerId);const plan=await practicePlan(ctx,ownerId),period=usagePeriod();const row=plan==='free'?await ctx.db.query('practiceUsage').withIndex('by_owner_period',q=>q.eq('ownerId',ownerId).eq('period',period)).first():null;return {plan,period,limits:plan==='free'?PRACTICE_FREE_LIMITS:null,counts:row?.counts||{}};}
+});
 export const getProfile = query({
   args: ownerArgs,
   handler: async (ctx, { ownerId }) => {
@@ -158,6 +164,13 @@ export const saveProfile = mutation({
       .query("practiceProfiles")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .first();
+    if(await practicePlan(ctx,args.ownerId)==='free') {
+      for(const [field,basic] of [['bookingLayout','split'],['widgetLayout','classic']] as const) {
+        const selected=args[field]??current?.[field]??basic;
+        if(selected!==basic && selected!==(current?.[field]??basic))practiceLimit(field,'Free includes one booking layout and one widget style. Upgrade to Monthly or Yearly to publish this design. Your preview and edits are preserved.');
+      }
+      if(args.services.length>3 && args.services.length>(current?.services.length||0))practiceLimit('services','Free includes 3 services. Upgrade to Monthly or Yearly to add more. Your edits are preserved.');
+    }
     // Keep shared links stable: unpublish before changing a published slug.
     if (current?.published && current.slug !== args.slug)
       throw Error("Unpublish the page before changing its link.");
@@ -229,6 +242,7 @@ async function insertLead(ctx: any, ownerId: any, p: any, source: string) {
     email = cleanText(p.email, 254).toLowerCase();
   if (!name || !validEmail(email))
     throw Error("Enter your name and a valid email address.");
+  await practiceAllowance(ctx,ownerId,'leads',true,source==='Booking page'||source==='Website widget');
   return ctx.db.insert("practiceLeads", {
     ownerId,
     name,
@@ -304,6 +318,7 @@ export const book = mutation({
     if (!times.includes(a.startsAt))
       throw Error("This time is no longer available. Choose another slot.");
     const s = p.services.find((s: any) => s.id === a.serviceId);
+    await practiceAllowance(ctx,p.ownerId,'appointments',true,true);
     const leadId = await insertLead(ctx, p.ownerId, a, "Booking page");
     const id = await ctx.db.insert("practiceAppointments", {
       ownerId: p.ownerId,
@@ -455,6 +470,7 @@ async function addFollowup(ctx: any, ownerId: any, p: any) {
   await owned(ctx, "practiceLeads", p.leadId, ownerId);
   if (!p.title?.trim() || !Number.isFinite(p.dueAt) || p.dueAt <= Date.now())
     throw Error("Add a title and future deadline.");
+  await practiceAllowance(ctx,ownerId,'followups',true);
   const id = await ctx.db.insert("practiceFollowups", {
     ownerId,
     leadId: p.leadId,
@@ -527,6 +543,7 @@ export const inviteClient = mutation({
     for (const previous of pending)
       if (!previous.acceptedAt && !previous.revokedAt)
         await ctx.db.patch(previous._id, { revokedAt: Date.now() });
+    await practiceAllowance(ctx,b!.userId,'portalInvites',true);
     const token = crypto.randomUUID() + crypto.randomUUID();
     await ctx.db.insert("practiceInvites", {
       ownerId: b!.userId,
@@ -651,11 +668,12 @@ export const messages = query({
       .paginate(a.paginationOpts);
   },
 });
-async function insertMessage(ctx: any, businessId: any, text: string) {
+async function insertMessage(ctx: any, businessId: any, text: string, bill = true) {
   const access = await portalAccess(ctx, businessId, true);
   if (!text.trim() || text.length > 4000)
     throw Error("Write a message of up to 4,000 characters.");
   await rate(ctx, `chat:${access.identity.subject}`, 60, 60000);
+  if(bill && access.role==='accountant')await practiceAllowance(ctx,access.business.userId,'messages',true);
   return ctx.db.insert("practiceMessages", {
     ownerId: access.business.userId,
     businessId,
@@ -690,6 +708,7 @@ async function addRequest(ctx: any, businessId: any, p: any) {
     throw Error("Only your accountant can request documents.");
   if (!p.title?.trim() || !Number.isFinite(p.dueAt) || p.dueAt <= Date.now())
     throw Error("Enter a title and future deadline.");
+  await practiceAllowance(ctx,access.business.userId,'documentRequests',true);
   const id = await ctx.db.insert("practiceRequests", {
     ownerId: access.business.userId,
     businessId,
@@ -709,6 +728,7 @@ async function addRequest(ctx: any, businessId: any, p: any) {
     ctx,
     businessId,
     `Document request: ${cleanText(p.title, 200)}\n${cleanText(p.details || "")}\nDue: ${new Date(p.dueAt).toISOString().slice(0, 10)}`,
+    false,
   );
   return id;
 }
@@ -770,6 +790,7 @@ export const uploadContext = internalQuery({
   handler: async (ctx, a) => {
     if (a.purpose === "document" && a.businessId) {
       const access = await portalAccess(ctx, a.businessId, true);
+      await practiceAllowance(ctx,access.business.userId,'uploads',false,access.role==='client');
       return {
         uid: access.identity.subject,
         ownerId: access.business.userId,
@@ -795,6 +816,7 @@ export const registerUpload = internalMutation({
     if (a.purpose === "document" && a.businessId) {
       const access = await portalAccess(ctx, a.businessId, true);
       ownerId = access.business.userId;
+      await practiceAllowance(ctx,ownerId,'uploads',true,access.role==='client');
       uid = access.identity.subject;
     } else if (a.purpose === "brand") {
       const access = await getActor(ctx);
@@ -1033,6 +1055,7 @@ export const approveDraft = mutation({
       if (!times.includes(p.startsAt))
         throw Error("This appointment time is no longer available.");
       const service = profile.services.find((s) => s.id === p.serviceId)!;
+      await practiceAllowance(ctx,d.ownerId,'appointments',true);
       const leadId = await insertLead(ctx, d.ownerId, p, "Cayla");
       result = await ctx.db.insert("practiceAppointments", {
         ownerId: d.ownerId,
@@ -1078,6 +1101,7 @@ export const publicChatContext = internalMutation({
   args: { slug: v.string() },
   handler: async (ctx, { slug }) => {
     const p = await published(ctx, slug);
+    await practiceAllowance(ctx,p.ownerId,'widgetChats',true,true);
     await rate(ctx, `public-chat:${p.ownerId}`, 100);
     return {
       name: p.name,

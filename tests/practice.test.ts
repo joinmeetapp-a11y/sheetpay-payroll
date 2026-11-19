@@ -417,3 +417,86 @@ describe("private portal and reviewed commands", () => {
   it('preserves legacy saves and rejects unknown design identifiers',async()=>{const f=await fixture();await f.owner.mutation(api.practice.saveProfile,{...profile,ownerId:f.ids.owner,bookingLayout:'studio',widgetLayout:'cards'});await f.owner.mutation(api.practice.saveProfile,{...profile,ownerId:f.ids.owner});const current=await f.owner.query(api.practice.getProfile,{ownerId:f.ids.owner});expect(current.bookingLayout).toBe('studio');expect(current.widgetLayout).toBe('cards');for(const key of ['bookingLayout','widgetLayout'])await expect(f.owner.mutation(api.practice.saveProfile,{...profile,ownerId:f.ids.owner,[key]:'unsupported-design'})).rejects.toThrow('supported');});
 
 });
+
+describe('practice plan enforcement',()=>{
+ const contact={name:'Example',email:'lead@example.com',phone:'',notes:'',serviceId:'consultation'};
+ async function freeFixture(){const f=await fixture();await f.t.run(ctx=>ctx.db.patch(f.ids.owner,{plan:'free',planStatus:'active'}));return f;}
+ it('enforces Free lead caps atomically, preserves reads and resets by UTC month',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-15T12:00:00Z'));
+  const f=await freeFixture();
+  for(let i=0;i<10;i++)await f.owner.mutation(api.practice.createLead,{ownerId:f.ids.owner,...contact});
+  await expect(f.owner.mutation(api.practice.createLead,{ownerId:f.ids.owner,...contact})).rejects.toThrow(/Free includes 10/);
+  const status=await f.owner.query(api.practice.planStatus,{ownerId:f.ids.owner});expect(status.counts.leads).toBe(10);
+  await expect(f.other.query(api.practice.planStatus,{ownerId:f.ids.owner})).rejects.toThrow();
+  const page=await f.owner.query(api.practice.listLeads,{ownerId:f.ids.owner,paginationOpts:{numItems:20,cursor:null}});expect(page.page).toHaveLength(10);
+  vi.setSystemTime(new Date('2026-12-01T00:00:00Z'));
+  await f.owner.mutation(api.practice.createLead,{ownerId:f.ids.owner,...contact});
+  expect((await f.owner.query(api.practice.planStatus,{ownerId:f.ids.owner})).counts.leads).toBe(1);
+ });
+ it('restricts new premium layouts and services while retaining saved profile data',async()=>{
+  const f=await freeFixture();
+  await f.owner.mutation(api.practice.saveProfile,{ownerId:f.ids.owner,...profile,bookingLayout:'split',widgetLayout:'classic'});
+  for(const change of [{bookingLayout:'editorial'},{widgetLayout:'voice'},{services:[0,1,2,3].map(i=>({...profile.services[0],id:`s${i}`}))}])
+   await expect(f.owner.mutation(api.practice.saveProfile,{ownerId:f.ids.owner,...profile,...change})).rejects.toThrow(/Free includes/);
+  expect((await f.owner.query(api.practice.getProfile,{ownerId:f.ids.owner})).bookingLayout).toBe('split');
+ });
+ it.each(['accountant_monthly','accountant_yearly'] as const)('unlocks layouts and removes Free caps for %s',async plan=>{
+  const f=await freeFixture();await f.t.run(ctx=>ctx.db.patch(f.ids.owner,{plan,planStatus:'active'}));
+  await f.owner.mutation(api.practice.saveProfile,{ownerId:f.ids.owner,...profile,bookingLayout:'studio',widgetLayout:'voice'});
+  for(let i=0;i<11;i++)await f.owner.mutation(api.practice.createLead,{ownerId:f.ids.owner,...contact});
+  expect((await f.owner.query(api.practice.planStatus,{ownerId:f.ids.owner})).limits).toBeNull();
+ });
+ it('caps accountant messages and document requests without locking old conversations',async()=>{
+  const f=await freeFixture();
+  for(let i=0;i<20;i++)await f.owner.mutation(api.practice.sendMessage,{businessId:f.ids.business,text:`Message ${i}`});
+  await expect(f.owner.mutation(api.practice.sendMessage,{businessId:f.ids.business,text:'Beyond allowance'})).rejects.toThrow(/Free includes 20/);
+  for(let i=0;i<3;i++)await f.owner.mutation(api.practice.requestDocuments,{businessId:f.ids.business,title:`Request ${i}`,details:'Review please',dueAt:Date.now()+86400000});
+  await expect(f.owner.mutation(api.practice.requestDocuments,{businessId:f.ids.business,title:'Over limit',details:'',dueAt:Date.now()+86400000})).rejects.toThrow(/Free includes 3/);
+  const status=await f.owner.query(api.practice.planStatus,{ownerId:f.ids.owner});expect(status.counts.messages).toBe(20);expect(status.counts.documentRequests).toBe(3);
+  const page=await f.owner.query(api.practice.messages,{businessId:f.ids.business,paginationOpts:{numItems:30,cursor:null}});expect(page.page).toHaveLength(23);
+ });
+ it('checks the invitation quota and caps uploads before accepting more file bytes',async()=>{
+  const f=await freeFixture();await f.owner.mutation(api.practice.inviteClient,{businessId:f.ids.business,email:'client@example.com'});
+  await expect(f.owner.mutation(api.practice.inviteClient,{businessId:f.ids.business,email:'second@example.com'})).rejects.toThrow(/Free includes 1/);
+  await f.t.run(ctx=>ctx.db.insert('practiceUsage',{ownerId:f.ids.owner,period:'2000-01',counts:{uploads:5}}));
+  const {usagePeriod}=await import('../shared/accountantPlans');
+  await f.t.run(async ctx=>{const row=await ctx.db.query('practiceUsage').withIndex('by_owner_period',q=>q.eq('ownerId',f.ids.owner).eq('period',usagePeriod())).first();await ctx.db.patch(row!._id,{counts:{...row!.counts,uploads:5}});});
+  await expect(f.owner.query(api.practice.uploadContext,{businessId:f.ids.business,purpose:'document'})).rejects.toThrow(/Free includes 5/);
+ });
+});
+
+describe('practice quota entry points',()=>{
+ it('public booking cannot bypass appointment limits and failed bookings do not create leads',async()=>{
+  const f=await fixture();await f.t.run(async ctx=>{await ctx.db.patch(f.ids.owner,{plan:'free',planStatus:'active'});const {usagePeriod}=await import('../shared/accountantPlans');await ctx.db.insert('practiceUsage',{ownerId:f.ids.owner,period:usagePeriod(),counts:{appointments:5}});});
+  const times=await f.t.query(api.practice.slots,{slug:profile.slug,serviceId:'consultation',from:Date.now()+86400000});
+  await expect(f.t.mutation(api.practice.book,{slug:profile.slug,name:'Visitor',email:'visitor@example.com',phone:'',notes:'',serviceId:'consultation',startsAt:times[0],consent:true,honeypot:''})).rejects.toThrow(/monthly appointments allowance/);
+  const page=await f.owner.query(api.practice.listLeads,{ownerId:f.ids.owner,paginationOpts:{numItems:20,cursor:null}});expect(page.page).toHaveLength(0);
+ });
+ it('Cayla approval enforces the same quotas and leaves the prepared draft reviewable',async()=>{
+  const f=await fixture();const {usagePeriod}=await import('../shared/accountantPlans');
+  const draft=await f.t.run(async ctx=>{await ctx.db.patch(f.ids.owner,{plan:'free',planStatus:'active'});await ctx.db.insert('practiceUsage',{ownerId:f.ids.owner,period:usagePeriod(),counts:{leads:10}});return ctx.db.insert('practiceDrafts',{ownerId:f.ids.owner,actorId:f.ids.owner,kind:'lead',payload:{name:'Draft lead',email:'draft@example.com'},status:'prepared',createdAt:Date.now()});});
+  await expect(f.owner.mutation(api.practice.approveDraft,{id:draft,confirmed:true})).rejects.toThrow(/Free includes 10/);
+  expect((await f.owner.query(api.practice.getDraft,{id:draft})).status).toBe('prepared');
+ });
+ it('a cancelled subscription uses Free allowances while existing premium designs stay readable',async()=>{
+  const f=await fixture();await f.owner.mutation(api.practice.saveProfile,{ownerId:f.ids.owner,...profile,bookingLayout:'editorial'});
+  await f.t.run(ctx=>ctx.db.patch(f.ids.owner,{planStatus:'canceled'}));
+  expect((await f.owner.query(api.practice.planStatus,{ownerId:f.ids.owner})).plan).toBe('free');
+  expect((await f.t.query(api.practice.publicProfile,{slug:profile.slug})).bookingLayout).toBe('editorial');
+ });
+});
+
+describe('practice quota boundaries',()=>{
+ it('applies booking, follow-up and widget chat caps through public and staff entry points',async()=>{
+  const f=await fixture();await f.t.run(ctx=>ctx.db.patch(f.ids.owner,{plan:'free',planStatus:'active'}));
+  const {usagePeriod}=await import('../shared/accountantPlans');
+  const lead=await f.owner.mutation(api.practice.createLead,{ownerId:f.ids.owner,name:'Lead',email:'lead@example.com',phone:'',notes:'',serviceId:'consultation'});
+  for(let i=0;i<5;i++)await f.owner.mutation(api.practice.createFollowup,{ownerId:f.ids.owner,leadId:lead,title:'Follow up',dueAt:Date.now()+86400000});
+  await expect(f.owner.mutation(api.practice.createFollowup,{ownerId:f.ids.owner,leadId:lead,title:'Over',dueAt:Date.now()+86400000})).rejects.toThrow(/Free includes 5/);
+  for(let i=0;i<10;i++)await f.t.mutation(api.practice.publicChatContext,{slug:profile.slug});
+  await expect(f.t.mutation(api.practice.publicChatContext,{slug:profile.slug})).rejects.toThrow(/monthly widget chat requests/);
+  await f.t.run(async ctx=>{const row=await ctx.db.query('practiceUsage').withIndex('by_owner_period',q=>q.eq('ownerId',f.ids.owner).eq('period',usagePeriod())).first();await ctx.db.patch(row!._id,{counts:{...row!.counts,appointments:5}});});
+  const slots=await f.t.query(api.practice.slots,{slug:profile.slug,serviceId:'consultation',from:Date.now()});
+  await expect(f.t.mutation(api.practice.book,{slug:profile.slug,name:'Guest',email:'guest@example.com',phone:'',notes:'',serviceId:'consultation',startsAt:slots[0],consent:true,honeypot:''})).rejects.toThrow(/monthly appointments allowance/);
+ });
+});

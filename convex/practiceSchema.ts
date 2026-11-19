@@ -13,6 +13,7 @@ export const availability = v.object({
   end: v.number(),
 });
 export const practiceTables = {
+  practiceUsage: defineTable({ownerId:v.id('users'),period:v.string(),counts:v.record(v.string(),v.number())}).index('by_owner_period',['ownerId','period']),
   practiceProfiles: defineTable({
     ownerId: v.id("users"),
     slug: v.string(),
